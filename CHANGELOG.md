@@ -7,6 +7,22 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Documentation
+
+## [0.5.0] - 2026-07-27
+
+### Added
+
 - MIT licensing and public-package metadata for the CLI and 21 Runtime packages.
 - Isolated package consumers, release-candidate auditing, and installable CLI preview checks.
 - `@civaapple/qi-agent`, `@civaapple/qi-introspection`, and reusable `@civaapple/qi-tui` package surfaces.

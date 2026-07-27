@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-capability",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Default-deny Qi capability leases, credentials, delegation, and redaction",
   "type": "module",
   "main": "./dist/index.js",

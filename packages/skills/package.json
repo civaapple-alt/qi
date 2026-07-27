@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-skills",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Safe progressive loading of declarative Agent and Skill definitions",
   "type": "module",
   "main": "./dist/index.js",

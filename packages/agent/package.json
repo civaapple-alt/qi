@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-agent",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Default-deny Agent composition facade for the Qi event-sourced runtime",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,14 +20,14 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-capability": "0.4.0",
-    "@civaapple/qi-context": "0.4.0",
-    "@civaapple/qi-kernel": "0.4.0",
-    "@civaapple/qi-llm": "0.4.0",
-    "@civaapple/qi-loop": "0.4.0",
-    "@civaapple/qi-protocol": "0.4.0",
-    "@civaapple/qi-tools": "0.4.0",
-    "@civaapple/qi-workspace": "0.4.0",
+    "@civaapple/qi-capability": "0.5.0",
+    "@civaapple/qi-context": "0.5.0",
+    "@civaapple/qi-kernel": "0.5.0",
+    "@civaapple/qi-llm": "0.5.0",
+    "@civaapple/qi-loop": "0.5.0",
+    "@civaapple/qi-protocol": "0.5.0",
+    "@civaapple/qi-tools": "0.5.0",
+    "@civaapple/qi-workspace": "0.5.0",
     "@sinclair/typebox": "0.34.52"
   },
   "repository": {

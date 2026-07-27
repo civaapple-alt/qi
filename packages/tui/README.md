@@ -1,6 +1,6 @@
 # `@civaapple/qi-tui`
 
-Version **0.4.0**. Package maturity: **internal public-package preview**.
+Version **0.5.0**. Package maturity: **internal public-package preview**.
 
 Reusable Qi-specific terminal presentation and control components built on
 `@earendil-works/pi-tui`.

@@ -72,7 +72,7 @@ const VALUE_FLAGS = [
   "--workspace", "--data", "--provider", "--model", "--base-url", "--session", "--config", "--add-dir",
 ] as const;
 
-export function qiCliVersion(packageVersion = process.env.npm_package_version ?? "0.4.0"): string {
+export function qiCliVersion(packageVersion = process.env.npm_package_version ?? "0.5.0"): string {
   return `qi ${packageVersion}`;
 }
 

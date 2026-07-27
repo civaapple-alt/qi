@@ -1,6 +1,6 @@
 # `@civaapple/qi-introspection`
 
-Version **0.4.0**. Package maturity: **internal public-package preview**.
+Version **0.5.0**. Package maturity: **internal public-package preview**.
 
 This package gives Qi and contributors one versioned, machine-readable view of Qi's identity, package
 ownership, invariants, architecture decisions, maturity, release gaps, and verification commands.

@@ -578,7 +578,7 @@ export class TuiPresenter {
   render(width = 120): string[] {
     this.#width = width;
     const startup = !this.#view || this.#view.runOrder.length === 0;
-    const version = this.launch.version ?? "0.4.0";
+    const version = this.launch.version ?? "0.5.0";
     const lines: string[] = [];
     if (startup) {
       lines.push(...this.renderWelcome(width), "");
@@ -598,7 +598,7 @@ export class TuiPresenter {
   }
 
   renderWelcome(width = 120): string[] {
-    const version = this.launch.version ?? "0.4.0";
+    const version = this.launch.version ?? "0.5.0";
     if (width < 40) {
       return [
         "栖 · QI",
