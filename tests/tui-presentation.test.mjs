@@ -930,7 +930,7 @@ test("authority denial repaints the visible Action settlement", () => {
   );
 });
 
-test("active Run folds older Steps and collapses Action cards without edit gutters", () => {
+test("active Run folds older Steps but keeps bounded edit diffs in the retained window", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",
     dataRoot: "/tmp/ws/.qi",
@@ -1059,18 +1059,19 @@ test("active Run folds older Steps and collapses Action cards without edit gutte
   assert.match(firstText, /… 4 earlier steps · 4 actions · Ctrl\+O/);
   assert.doesNotMatch(firstText, /· narration 1$/m);
   assert.doesNotMatch(firstText, /src\/f1\.ts/);
-  assert.doesNotMatch(firstText, /▎/);
-  assert.doesNotMatch(firstText, /Edited src\/f5\.ts/);
-  // Visible prior Steps (5–11) are one-line summaries, not Cursor edit cards.
-  assert.match(firstText, /edit\s+src\/f11\.ts/);
+  assert.match(firstText, /Edited src\/f5\.ts/);
+  assert.match(firstText, /Edited src\/f11\.ts/);
+  assert.match(firstText, /▎ -old 5/);
+  assert.match(firstText, /▎ \+new 11/);
+  // Narration stays summarized while completed mutations retain their bounded diff cards.
   assert.match(firstText, /· narration 11/);
   const second = presenter.render(100);
   assert.equal(second.join("\n"), firstText);
   assert.equal(presenter.toggleExpand(), "Expanded earlier steps");
   const expanded = presenter.render(100).join("\n");
   assert.match(expanded, /· narration 1$/m);
-  assert.match(expanded, /edit\s+src\/f1\.ts/);
-  assert.doesNotMatch(expanded, /▎/);
+  assert.match(expanded, /Edited src\/f1\.ts/);
+  assert.match(expanded, /▎ \+new 1/);
   assert.equal(presenter.toggleExpand(), "Collapsed earlier steps");
   const collapsedAgain = presenter.render(100).join("\n");
   assert.match(collapsedAgain, /… 4 earlier steps · 4 actions · Ctrl\+O/);
@@ -1819,6 +1820,42 @@ test("shell cards use compact $ command · duration grammar", () => {
   assert.match(text, /output lines hidden · Ctrl\+O/);
   assert.match(text, /nothing to commit/);
   assert.doesNotMatch(text, /cwd /);
+});
+
+test("failed shell cards unwrap bounded process evidence from the ToolFailure envelope", () => {
+  const model = {
+    actionId: "act_shell_failed",
+    toolName: "shell",
+    status: "failed",
+    elapsed: "240ms",
+    errorCode: "SHELL_EXIT_NONZERO",
+    input: { command: "node", args: ["-e", "bad code"], workdir: "packages/kernel" },
+    output: {
+      code: "SHELL_EXIT_NONZERO",
+      message: "Process exited unsuccessfully",
+      details: {
+        exitCode: 1,
+        timedOut: false,
+        stdout: "partial output\n",
+        stderr: "SyntaxError: Expected ',', got ';'\n",
+        workspaceChange: { changed: true },
+      },
+    },
+  };
+  const collapsed = renderToolCard(model).join("\n");
+  assert.match(collapsed, /SHELL_EXIT_NONZERO · exit 1/);
+  assert.match(collapsed, /SyntaxError: Expected ',', got ';'/);
+  assert.doesNotMatch(collapsed, /partial output/);
+
+  const summary = renderToolCard(model, { summaryOnly: true }).join("\n");
+  assert.equal(summary.split("\n").length, 1);
+  assert.match(summary, /exit 1.*SyntaxError/);
+
+  const expanded = renderToolCard(model, { expanded: true }).join("\n");
+  assert.match(expanded, /cwd packages\/kernel/);
+  assert.match(expanded, /stderr\s+SyntaxError/);
+  assert.match(expanded, /stdout\s+partial output/);
+  assert.match(expanded, /workspace changed/);
 });
 
 test("write/edit cards show Cursor-style Edited header, gutter, and context", () => {

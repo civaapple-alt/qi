@@ -386,6 +386,7 @@ function projectAction(
   if (detail === "detail") {
     const result = terminalData?.modelOutput ?? terminalData?.outputRef ?? terminalData?.reason;
     base.result = boundedJson(result, resultTextLimit, omissions);
+    if (action.freshnessRebase) base.freshnessRebase = { ...action.freshnessRebase };
   }
   return base;
 }

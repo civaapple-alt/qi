@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-coordinator",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Evidence-gated depth-1 Qi delegation under narrowed capability leases",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,13 +20,13 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-capability": "0.5.0",
-    "@civaapple/qi-context": "0.5.0",
-    "@civaapple/qi-kernel": "0.5.0",
-    "@civaapple/qi-llm": "0.5.0",
-    "@civaapple/qi-loop": "0.5.0",
-    "@civaapple/qi-protocol": "0.5.0",
-    "@civaapple/qi-tools": "0.5.0",
+    "@civaapple/qi-capability": "0.5.1",
+    "@civaapple/qi-context": "0.5.1",
+    "@civaapple/qi-kernel": "0.5.1",
+    "@civaapple/qi-llm": "0.5.1",
+    "@civaapple/qi-loop": "0.5.1",
+    "@civaapple/qi-protocol": "0.5.1",
+    "@civaapple/qi-tools": "0.5.1",
     "@sinclair/typebox": "0.34.52"
   },
   "repository": {

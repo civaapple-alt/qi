@@ -76,6 +76,12 @@ export interface ActionView {
   terminalDetail?: string;
   resources: string[];
   policyTrace?: Array<{ leaseId: string; matched: boolean; reason: string }>;
+  freshnessRebase?: {
+    priorActionId: ActionId;
+    resource: string;
+    originalExpectedSha256: string;
+    effectiveExpectedSha256: string;
+  };
 }
 
 export interface EvaluationView {
@@ -1195,6 +1201,38 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
         effect: event.data.effect,
         resources: [...(event.data.resources ?? [])],
         status: "proposed",
+      };
+      break;
+    }
+    case "action.freshness.rebased": {
+      const run = getRun(view, event.data.runId);
+      requireActive(run);
+      const action = getAction(run, event.data.actionId, event.data.stepId);
+      requireActionStatus(action, "proposed", "ACTION_REBASE_TOO_LATE");
+      if (action.freshnessRebase) fail("ACTION_ALREADY_REBASED", `Action ${action.actionId} was already rebased`);
+      const prior = getAction(run, event.data.priorActionId, event.data.stepId);
+      requireActionStatus(prior, "completed", "ACTION_REBASE_PRIOR_NOT_COMPLETED");
+      if (action.toolName !== "edit" || prior.toolName !== "edit") {
+        fail("ACTION_REBASE_TOOL_INVALID", "Freshness rebase requires an edit after a completed edit");
+      }
+      if (
+        action.effect !== "write"
+        || prior.effect !== "write"
+        || action.resources.length !== 1
+        || prior.resources.length !== 1
+        || action.resources[0] !== event.data.resource
+        || prior.resources[0] !== event.data.resource
+      ) {
+        fail("ACTION_REBASE_RESOURCE_INVALID", "Freshness rebase requires the same single write resource");
+      }
+      if (event.data.originalExpectedSha256 === event.data.effectiveExpectedSha256) {
+        fail("ACTION_REBASE_NO_CHANGE", "Freshness rebase must change the expected digest");
+      }
+      action.freshnessRebase = {
+        priorActionId: event.data.priorActionId,
+        resource: event.data.resource,
+        originalExpectedSha256: event.data.originalExpectedSha256,
+        effectiveExpectedSha256: event.data.effectiveExpectedSha256,
       };
       break;
     }

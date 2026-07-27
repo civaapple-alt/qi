@@ -20,7 +20,8 @@ produces an `AuthorizedToolCall`; execution returns a `ToolSettlement`. Registra
 tool implementation from impersonating a previously advertised identity.
 
 Built-ins provide bounded directory listing and tree rendering, fd-accelerated file discovery, rg-accelerated
-content search, file read/write, fixed read-only Git inspection, controlled public HTTP(S) text retrieval,
+content search, whole-file or bounded line-range reads, file write/edit, fixed read-only Git inspection,
+controlled public HTTP(S) text retrieval,
 argument-vector `shell` (`shell-profile:direct`), explicit `script` profiles (`pwsh`/`cmd`/`bash`), and
 content-addressed artifact storage. `tree`, `find`, `list`, `read`, `search`, `git`, and `fetch` remain separate so
 local discovery, repository inspection, external evidence, and execution authority are explicit.
@@ -46,6 +47,8 @@ input. Each capability resource includes the profile name and definition hash.
 - Recursive access requires explicit tree authority.
 - Directory discovery is bounded, deterministic, and excludes generated/runtime trees.
 - Search matches file contents via literal mode by default or explicit regex mode; it is not filename discovery.
+- Read accepts an optional 1-based `startLine` and at most 500 lines. Partial content preserves source line
+  endings while size and SHA-256 continue to describe the whole file.
 - Find filters paths by pattern, type, modification time, and depth. Matching defaults to literal substring;
   patterns that look like globs (`*`, `?`, `[]`, `{}`) use glob mode; regex is explicit. Tree renders a bounded
   architecture view.
@@ -62,8 +65,9 @@ input. Each capability resource includes the profile name and definition hash.
 - Network fetch is absent by default, uses credential-free GET only, pins validated public DNS results through
   connection, and revalidates every bounded redirect. Local/private targets and binary or oversized output fail
   closed; returned page text remains explicitly untrusted.
-- Shell arguments are not interpolated through an ambient shell. Windows PATH/PATHEXT shims are resolved
-  explicitly; `.cmd`/`.bat` invocation rejects shell metacharacters before entering the trusted command processor.
+- Shell arguments are not interpolated through an ambient shell and globs, pipes, and redirection are not
+  expanded. Windows PATH/PATHEXT shims are resolved explicitly; `.cmd`/`.bat` invocation rejects shell
+  metacharacters before entering the trusted command processor.
 - Shell and declared verification timeouts or non-zero exits are failed Actions, not successful settlements with
   an error-shaped payload. Failure details retain bounded process evidence for the next Step.
 - In Git Workspaces, shell execution records before/after state hashes and a bounded tracked diff when that

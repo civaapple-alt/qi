@@ -41,6 +41,8 @@ export function renderEvent(event: SessionEvent): string | undefined {
       return `[invalid] ${event.data.toolName} ${event.data.errorCode} · ${event.data.reason}`;
     case "action.proposed":
       return `[action] ${short(event.data.actionId)} ${event.data.effect} ${event.data.toolName}${renderInput(event.data.toolName, event.data.input)}${event.data.resources?.length ? ` · ${event.data.resources.join(", ")}` : ""}`;
+    case "action.freshness.rebased":
+      return `[rebase] ${short(event.data.actionId)} after ${short(event.data.priorActionId)} · ${event.data.resource}`;
     case "action.started":
       return `[running] ${short(event.data.actionId)}`;
     case "authority.denied":

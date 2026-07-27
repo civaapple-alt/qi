@@ -1,6 +1,6 @@
 # `@civaapple/qi-tui`
 
-Version **0.5.0**. Package maturity: **internal public-package preview**.
+Version **0.5.1**. Package maturity: **internal public-package preview**.
 
 Reusable Qi-specific terminal presentation and control components built on
 `@earendil-works/pi-tui`.
@@ -9,6 +9,8 @@ Reusable Qi-specific terminal presentation and control components built on
 
 - Project committed `SessionEvent` and `SessionView` facts into terminal-friendly transcripts and status views.
 - Render bounded Markdown and Action cards without turning provisional activity into settlement.
+- Keep bounded file Diff previews for completed mutations in the active Run's retained eight-Step window, and
+  expose bounded process failure evidence instead of hiding it inside the ToolFailure envelope.
 - Provide reusable composer, follow-up queue, selection/form/scroll panels, themes, and layout helpers.
 - Keep Qi-specific control vocabulary separate from CLI startup, credentials, persistence, and process ownership.
 

@@ -7,6 +7,22 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Documentation
+
+## [0.5.1] - 2026-07-27
+
+### Added
+
 - Added configurable 8–100 Step budgets (default 32), a tool-free final handoff Step, and explicit
   `step.completed.finishReason = handoff` continuation history.
 - Added digest-guarded Workspace Skill draft export/update through the dedicated Skill service, including sibling
@@ -14,11 +30,14 @@ steps and investigation history belong in pull requests, not release notes.
 - Added bounded Session/Run/Step/Action queries and the read-only `qi_session_inspect` Tool in
   `@civaapple/qi-introspection`, plus matching analyze-qi-session filters.
 - Added `npm run verify:focused -- tests/<name>.test.mjs …` for build-once targeted iteration.
+- Added bounded 1-based line-range reads whose freshness metadata continues to cover the complete file.
+- Added durable, pre-authority freshness rebasing for safe same-Step `edit → edit` chains.
 
 ### Changed
 
 - Development verification now favors affected tests during iteration, one full typecheck/test pass for
   cross-package completion, and package/CLI gates only when those surfaces change; releases still run all gates.
+- Active TUI transcripts retain bounded Diffs for completed mutations in the visible eight-Step window.
 
 ### Deprecated
 
@@ -32,6 +51,8 @@ steps and investigation history belong in pull requests, not release notes.
 - Ask/Plan mode tool or effect denials are recovered as `model.action.rejected` (`TOOL_INPUT`) feedback so the
   model can correct course. Kernel and capability mode allowlists are exported and lockstep-tested so dual-copy
   drift is caught in CI.
+- Failed shell/script/verification cards now unwrap exit, stderr/stdout, timeout, and Workspace-change evidence
+  from structured Tool failure details.
 
 ### Security
 

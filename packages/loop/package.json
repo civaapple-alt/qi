@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-loop",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Durable Qi turn orchestration, safe boundaries, controls, and recovery",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,13 +20,13 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-capability": "0.5.0",
-    "@civaapple/qi-context": "0.5.0",
-    "@civaapple/qi-kernel": "0.5.0",
-    "@civaapple/qi-llm": "0.5.0",
-    "@civaapple/qi-protocol": "0.5.0",
-    "@civaapple/qi-tools": "0.5.0",
-    "@civaapple/qi-workspace": "0.5.0"
+    "@civaapple/qi-capability": "0.5.1",
+    "@civaapple/qi-context": "0.5.1",
+    "@civaapple/qi-kernel": "0.5.1",
+    "@civaapple/qi-llm": "0.5.1",
+    "@civaapple/qi-protocol": "0.5.1",
+    "@civaapple/qi-tools": "0.5.1",
+    "@civaapple/qi-workspace": "0.5.1"
   },
   "repository": {
     "type": "git",

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -108,6 +109,91 @@ test("Registry rejects calls when the advertised tool identity was replaced", as
       context(root, artifactStore),
     );
     assert.equal(settlement.output.content, "hello");
+  });
+});
+
+test("read returns bounded line ranges while keeping whole-file freshness metadata", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    const content = "one\r\ntwo\r\nthree\r\nfour\r\n";
+    await writeFile(join(root, "lines.txt"), content, "utf8");
+    await writeFile(join(root, "empty.txt"), "", "utf8");
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("read", readTool);
+    const readIdentity = identity(registry, "read");
+
+    const ranged = await registry.execute(
+      "read",
+      readIdentity,
+      { path: "lines.txt", startLine: 2, maxLines: 2 },
+      context(root, artifactStore, "act_read_range"),
+    );
+    assert.deepEqual(ranged.output, {
+      path: "lines.txt",
+      content: "two\r\nthree\r\n",
+      size: Buffer.byteLength(content),
+      sha256: createHash("sha256").update(content).digest("hex"),
+      startLine: 2,
+      endLine: 3,
+      returnedLines: 2,
+      totalLines: 4,
+      truncated: true,
+    });
+
+    const throughEnd = await registry.execute(
+      "read",
+      readIdentity,
+      { path: "lines.txt", startLine: 2 },
+      context(root, artifactStore, "act_read_default_range"),
+    );
+    assert.equal(throughEnd.output.content, "two\r\nthree\r\nfour\r\n");
+    assert.equal(throughEnd.output.returnedLines, 3);
+    assert.equal(throughEnd.output.truncated, true);
+
+    const full = await registry.execute(
+      "read",
+      readIdentity,
+      { path: "lines.txt" },
+      context(root, artifactStore, "act_read_full"),
+    );
+    assert.equal(full.output.content, content);
+    assert.deepEqual(
+      [full.output.startLine, full.output.endLine, full.output.returnedLines, full.output.totalLines, full.output.truncated],
+      [1, 4, 4, 4, false],
+    );
+
+    const empty = await registry.execute(
+      "read",
+      readIdentity,
+      { path: "empty.txt", startLine: 1, maxLines: 10 },
+      context(root, artifactStore, "act_read_empty"),
+    );
+    assert.deepEqual(
+      [empty.output.content, empty.output.startLine, empty.output.endLine, empty.output.totalLines, empty.output.truncated],
+      ["", 0, 0, 0, false],
+    );
+
+    await assert.rejects(
+      registry.execute(
+        "read",
+        readIdentity,
+        { path: "lines.txt", startLine: 5, maxLines: 1 },
+        context(root, artifactStore, "act_read_out_of_bounds"),
+      ),
+      (error) => error instanceof ToolFailure
+        && error.code === "READ_RANGE_OUT_OF_BOUNDS"
+        && error.details?.totalLines === 4,
+    );
+    await assert.rejects(
+      registry.execute(
+        "read",
+        readIdentity,
+        { path: "lines.txt", maxLines: 501 },
+        context(root, artifactStore, "act_read_too_large"),
+      ),
+      (error) => error instanceof ToolInputError,
+    );
   });
 });
 

@@ -65,33 +65,74 @@ interface FindEntry {
 
 export const readTool = defineTool({
   description:
-    "Read one known UTF-8 text file and return its content and freshness hash. " +
+    "Read one known UTF-8 text file and return its content and whole-file freshness hash. " +
+    "After search, prefer startLine/maxLines around the reported match instead of rereading a large file in full. " +
+    "startLine is 1-based; maxLines is capped at 500 and defaults to 200 when startLine is provided. " +
     "Workspace paths are relative to the primary root; authorized read-only mounts use mount:<id>/…. " +
     "The path must be a file, never a directory; use list to discover directory entries.",
-  input: Type.Object({ path: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+  input: Type.Object(
+    {
+      path: Type.String({ minLength: 1 }),
+      startLine: Type.Optional(Type.Integer({ minimum: 1 })),
+      maxLines: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+    },
+    { additionalProperties: false },
+  ),
   output: Type.Object(
     {
       path: Type.String(),
       content: Type.String(),
       size: Type.Integer({ minimum: 0 }),
       sha256: Type.String({ pattern: sha256Pattern }),
+      startLine: Type.Integer({ minimum: 0 }),
+      endLine: Type.Integer({ minimum: 0 }),
+      returnedLines: Type.Integer({ minimum: 0 }),
+      totalLines: Type.Integer({ minimum: 0 }),
+      truncated: Type.Boolean(),
     },
     { additionalProperties: false },
   ),
   effect: () => "read",
   resources: (input) => [`file:${input.path}`],
   async execute(input, context) {
+    const request = input as { path: string; startLine?: number; maxLines?: number };
     const mounts = mountsFromContext(context);
-    const resolved = await resolveAccessiblePath(context.workspaceRoot, input.path, mounts);
+    const resolved = await resolveAccessiblePath(context.workspaceRoot, request.path, mounts);
     if (!(await isRegularFile(resolved.absolute))) {
-      throw new ToolFailure("NOT_A_FILE", `${input.path} is not a regular file`);
+      throw new ToolFailure("NOT_A_FILE", `${request.path} is not a regular file`);
     }
     const content = await readFile(resolved.absolute, "utf8");
+    const lines = textLineSpans(content);
+    const totalLines = lines.length;
+    const rangeRequested = request.startLine !== undefined || request.maxLines !== undefined;
+    const requestedStartLine = request.startLine ?? 1;
+    if (totalLines > 0 && requestedStartLine > totalLines) {
+      throw new ToolFailure(
+        "READ_RANGE_OUT_OF_BOUNDS",
+        `startLine ${requestedStartLine} exceeds the file's ${totalLines} lines`,
+        { startLine: requestedStartLine, totalLines },
+      );
+    }
+    const maximum = rangeRequested ? (request.maxLines ?? 200) : totalLines;
+    const firstIndex = totalLines === 0 ? 0 : requestedStartLine - 1;
+    const selected = lines.slice(firstIndex, firstIndex + maximum);
+    const selectedContent = rangeRequested && selected.length > 0
+      ? content.slice(selected[0]?.start ?? 0, selected.at(-1)?.end ?? 0)
+      : rangeRequested
+        ? ""
+        : content;
+    const actualStartLine = selected.length === 0 ? 0 : requestedStartLine;
+    const actualEndLine = selected.length === 0 ? 0 : requestedStartLine + selected.length - 1;
     return {
       path: formatAccessiblePath(resolved, context.workspaceRoot, mounts, resolved.absolute),
-      content,
+      content: selectedContent,
       size: Buffer.byteLength(content),
       sha256: hash(content),
+      startLine: actualStartLine,
+      endLine: actualEndLine,
+      returnedLines: selected.length,
+      totalLines,
+      truncated: selected.length < totalLines,
     };
   },
 });
@@ -251,6 +292,9 @@ export const editTool = defineTool({
       replacements: Type.Integer({ minimum: 1 }),
       diff: Type.String(),
       diffTruncated: Type.Boolean(),
+      freshnessRebased: Type.Optional(Type.Literal(true)),
+      rebasedFromSha256: Type.Optional(Type.String({ pattern: sha256Pattern })),
+      rebasedAfterActionId: Type.Optional(Type.String({ minLength: 1 })),
     },
     { additionalProperties: false },
   ),
@@ -303,6 +347,11 @@ export const editTool = defineTool({
       replacements,
       diff: renderedDiff.text,
       diffTruncated: renderedDiff.truncated,
+      ...(context.freshnessRebase === undefined ? {} : {
+        freshnessRebased: true as const,
+        rebasedFromSha256: context.freshnessRebase.originalExpectedSha256,
+        rebasedAfterActionId: context.freshnessRebase.priorActionId,
+      }),
     };
   },
 });
@@ -581,7 +630,7 @@ export const treeTool = defineTool({
 });
 
 export const shellTool = defineTool({
-  description: "Execute one program with an argument vector in the Workspace; no shell interpolation is used. Non-zero exits and timeouts fail the Action. In a Git Workspace, Qi records bounded before/after state fingerprints and the resulting tracked diff.",
+  description: "Execute one program with a direct argument vector in the Workspace; shell interpolation, wildcard/glob expansion, pipes, and redirection are not available. Use find/search/read for file inspection, qi_session_inspect for Session diagnostics, and an authorized script profile instead of a long node -e program. Non-zero exits and timeouts fail the Action. In a Git Workspace, Qi records bounded before/after state fingerprints and the resulting tracked diff.",
   input: Type.Object(
     {
       command: Type.String({ minLength: 1 }),
@@ -988,6 +1037,20 @@ function countOccurrences(content: string, fragment: string): number {
     count += 1;
     offset = index + fragment.length;
   }
+}
+
+function textLineSpans(content: string): Array<{ start: number; end: number }> {
+  if (!content) return [];
+  const spans: Array<{ start: number; end: number }> = [];
+  const newline = /\r\n|\r|\n/g;
+  let start = 0;
+  for (const match of content.matchAll(newline)) {
+    const end = (match.index ?? start) + match[0].length;
+    spans.push({ start, end });
+    start = end;
+  }
+  if (start < content.length) spans.push({ start, end: content.length });
+  return spans;
 }
 
 function prepareExactEdit(

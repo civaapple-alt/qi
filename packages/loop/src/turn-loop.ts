@@ -103,6 +103,21 @@ interface CandidateCall {
   context: ToolExecutionContext;
 }
 
+interface SuccessfulStepWrite {
+  actionId: string;
+  toolName: string;
+  editChain?: {
+    originalSha256: string;
+    latestSha256: string;
+  };
+}
+
+interface StepMutationAttempt {
+  actionId: string;
+  toolName: string;
+  status: "completed" | "failed" | "denied";
+}
+
 interface RejectedModelCall {
   callId: string;
   toolName: string;
@@ -705,10 +720,80 @@ export class TurnLoop {
         { kind: "runtime", id: "qi" },
       );
 
-      const writtenResources = new Set<string>();
+      const successfulWrites = new Map<string, SuccessfulStepWrite>();
+      const lastMutationAttempts = new Map<string, StepMutationAttempt>();
       for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
         const candidate = candidates[candidateIndex];
         if (!candidate) throw new Error(`Missing candidate at index ${candidateIndex}`);
+        let inspected = candidate.inspected;
+        let context = candidate.context;
+        let chainedEdit = false;
+        let rebaseFailure: ToolFailure | undefined;
+        const priorWrites = inspected.effect === "read"
+          ? []
+          : inspected.resources
+              .map((resource) => ({ resource, write: successfulWrites.get(resource) }))
+              .filter((entry): entry is { resource: string; write: SuccessfulStepWrite } => entry.write !== undefined);
+        if (
+          priorWrites.length === 1
+          && inspected.name === "edit"
+          && inspected.resources.length === 1
+          && priorWrites[0]?.write.toolName === "edit"
+          && priorWrites[0].write.editChain
+          && lastMutationAttempts.get(priorWrites[0].resource)?.actionId === priorWrites[0].write.actionId
+        ) {
+          const prior = priorWrites[0];
+          const input = objectRecord(inspected.input);
+          const expectedSha256 = typeof input?.expectedSha256 === "string" ? input.expectedSha256 : undefined;
+          const chain = prior.write.editChain!;
+          if (expectedSha256 === chain.latestSha256) {
+            chainedEdit = true;
+          } else if (expectedSha256 === chain.originalSha256) {
+            const effectiveInput = { ...input, expectedSha256: chain.latestSha256 };
+            context = {
+              ...context,
+              freshnessRebase: {
+                priorActionId: prior.write.actionId,
+                originalExpectedSha256: expectedSha256,
+              },
+            };
+            try {
+              const rebased = this.#toolRegistry.inspect(
+                inspected.name,
+                inspected.identity,
+                effectiveInput,
+                context,
+              );
+              if (
+                rebased.effect !== inspected.effect
+                || !sameResources(rebased.resources, inspected.resources)
+                || rebased.name !== "edit"
+              ) {
+                throw new Error("re-inspection changed the tool effect or resources");
+              }
+              writer.append(
+                "action.freshness.rebased",
+                {
+                  runId,
+                  stepId,
+                  actionId: candidate.actionId,
+                  priorActionId: prior.write.actionId,
+                  resource: prior.resource,
+                  originalExpectedSha256: expectedSha256,
+                  effectiveExpectedSha256: chain.latestSha256,
+                },
+                { kind: "runtime", id: "tool_registry" },
+              );
+              inspected = rebased;
+              chainedEdit = true;
+            } catch (error) {
+              rebaseFailure = new ToolFailure(
+                "EDIT_REBASE_INVALID",
+                `Could not safely re-inspect edit ${candidate.actionId}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+        }
         writer.append(
           "authority.requested",
           { runId, stepId, actionId: candidate.actionId },
@@ -716,7 +801,7 @@ export class TurnLoop {
         );
         let authorized;
         try {
-          authorized = await candidate.inspected.authorize();
+          authorized = await inspected.authorize();
         } catch (error) {
           const reason =
             error instanceof AuthorityDeniedError
@@ -740,6 +825,15 @@ export class TurnLoop {
             output: { code: "AUTHORITY_DENIED", reason },
             isError: true,
           });
+          if (inspected.effect !== "read") {
+            for (const resource of inspected.resources) {
+              lastMutationAttempts.set(resource, {
+                actionId: candidate.actionId,
+                toolName: inspected.name,
+                status: "denied",
+              });
+            }
+          }
           continue;
         }
 
@@ -761,9 +855,10 @@ export class TurnLoop {
         );
 
         try {
-          if (candidate.inspected.effect !== "read") {
-            const overlap = candidate.inspected.resources.filter((resource) => writtenResources.has(resource));
-            if (overlap.length > 0) {
+          if (rebaseFailure) throw rebaseFailure;
+          if (inspected.effect !== "read") {
+            const overlap = inspected.resources.filter((resource) => successfulWrites.has(resource));
+            if (overlap.length > 0 && !chainedEdit) {
               throw new ToolFailure(
                 "BATCH_WRITE_CONFLICT",
                 `A prior write in this step already changed ${overlap.join(", ")}; re-read that path, then edit with the new expectedSha256`,
@@ -788,8 +883,31 @@ export class TurnLoop {
             },
             { kind: "runtime", id: "tool_runner" },
           );
-          if (candidate.inspected.effect !== "read") {
-            for (const resource of candidate.inspected.resources) writtenResources.add(resource);
+          if (inspected.effect !== "read") {
+            const input = objectRecord(inspected.input);
+            const output = objectRecord(settlement.output);
+            for (const resource of inspected.resources) {
+              const prior = successfulWrites.get(resource);
+              const expectedSha256 = typeof input?.expectedSha256 === "string" ? input.expectedSha256 : undefined;
+              const latestSha256 = typeof output?.sha256 === "string" ? output.sha256 : undefined;
+              successfulWrites.set(resource, {
+                actionId: candidate.actionId,
+                toolName: inspected.name,
+                ...(inspected.name === "edit" && expectedSha256 && latestSha256
+                  ? {
+                      editChain: {
+                        originalSha256: prior?.editChain?.originalSha256 ?? expectedSha256,
+                        latestSha256,
+                      },
+                    }
+                  : {}),
+              });
+              lastMutationAttempts.set(resource, {
+                actionId: candidate.actionId,
+                toolName: inspected.name,
+                status: "completed",
+              });
+            }
           }
           toolResults.set(candidate.callId, {
             type: "tool-result",
@@ -841,6 +959,15 @@ export class TurnLoop {
               output: modelOutput,
               isError: true,
             });
+            if (inspected.effect !== "read") {
+              for (const resource of inspected.resources) {
+                lastMutationAttempts.set(resource, {
+                  actionId: candidate.actionId,
+                  toolName: inspected.name,
+                  status: "failed",
+                });
+              }
+            }
             continue;
           }
 
@@ -1090,6 +1217,19 @@ function extractOutputRef(output: unknown): string | undefined {
   const candidate = output as { ref?: unknown; diffRef?: unknown };
   const ref = candidate.ref ?? candidate.diffRef;
   return typeof ref === "string" ? ref : undefined;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function sameResources(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((resource, index) => resource === sortedRight[index]);
 }
 
 function compileTurnContext(

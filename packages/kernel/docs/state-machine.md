@@ -21,6 +21,13 @@ decide which explicit recovery events to append after observing durable state.
 
 Recovery never edits or deletes the earlier fact. It appends another event that explains the reconciliation.
 
+## Edit freshness rebase
+
+An `action.freshness.rebased` transition is legal only while the current Action is proposed, after another
+same-Step `edit` on the same single write resource completed, and before authority is requested. The original
+and effective digests must differ. The projection retains this relationship so replay explains why the
+authorized input used a newer digest without rewriting the model proposal.
+
 ## ProcessTask lifecycle
 
 ```text

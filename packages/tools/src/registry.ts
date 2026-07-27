@@ -41,6 +41,11 @@ export interface ToolExecutionContext {
   effectJournal?: EffectJournal;
   idempotencyScope?: string;
   reportActivity?: (activity: ToolExecutionActivity) => void;
+  /** Runtime-only audit metadata for a same-Step edit freshness rebase. */
+  freshnessRebase?: {
+    readonly priorActionId: string;
+    readonly originalExpectedSha256: string;
+  };
 }
 
 export interface ToolExecutionActivity {

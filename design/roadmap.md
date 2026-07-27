@@ -1,6 +1,6 @@
 # Roadmap
 
-Qi 0.5.0 has a working local Runtime, CLI, reusable packages, deterministic tests, and local package
+Qi 0.5.1 has a working local Runtime, CLI, reusable packages, deterministic tests, and local package
 installation evidence. The roadmap now focuses on making those surfaces honestly usable by external
 contributors and consumers.
 

@@ -41,6 +41,11 @@ known directory, `read` for one known regular file, and `search` for content. Se
 regex and glob behavior must be explicit. Keeping these operations separate prevents guessed filenames,
 accidental directory reads, and filename queries from masquerading as content matches.
 
+After `search`, pass its 1-based match line to `read.startLine` and request at most the surrounding lines needed
+for the next decision. `maxLines` is capped at 500 and defaults to 200 for a ranged read. Returned content keeps
+the file's original line endings; range metadata reports omissions, while `size` and `sha256` always describe
+the complete file. Calling `read` without a range remains the compatible full-file path.
+
 The fast path resolves trusted `rg` and `fd` executables outside the Workspace and invokes only schema-derived
 argument vectors without a shell. Both retain ignore-file and hidden-file defaults. Portable Node traversal is a
 bounded fallback; content globs require `rg`. Results report the engine used and remain capped independently of
@@ -64,6 +69,12 @@ authorized shell process can still change Workspace files, but it is not the pre
 doing so gives up the dedicated tool's per-file freshness and unique-target assertions. Git-backed shell evidence
 keeps such an explicit host effect inspectable; it does not make it equivalent to a precise edit.
 
+Within one Step, the Loop may chain only consecutive same-resource `edit` calls whose proposed digest is the
+chain's original or latest successfully settled digest. It re-inspects the effective digest before authority,
+records `action.freshness.rebased` when the digest changes, and still rejects missing or ambiguous targets.
+`write`, `move`, `remove`, mixed mutation sequences, and unrelated digests keep the
+`BATCH_WRITE_CONFLICT` path.
+
 Cross-file patch application remains deferred. A patch may reserve several resources and partially commit before
 a later hunk fails, so it needs explicit multi-resource settlement and recovery semantics rather than being
 smuggled into one ordinary file Action. See
@@ -78,8 +89,10 @@ schema does not accept arbitrary arguments, Git optional locks and external diff
 executable must resolve outside the Workspace. General Git commands remain behind the explicit `shell` execute
 capability.
 
-General host execution receives a program name and argument vector rather than a command-line string. Bare names
-resolve through PATH outside the Workspace. On Windows, PATHEXT resolution may select a `.cmd`/`.bat` shim such as
+General host execution receives a program name and argument vector rather than a command-line string. It does
+not expand shell globs, variables, pipes, or redirection; use discovery Tools for paths and a declared script
+profile for a real multiline script instead of embedding a long `node -e` program. Bare names resolve through
+PATH outside the Workspace. On Windows, PATHEXT resolution may select a `.cmd`/`.bat` shim such as
 `npm.cmd`; Qi invokes it through the trusted system command processor only after rejecting argument shell
 metacharacters. Direct executables retain normal argument-vector spawning on every platform. Direct execution
 requires the `shell-profile:direct` resource in addition to host-process/workspace resources.

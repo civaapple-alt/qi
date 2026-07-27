@@ -19,6 +19,7 @@ import {
 } from "./ids.js";
 
 const isoTimestampPattern = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$";
+const sha256Pattern = "^[a-f0-9]{64}$";
 
 const ActorSchema = Type.Object(
   {
@@ -779,6 +780,21 @@ export const SessionEventSchema = Type.Union([
           Type.Literal("publish"),
           Type.Literal("spend"),
         ]),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "action.freshness.rebased",
+    Type.Object(
+      {
+        runId: RunIdSchema,
+        stepId: StepIdSchema,
+        actionId: ActionIdSchema,
+        priorActionId: ActionIdSchema,
+        resource: Type.String({ minLength: 1, maxLength: 1_000 }),
+        originalExpectedSha256: Type.String({ pattern: sha256Pattern }),
+        effectiveExpectedSha256: Type.String({ pattern: sha256Pattern }),
       },
       { additionalProperties: false },
     ),

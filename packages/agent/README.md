@@ -1,6 +1,6 @@
 # `@civaapple/qi-agent`
 
-Version **0.5.0**. Package maturity: **internal public-package preview**.
+Version **0.5.1**. Package maturity: **internal public-package preview**.
 
 `@civaapple/qi-agent` is the small embedding façade for Qi's event-sourced, evidence-first Agent Runtime. It
 composes the existing `TurnLoop`, EventStore, ModelPort, Tool Registry, Capability Broker, and ArtifactStore; it

@@ -578,7 +578,7 @@ export class TuiPresenter {
   render(width = 120): string[] {
     this.#width = width;
     const startup = !this.#view || this.#view.runOrder.length === 0;
-    const version = this.launch.version ?? "0.5.0";
+    const version = this.launch.version ?? "0.5.1";
     const lines: string[] = [];
     if (startup) {
       lines.push(...this.renderWelcome(width), "");
@@ -598,7 +598,7 @@ export class TuiPresenter {
   }
 
   renderWelcome(width = 120): string[] {
-    const version = this.launch.version ?? "0.5.0";
+    const version = this.launch.version ?? "0.5.1";
     if (width < 40) {
       return [
         "栖 · QI",
@@ -1225,7 +1225,11 @@ export class TuiPresenter {
       const card = this.toolCard(action);
       const stepExpanded = this.#expanded.has(`step:${action.stepId}`);
       // One-line summaries only mid-Run; settled Runs keep full Cursor cards (already fingerprint-cached).
-      if (activeRun && options.collapse && !stepExpanded) {
+      const retainedMutationDiff = action.status === "completed"
+        && ["write", "edit", "move", "remove"].includes(action.toolName)
+        && typeof card.output?.diff === "string"
+        && card.output.diff.length > 0;
+      if (activeRun && options.collapse && !stepExpanded && !retainedMutationDiff) {
         lines.push(...renderToolCard(card, { summaryOnly: true }));
         continue;
       }

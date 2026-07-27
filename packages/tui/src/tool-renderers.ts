@@ -81,37 +81,51 @@ function renderProcess(model: ToolCardModel, options: ToolCardOptions): string[]
       ? `${String(input?.profile ?? "?")} ${oneLine(String(input?.script ?? ""), 80)}`
       : [String(input?.command ?? "?"), ...(Array.isArray(input?.args) ? input.args.map(shellArg) : [])].join(" ");
   const workdir = typeof input?.workdir === "string" ? input.workdir : undefined;
-  const output = model.output;
-  const stream = output
-    ? (typeof output.stderr === "string" && output.stderr ? output.stderr : typeof output.stdout === "string" ? output.stdout : "")
-    : "";
+  const envelope = model.output;
+  const output = processPayload(envelope);
+  const stderr = typeof output?.stderr === "string" ? output.stderr : "";
+  const stdout = typeof output?.stdout === "string" ? output.stdout : "";
+  const message = typeof envelope?.message === "string" ? envelope.message : "";
+  const stream = stderr || stdout || message;
   const streamLines = stream ? normalizedLines(stream) : [];
   const duration = model.elapsed ?? (model.status === "running" ? undefined : "0ms");
   const prefix = model.toolName === "shell" ? "$" : model.toolName === "script" ? ">" : "#";
+  const exitSummary = output?.timedOut === true
+    ? "timed out"
+    : "exitCode" in (output ?? {}) && output?.exitCode !== undefined
+      ? `exit ${String(output.exitCode)}`
+      : undefined;
   const title = [
     coloredGlyph(model.status),
     `${prefix} ${oneLine(command, 100)}`,
     duration,
     model.status !== "completed" && model.status !== "running" ? `· ${model.status}` : undefined,
     model.errorCode && model.status !== "completed" ? `· ${model.errorCode}` : undefined,
+    exitSummary && model.status !== "completed" ? `· ${exitSummary}` : undefined,
   ].filter(Boolean).join(" ");
-  if (options.summaryOnly) return [title];
+  if (options.summaryOnly) {
+    const tail = lastNonEmpty(stream);
+    return [`${title}${tail ? ` · ${oneLine(tail, 80)}` : ""}`];
+  }
   const lines = [title];
 
   if (model.status === "running" || model.liveTail?.text) {
     const live = model.liveTail?.text ? lastNonEmpty(model.liveTail.text) : "running…";
     lines.push(`  · ${oneLine(live, 110)}`);
-  } else if (!options.expanded && streamLines.length > 0) {
-    const hidden = Math.max(0, streamLines.length - 1);
-    if (hidden > 0) lines.push(`  … ${hidden} output lines hidden · Ctrl+O to expand`);
-    lines.push(`  ${oneLine(streamLines.at(-1) ?? "", 110)}`);
-  } else if (output && "exitCode" in output && Number(output.exitCode) !== 0) {
-    lines.push(`  exit ${String(output.exitCode)}${output.timedOut ? " · timed out" : ""}`);
+  } else {
+    if (exitSummary && model.status !== "completed") lines.push(`  ${exitSummary}`);
+    if (!options.expanded && streamLines.length > 0) {
+      const hidden = Math.max(0, streamLines.length - 1);
+      if (hidden > 0) lines.push(`  … ${hidden} output lines hidden · Ctrl+O to expand`);
+      lines.push(`  ${oneLine(streamLines.at(-1) ?? "", 110)}`);
+    }
   }
 
   if (options.expanded) {
     if (workdir && workdir !== ".") lines.push(`  cwd ${workdir}`);
-    appendBounded(lines, stream, options.outputLines ?? 12, "output");
+    appendBounded(lines, stderr, options.outputLines ?? 12, "stderr");
+    appendBounded(lines, stdout, options.outputLines ?? 12, "stdout");
+    if (!stderr && !stdout) appendBounded(lines, message, options.outputLines ?? 12, "message");
     if (record(output?.workspaceChange)?.changed) lines.push("  workspace changed");
   }
   return lines;
@@ -447,7 +461,15 @@ function discoverySubject(tool: string, input: Record<string, unknown> | undefin
 
 function discoveryResult(tool: string, output: Record<string, unknown> | undefined): string | undefined {
   if (!output) return undefined;
-  if (tool === "read") return typeof output.content === "string" ? `${normalizedLines(output.content).length} lines` : undefined;
+  if (tool === "read") {
+    if (typeof output.totalLines === "number" && typeof output.returnedLines === "number") {
+      const range = Number(output.startLine) > 0
+        ? ` · ${String(output.startLine)}–${String(output.endLine)}`
+        : "";
+      return `${output.returnedLines}/${output.totalLines} lines${range}${output.truncated ? " · truncated" : ""}`;
+    }
+    return typeof output.content === "string" ? `${normalizedLines(output.content).length} lines` : undefined;
+  }
   if (tool === "tree") return output.entryCount === undefined ? undefined : `${output.entryCount} entries${output.truncated ? " · truncated" : ""}`;
   if (tool === "list") return Array.isArray(output.entries) ? `${output.entries.length} entries${output.truncated ? " · truncated" : ""}` : undefined;
   if (tool === "find") return Array.isArray(output.entries) ? `${output.entries.length} paths${output.truncated ? " · truncated" : ""}` : undefined;
@@ -479,6 +501,18 @@ function normalizedLines(value: string): string[] {
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function processPayload(output: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!output) return undefined;
+  const details = record(output.details);
+  if (
+    details
+    && ["exitCode", "timedOut", "stdout", "stderr", "workspaceChange"].some((key) => key in details)
+  ) {
+    return details;
+  }
+  return output;
 }
 
 function shellArg(value: unknown): string {

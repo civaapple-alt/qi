@@ -7,7 +7,8 @@ import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
 import { InMemoryEventStore } from "@civaapple/qi-kernel";
 import { ScriptedModelPort } from "@civaapple/qi-llm";
 import { TurnLoop } from "@civaapple/qi-loop";
-import { FileArtifactStore, ToolRegistry, artifactTool, editTool, readTool, searchTool } from "@civaapple/qi-tools";
+import { FileArtifactStore, ToolRegistry, artifactTool, editTool, readTool, searchTool, writeTool } from "@civaapple/qi-tools";
+import { effectIdempotencyKey } from "@civaapple/qi-workspace";
 
 async function withRuntime(run) {
   const root = await mkdtemp(join(tmpdir(), "qi-loop-test-"));
@@ -607,12 +608,12 @@ test("TurnLoop settles unstarted batch actions before parking an indeterminate e
   });
 });
 
-test("TurnLoop fails a second same-path write in one step as BATCH_WRITE_CONFLICT", async () => {
+test("TurnLoop rebases consecutive same-Step edits against the latest successful digest", async () => {
   await withRuntime(async ({ root, artifactStore }) => {
-    const { writeFile } = await import("node:fs/promises");
+    const { readFile, writeFile } = await import("node:fs/promises");
     const { createHash } = await import("node:crypto");
     const target = join(root, "same-file.txt");
-    const original = "alpha\n";
+    const original = "alpha\nomega\ntail\n";
     await writeFile(target, original, "utf8");
     const sha256 = createHash("sha256").update(original, "utf8").digest("hex");
 
@@ -628,6 +629,27 @@ test("TurnLoop fails a second same-path write in one step as BATCH_WRITE_CONFLIC
     });
     const registry = new ToolRegistry(broker);
     registry.register("edit", editTool);
+    const journalBegins = [];
+    const journal = {
+      begin(input) {
+        journalBegins.push(structuredClone(input));
+        return {
+          outcome: "acquired",
+          record: {
+            ...input,
+            status: "reserved",
+            attempts: 1,
+            updatedAt: new Date(0).toISOString(),
+          },
+        };
+      },
+      markStarted() {},
+      complete() {},
+      fail() {},
+      indeterminate() {},
+      reconcile() {},
+      get() { return undefined; },
+    };
     const model = new ScriptedModelPort([
       [
         {
@@ -647,26 +669,158 @@ test("TurnLoop fails a second same-path write in one step as BATCH_WRITE_CONFLIC
           name: "edit",
           input: {
             path: "same-file.txt",
-            oldText: "alpha",
-            newText: "gamma",
+            oldText: "omega",
+            newText: "sigma",
+            expectedSha256: sha256,
+          },
+        },
+        {
+          type: "action.requested",
+          callId: "call-edit-3",
+          name: "edit",
+          input: {
+            path: "same-file.txt",
+            oldText: "tail",
+            newText: "end",
             expectedSha256: sha256,
           },
         },
         { type: "completed", finishReason: "actions" },
       ],
-      [{ type: "text.delta", delta: "Second edit conflicted; will re-read." }, { type: "completed", finishReason: "stop" }],
+      [{ type: "text.delta", delta: "All edits completed." }, { type: "completed", finishReason: "stop" }],
     ]);
     const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
-    const result = await loop.run(turnRequest(root, artifactStore, { maxSteps: 2 }));
+    const result = await loop.run(turnRequest(root, artifactStore, {
+      maxSteps: 2,
+      effectJournal: journal,
+    }));
     assert.equal(result.status, "completed");
     const actions = Object.values(result.view.runs[result.runId].actions);
     assert.deepEqual(
       actions.map((action) => ({ tool: action.toolName, status: action.status, detail: action.terminalDetail })),
       [
         { tool: "edit", status: "completed", detail: undefined },
-        { tool: "edit", status: "failed", detail: "BATCH_WRITE_CONFLICT" },
+        { tool: "edit", status: "completed", detail: undefined },
+        { tool: "edit", status: "completed", detail: undefined },
       ],
     );
+    assert.equal(await readFile(target, "utf8"), "beta\nsigma\nend\n");
+    const events = store.read("ses_turn_test").events;
+    const rebases = events.filter((event) => event.type === "action.freshness.rebased");
+    assert.equal(rebases.length, 2);
+    for (const rebase of rebases) {
+      const rebaseIndex = events.indexOf(rebase);
+      const priorCompletedIndex = events.findIndex(
+        (event) => event.type === "action.completed" && event.data.actionId === rebase.data.priorActionId,
+      );
+      const authorityIndex = events.findIndex(
+        (event) => event.type === "authority.requested" && event.data.actionId === rebase.data.actionId,
+      );
+      const startedIndex = events.findIndex(
+        (event) => event.type === "action.started" && event.data.actionId === rebase.data.actionId,
+      );
+      assert.ok(priorCompletedIndex < rebaseIndex);
+      assert.ok(rebaseIndex < authorityIndex);
+      assert.ok(authorityIndex < startedIndex);
+      assert.equal(result.view.runs[result.runId].actions[rebase.data.actionId].freshnessRebase.priorActionId, rebase.data.priorActionId);
+    }
+    const rebasedOutputs = events
+      .filter((event) => event.type === "action.completed")
+      .map((event) => event.data.modelOutput?.[0]?.text)
+      .filter(Boolean)
+      .map((text) => JSON.parse(text))
+      .filter((output) => output.freshnessRebased);
+    assert.equal(rebasedOutputs.length, 2);
+    const afterFirst = createHash("sha256").update("beta\nomega\ntail\n", "utf8").digest("hex");
+    assert.equal(
+      journalBegins[1].idempotencyKey,
+      effectIdempotencyKey(
+        result.runId,
+        "edit",
+        {
+          path: "same-file.txt",
+          oldText: "omega",
+          newText: "sigma",
+          expectedSha256: afterFirst,
+        },
+        ["file:same-file.txt"],
+      ),
+    );
+  });
+});
+
+test("TurnLoop rebases safely but does not fuzzy-merge an overlapping edit target", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const { writeFile } = await import("node:fs/promises");
+    const { createHash } = await import("node:crypto");
+    const original = "alpha\n";
+    await writeFile(join(root, "overlap.txt"), original, "utf8");
+    const sha256 = createHash("sha256").update(original, "utf8").digest("hex");
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_overlap_edit",
+      subject: "agent_main",
+      tools: ["edit"],
+      effects: ["write"],
+      resources: ["file:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("edit", editTool);
+    const model = new ScriptedModelPort([
+      [
+        { type: "action.requested", callId: "call-overlap-1", name: "edit", input: { path: "overlap.txt", oldText: "alpha", newText: "beta", expectedSha256: sha256 } },
+        { type: "action.requested", callId: "call-overlap-2", name: "edit", input: { path: "overlap.txt", oldText: "alpha", newText: "gamma", expectedSha256: sha256 } },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [{ type: "text.delta", delta: "The overlapping target no longer exists." }, { type: "completed", finishReason: "stop" }],
+    ]);
+    const result = await new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry })
+      .run(turnRequest(root, artifactStore, { maxSteps: 2 }));
+    const actions = Object.values(result.view.runs[result.runId].actions);
+    assert.deepEqual(actions.map((action) => action.status), ["completed", "failed"]);
+    assert.equal(actions[1].terminalDetail, "EDIT_TARGET_NOT_FOUND");
+    assert.equal(store.read("ses_turn_test").events.some((event) => event.type === "action.freshness.rebased"), true);
+  });
+});
+
+test("TurnLoop keeps mixed same-resource mutations behind BATCH_WRITE_CONFLICT", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const { writeFile } = await import("node:fs/promises");
+    const { createHash } = await import("node:crypto");
+    const original = "alpha\n";
+    await writeFile(join(root, "mixed.txt"), original, "utf8");
+    const sha256 = createHash("sha256").update(original, "utf8").digest("hex");
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_mixed_write",
+      subject: "agent_main",
+      tools: ["edit", "write"],
+      effects: ["write"],
+      resources: ["file:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("edit", editTool);
+    registry.register("write", writeTool);
+    const model = new ScriptedModelPort([
+      [
+        { type: "action.requested", callId: "call-mixed-edit", name: "edit", input: { path: "mixed.txt", oldText: "alpha", newText: "beta", expectedSha256: sha256 } },
+        { type: "action.requested", callId: "call-mixed-write", name: "write", input: { path: "mixed.txt", content: "gamma\n", expectedSha256: sha256 } },
+        { type: "action.requested", callId: "call-after-mixed", name: "edit", input: { path: "mixed.txt", oldText: "beta", newText: "delta", expectedSha256: sha256 } },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [{ type: "text.delta", delta: "The mixed write was rejected." }, { type: "completed", finishReason: "stop" }],
+    ]);
+    const result = await new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry })
+      .run(turnRequest(root, artifactStore, { maxSteps: 2 }));
+    const actions = Object.values(result.view.runs[result.runId].actions);
+    assert.deepEqual(actions.map((action) => action.status), ["completed", "failed", "failed"]);
+    assert.equal(actions[1].terminalDetail, "BATCH_WRITE_CONFLICT");
+    assert.equal(actions[2].terminalDetail, "BATCH_WRITE_CONFLICT");
+    assert.equal(store.read("ses_turn_test").events.some((event) => event.type === "action.freshness.rebased"), false);
   });
 });
 

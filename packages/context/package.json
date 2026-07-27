@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-context",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Deterministic budget-aware Qi context compiler",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,7 +20,7 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-llm": "0.5.0"
+    "@civaapple/qi-llm": "0.5.1"
   },
   "repository": {
     "type": "git",

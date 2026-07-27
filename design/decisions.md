@@ -29,9 +29,14 @@ Opaque credential handles remain the preferred transport. Previously persisted s
 ## ADR-0003: use freshness-checked precise file mutation
 
 - `read`, `edit`, `write`, `move`, and `remove` remain separate operations.
+- `read` may return a bounded 1-based line range, but its size and freshness hash always describe the complete
+  file so a partial observation cannot weaken mutation freshness.
 - `edit` requires a previously observed content hash and one unique target.
 - Newline normalization may bridge CRLF/LF transport differences; untouched bytes and UTF-8 BOMs are preserved.
 - Missing, ambiguous, stale, and no-op edits fail before mutation.
+- Consecutive `edit` calls to the same resource in one Step may rebase only from the chain's original digest to
+  the latest successfully settled digest. The Loop re-inspects before authority and records
+  `action.freshness.rebased`; mixed mutations and unproven digest ancestry still fail closed.
 - Generic shell execution is not the preferred file-edit transport.
 
 A future cross-file patch operation must define per-resource authority, partial settlement, recovery, and replay

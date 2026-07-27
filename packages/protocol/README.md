@@ -38,6 +38,8 @@ for untrusted serialized input.
   Agent.
 - `step.completed.finishReason = handoff` explicitly marks a budget continuation summary. Older Sessions without
   this additive value keep their prior history behavior.
+- `action.freshness.rebased` records the original and effective whole-file digests when the Loop safely chains a
+  same-Step `edit` after a completed edit; it must precede authority and executor entry.
 
 ## Failure semantics
 

@@ -1,6 +1,6 @@
 # `@civaapple/qi-introspection`
 
-Version **0.5.0**. Package maturity: **internal public-package preview**.
+Version **0.5.1**. Package maturity: **internal public-package preview**.
 
 This package gives Qi and contributors one versioned, machine-readable view of Qi's identity, package
 ownership, invariants, architecture decisions, maturity, release gaps, and verification commands.
@@ -44,7 +44,8 @@ matching read lease for `qi:self-model:<section>`.
 
 `inspectQiSession(source, query)` lists project Sessions or narrows one Session to Runs, a selected/latest Run,
 problems, the last Step, or one Step/Action. Summary and detail projections retain IDs, event sequence bounds,
-status, and error codes while bounding text, results, and lists and reporting every omission.
+status, error codes, and any durable edit freshness rebase while bounding text, results, and lists and reporting
+every omission.
 `createQiSessionInspectionTool(source, currentSessionId)` exposes the same semantics as `qi_session_inspect`.
 The CLI injects only its current project EventStore; callers cannot supply a database path or cross-project root.
 

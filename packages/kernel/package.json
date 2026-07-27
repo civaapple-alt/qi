@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-kernel",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Deterministic Qi Session state machine, replay, and EventStore port",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,7 +20,7 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-protocol": "0.5.0"
+    "@civaapple/qi-protocol": "0.5.1"
   },
   "repository": {
     "type": "git",

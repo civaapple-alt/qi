@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-scheduler",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Durable bounded proactive watchers with attention policy and idempotent Session triggers",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,9 +20,9 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-kernel": "0.5.0",
-    "@civaapple/qi-loop": "0.5.0",
-    "@civaapple/qi-protocol": "0.5.0"
+    "@civaapple/qi-kernel": "0.5.1",
+    "@civaapple/qi-loop": "0.5.1",
+    "@civaapple/qi-protocol": "0.5.1"
   },
   "repository": {
     "type": "git",

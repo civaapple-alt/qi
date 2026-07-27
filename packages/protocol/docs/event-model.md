@@ -30,6 +30,11 @@ A schema-invalid call or a call beyond the deterministic Step batch envelope is 
 `model.action.rejected`. It remains attached to the Step's model output and never becomes an Action, because it
 was rejected before authority or executor entry.
 
+`action.freshness.rebased` is an explicit pre-authority fact for a same-Step `edit → edit` chain. It links the
+current Action to the immediately prior completed edit on the same single resource and records both the
+model-proposed digest and the effective latest digest. The original `action.proposed` input remains unchanged.
+Other same-resource mutation combinations retain their deterministic conflict failure.
+
 `safety.redaction.applied` is an append-only audit fact emitted when high-confidence secret material is removed
 at model input, model output, Tool output, context compaction, or persistence. It deliberately contains no
 matched value and has no mutable projection state.
