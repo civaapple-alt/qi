@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/agent.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../protocol" },
+    { "path": "../kernel" },
+    { "path": "../llm" },
+    { "path": "../context" },
+    { "path": "../capability" },
+    { "path": "../tools" },
+    { "path": "../workspace" },
+    { "path": "../loop" }
+  ],
+  "include": ["src/**/*.ts"]
+}

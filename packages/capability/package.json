@@ -1,0 +1,36 @@
+{
+  "name": "@civaapple/qi-capability",
+  "version": "0.4.0",
+  "description": "Default-deny Qi capability leases, credentials, delegation, and redaction",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/civaapple-alt/qi.git",
+    "directory": "packages/capability"
+  },
+  "homepage": "https://github.com/civaapple-alt/qi#readme",
+  "bugs": {
+    "url": "https://github.com/civaapple-alt/qi/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "@civaapple/qi-agent",
+  "version": "0.4.0",
+  "description": "Default-deny Agent composition facade for the Qi event-sourced runtime",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@civaapple/qi-capability": "0.4.0",
+    "@civaapple/qi-context": "0.4.0",
+    "@civaapple/qi-kernel": "0.4.0",
+    "@civaapple/qi-llm": "0.4.0",
+    "@civaapple/qi-loop": "0.4.0",
+    "@civaapple/qi-protocol": "0.4.0",
+    "@civaapple/qi-tools": "0.4.0",
+    "@civaapple/qi-workspace": "0.4.0",
+    "@sinclair/typebox": "0.34.52"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/civaapple-alt/qi.git",
+    "directory": "packages/agent"
+  },
+  "homepage": "https://github.com/civaapple-alt/qi#readme",
+  "bugs": {
+    "url": "https://github.com/civaapple-alt/qi/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -1,0 +1,2370 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { stripVTControlCharacters } from "node:util";
+import { ScriptedModelPort } from "@civaapple/qi-llm";
+import {
+  commandHelp,
+  FollowUpQueue,
+  FollowUpsComponent,
+  InteractiveTui,
+  ListPanel,
+  MultiSelectPanel,
+  loadProjectConfig,
+  parseMountsCommand,
+  parseSkillInstallCommand,
+  parseTaskStopCommand,
+  parseTuiCommand,
+  primarySlashCommands,
+  autocompleteSlashCommands,
+  discoveryAcceleratorTip,
+  eventAffectsTranscript,
+  renderMarkdown,
+  renderComposerPlaceholder,
+  renderToolCard,
+  statusGlyph,
+  TuiPresenter,
+  TuiRuntime,
+} from "@civaapple/qi";
+
+test("TUI command catalog separates inspection, navigation, and control", () => {
+  assert.deepEqual(parseTuiCommand("/actions"), { name: "actions", argument: "" });
+  assert.equal(parseTuiCommand("fix the bug"), undefined);
+  const helpZh = commandHelp(undefined, "zh");
+  assert.ok(helpZh.some((line) => line.includes("键盘快捷键")));
+  assert.ok(helpZh.some((line) => line.includes("/settings")));
+  assert.ok(helpZh.some((line) => line.includes("/mounts")));
+  assert.ok(helpZh.some((line) => line.includes("/skills")));
+  assert.ok(helpZh.some((line) => line.includes("/steer")));
+  assert.ok(helpZh.some((line) => line.includes("/help advanced")));
+  assert.ok(!helpZh.some((line) => line.includes("/context —") || line.includes("/context —")));
+  assert.ok(!helpZh.some((line) => /\/context /.test(line)));
+  const helpEn = commandHelp(undefined, "en");
+  assert.ok(helpEn.some((line) => line.includes("Keyboard shortcuts")));
+  assert.ok(helpEn.some((line) => line.includes("Ctrl+O")));
+  const advanced = commandHelp("advanced", "en");
+  assert.ok(advanced.some((line) => line.includes("/context")));
+  assert.ok(advanced.some((line) => line.includes("/task stop")));
+  assert.ok(advanced.some((line) => line.includes("/agents")));
+  assert.ok(advanced.some((line) => line.includes("/coord")));
+  const primary = primarySlashCommands("en");
+  assert.ok(primary.some((command) => command.name === "help"));
+  assert.ok(primary.some((command) => command.name === "runs"));
+  assert.ok(primary.some((command) => command.name === "sessions"));
+  assert.ok(!primary.some((command) => command.name === "config"));
+  assert.ok(!primary.some((command) => command.name === "run"));
+  const autocomplete = autocompleteSlashCommands("en");
+  assert.ok(autocomplete.some((command) => command.name === "runs"));
+  assert.ok(!autocomplete.some((command) => command.name === "run"));
+  assert.ok(!autocomplete.some((command) => command.name === "step"));
+  assert.ok(!autocomplete.some((command) => command.name === "action"));
+  assert.ok(!autocomplete.some((command) => command.name === "agent"));
+  assert.ok(autocomplete.some((command) => command.name === "steps"));
+  assert.ok(autocomplete.some((command) => command.name === "actions"));
+  assert.ok(autocomplete.some((command) => command.name === "agents"));
+  assert.ok(autocomplete.some((command) => command.name === "config"));
+  assert.ok(!autocomplete.some((command) => command.name === "coord"));
+  assert.deepEqual(parseSkillInstallCommand("install skill-creator"), { source: "skill-creator", scope: "user" });
+  assert.deepEqual(parseSkillInstallCommand('install --workspace "skill drafts/my-skill"'), {
+    source: "skill drafts/my-skill",
+    scope: "workspace",
+  });
+  assert.throws(() => parseSkillInstallCommand("install"), /Usage/);
+  assert.deepEqual(parseMountsCommand("add D:/docs"), { mode: "add", argument: "D:/docs" });
+  assert.equal(parseTaskStopCommand("stop abc"), "abc");
+});
+
+test("TUI reconciles effective mounts into Session audit events across restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-mount-reconcile-"));
+  const workspace = join(root, "workspace");
+  const firstPath = join(root, "reference-a");
+  const secondPath = join(root, "reference-b");
+  const dataRoot = join(root, "data");
+  await mkdir(workspace);
+  await mkdir(firstPath);
+  await mkdir(secondPath);
+  let sessionId;
+  let first;
+  let second;
+  let third;
+  try {
+    first = await TuiRuntime.create({
+      workspaceRoot: workspace,
+      dataRoot,
+      projectConfigPath: join(root, "project-config.toml"),
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "fake", model: "mount-reconcile-v1" },
+      mounts: [{ id: "docs", path: firstPath, mode: "read", source: "project_config" }],
+    });
+    first.syncMountEvents();
+    sessionId = first.sessionId;
+    assert.equal(first.view()?.mounts.docs?.path, firstPath);
+    first.close();
+    first = undefined;
+
+    second = await TuiRuntime.create({
+      workspaceRoot: workspace,
+      dataRoot,
+      projectConfigPath: join(root, "project-config.toml"),
+      sessionId,
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "fake", model: "mount-reconcile-v1" },
+      mounts: [{ id: "docs", path: secondPath, mode: "read", source: "project_config" }],
+    });
+    second.syncMountEvents();
+    assert.equal(second.view()?.mounts.docs?.path, secondPath);
+    assert.deepEqual(
+      second.events().slice(-2).map((event) => event.type),
+      ["workspace.mount.removed", "workspace.mount.added"],
+    );
+    second.close();
+    second = undefined;
+
+    third = await TuiRuntime.create({
+      workspaceRoot: workspace,
+      dataRoot,
+      projectConfigPath: join(root, "project-config.toml"),
+      sessionId,
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "fake", model: "mount-reconcile-v1" },
+      mounts: [],
+    });
+    third.syncMountEvents();
+    assert.equal(third.view()?.mounts.docs, undefined);
+    assert.equal(third.events().at(-1)?.type, "workspace.mount.removed");
+  } finally {
+    first?.close();
+    second?.close();
+    third?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("persistent mount changes retain explicit CLI and command grants in project policy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-mount-policy-"));
+  const workspace = join(root, "workspace");
+  const cliPath = join(root, "cli-reference");
+  const persistentPath = join(root, "persistent-reference");
+  const projectConfigPath = join(root, "project-config.toml");
+  await mkdir(workspace);
+  await mkdir(cliPath);
+  await mkdir(persistentPath);
+  let runtime;
+  try {
+    runtime = await TuiRuntime.create({
+      workspaceRoot: workspace,
+      dataRoot: join(root, "data"),
+      projectConfigPath,
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "fake", model: "mount-policy-v1" },
+      mounts: [{ id: "cli", path: cliPath, mode: "read", source: "cli" }],
+    });
+    await runtime.addMount(persistentPath, "command", "docs");
+    const loaded = await loadProjectConfig(projectConfigPath);
+    assert.deepEqual(loaded.config.mounts, [
+      { id: "cli", path: cliPath, mode: "read" },
+      { id: "docs", path: persistentPath, mode: "read" },
+    ]);
+  } finally {
+    runtime?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("terminal Markdown renderer covers headings, lists, tables, code, and checklists", () => {
+  const rendered = renderMarkdown([
+    "# Title",
+    "",
+    "Paragraph with `code` and [link](https://example.com).",
+    "",
+    "- [x] Done",
+    "- [ ] Todo",
+    "",
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "```js",
+    "const x = 1;",
+    "",
+    "const y = 2;",
+    "```",
+  ].join("\n")).join("\n");
+  assert.match(rendered, /Title/);
+  assert.match(rendered, /═/);
+  assert.match(rendered, /☑ Done/);
+  assert.match(rendered, /☐ Todo/);
+  assert.match(rendered, /│ A/);
+  assert.match(rendered, /┌─ js/);
+  assert.match(rendered, /example\.com/);
+  assert.match(rendered, /const x = 1;/);
+  assert.match(rendered, /│\s*$/m);
+  assert.match(rendered, /const y = 2;/);
+});
+
+test("final summary Markdown renders h3 and glued heading+table without raw hashes", () => {
+  const rendered = renderMarkdown([
+    "已完成文案与可释放空间口径调整。",
+    "",
+    "### 1. 文案",
+    "| 原 | 现 |",
+    "|---|---|",
+    "| Lab 平台占用 | 平台占用 / 项目占用（按 scope） |",
+    "| 扫描产物 | 扫描日志与 SARIF |",
+    "",
+    "### 2. 原因与修复",
+    "• 原因：统计口径不一致",
+    "• 修复：reclaimableBytes 与预览共用 selectCleanupItems",
+    "",
+    "### 涉及文件",
+    "• backend/internal/datamanage/service/storage.go",
+  ].join("\n"), { width: 100 }).join("\n");
+  assert.match(rendered, /^1\. 文案$/m);
+  assert.match(rendered, /^─+$/m);
+  assert.doesNotMatch(rendered, /^#{1,6}\s/m);
+  assert.match(rendered, /│ 原/);
+  assert.match(rendered, /│ Lab 平台占用/);
+  assert.match(rendered, /│ 平台占用 \/ 项目占用/);
+  assert.match(rendered, /• 原因：统计口径不一致/);
+  assert.match(rendered, /^2\. 原因与修复$/m);
+  assert.match(rendered, /^涉及文件$/m);
+  assert.doesNotMatch(rendered, /^\| 原 \| 现 \|$/m);
+});
+
+test("TUI presenter reconstructs context, shell, diff, and durable Plan progress from events", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-presentation-"));
+  const model = new ScriptedModelPort([
+    [
+      {
+        type: "action.requested",
+        callId: "call_plan",
+        name: "plan_document",
+        input: {
+          title: "Feature plan",
+          overview: "Ship a small feature with verification.",
+          items: [
+            {
+              planItemId: "pit_inspect001",
+              title: "Inspect",
+              description: "Inspect the workspace before editing.",
+            },
+            {
+              planItemId: "pit_implement01",
+              title: "Implement",
+              description: "Write feature.js and verify with a short script.",
+            },
+          ],
+        },
+      },
+      { type: "completed", finishReason: "actions" },
+    ],
+    [
+      { type: "text.delta", delta: "Plan revision ready for review." },
+      { type: "completed", finishReason: "stop" },
+    ],
+    [
+      {
+        type: "action.requested",
+        callId: "call_code",
+        name: "write",
+        input: {
+          path: "feature.js",
+          content: "export const ready = true;\n",
+          expectedSha256: null,
+        },
+      },
+      { type: "completed", finishReason: "actions" },
+    ],
+    [
+      {
+        type: "action.requested",
+        callId: "call_shell",
+        name: "shell",
+        input: {
+          command: process.execPath,
+          args: ["-e", "console.log('verified')"],
+          timeoutMs: 10_000,
+        },
+      },
+      { type: "completed", finishReason: "actions" },
+    ],
+    [
+      { type: "text.delta", delta: "Implemented and verified the feature." },
+      { type: "usage", inputTokens: 1_200, outputTokens: 30 },
+      { type: "completed", finishReason: "stop" },
+    ],
+  ]);
+  const runtime = await TuiRuntime.create({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    modelPort: model,
+    model: { provider: "fake", model: "presentation-v1" },
+    contextWindowTokens: 80_000,
+    outputReserveTokens: 16_000,
+    allowWrite: true,
+    allowExecute: true,
+  });
+  try {
+    runtime.changeMode("plan", "test setup");
+    const planned = await runtime.run("Draft a plan for the feature.");
+    assert.equal(planned.status, "completed");
+    assert.equal(runtime.view()?.pendingReview?.status, "pending");
+
+    const accepted = runtime.acceptPlan();
+    const result = await runtime.runTriggered(accepted.runId, accepted.input);
+    assert.equal(result.status, "completed");
+    assert.equal(await readFile(join(root, "feature.js"), "utf8"), "export const ready = true;\n");
+    assert.equal(runtime.view()?.pendingQuestion?.kind, "next_run");
+
+    const presenter = new TuiPresenter({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi"),
+      provider: "fake",
+      model: "presentation-v1",
+      capabilities: ["write", "host execute"],
+      contextWindowTokens: 80_000,
+      contextBudgetTokens: 64_000,
+      outputReserveTokens: 16_000,
+      historyBudgetTokens: 16_000,
+      maxSteps: 20,
+      maxActionsPerStep: 6,
+    });
+    presenter.update(runtime.events(), runtime.view());
+
+    const overview = presenter.render().join("\n");
+    assert.match(overview, /^Qi  v/m);
+    assert.match(overview, /Draft a plan for the feature|Execute Plan item/);
+    assert.match(overview, /Implemented and verified the feature/);
+    assert.match(overview, /\$ /);
+    assert.match(overview, /Ctrl\+O to expand|verified|exit /);
+    assert.match(overview, /Edited feature\.js \+1/);
+    assert.match(overview, /▎ \+export const ready = true/);
+    assert.match(overview, /Next Run pending/);
+    assert.match(overview, /choice panel|\/next/);
+    assert.doesNotMatch(overview, /1 \/next continue/);
+    assert.match(overview, /Todo\s+/);
+    assert.match(overview, /1\/2 complete|Working on 2/);
+    assert.match(overview, /[✔◐○].*Inspect|[✔◐○].*Implement/);
+    assert.doesNotMatch(overview, /── Handoff ──/);
+    assert.doesNotMatch(overview, /Session timeline/);
+    assert.doesNotMatch(overview, /╭ Run /);
+    assert.match(presenter.renderPlan().join("\n"), /Feature plan/);
+    // write/edit cards must show real diff lines, not only a collapsed summary
+    assert.match(overview, /\+export const ready = true/);
+
+    presenter.pushInspection("providers");
+    assert.match(presenter.render().join("\n"), /Providers/);
+    assert.match(presenter.render().join("\n"), /fake\/presentation-v1|profile\s+fake/);
+    presenter.pushInspection("coord");
+    assert.match(presenter.render().join("\n"), /not available in this runtime build/);
+    assert.match(presenter.render().join("\n"), /No simulated/);
+
+    const status = presenter.formatStatusline(false, 120).join("\n");
+    assert.match(status, /fake\/presentation-v1/);
+    assert.match(status, /Agent/);
+    assert.match(status, /files/);
+    assert.match(presenter.renderWorking(true).join("\n"), /Running/);
+
+    presenter.pushInspection("diff");
+    const withDiff = presenter.render().join("\n");
+    assert.match(withDiff, /Execute Plan item|Draft a plan/);
+    assert.match(withDiff, /\+export const ready = true/);
+    assert.match(presenter.selectAction("2"), /Inspecting Action/);
+    presenter.pushInspection("diff");
+    assert.match(presenter.render().join("\n"), /feature\.js/);
+    assert.ok(
+      presenter.inspections().length >= 4,
+      `expected at least 4 inspections, got ${presenter.inspections().length}`,
+    );
+    assert.ok(presenter.inspections().every((entry) => Number.isInteger(entry.sessionSequence)));
+
+    presenter.pushInspection("context");
+    const context = presenter.render().join("\n");
+    assert.match(context, /history\s+newest completed turns, capped at 16k/);
+    assert.match(context, /boundary\s+safe between Steps/);
+
+    presenter.pushInspection("actions");
+    assert.match(presenter.render().join("\n"), /shell\s+completed/);
+    assert.match(presenter.selectAction("1"), /Inspecting Action/);
+    assert.match(presenter.selectStep("prev"), /Inspecting Step/);
+
+    presenter.pushInspection("overview");
+    assert.match(presenter.render().join("\n"), /Status/);
+    assert.match(presenter.render().join("\n"), /run \d+\/\d+ responded/);
+  } finally {
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Ctrl+C clears a non-empty composer before exiting", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-ctrlc-"));
+  const runtime = await TuiRuntime.create({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    userSkillsRoot: join(root, "user-skills"),
+    skillCompatibilityRoots: [],
+    modelPort: new ScriptedModelPort([]),
+    model: { provider: "fake", model: "ctrlc-v1" },
+  });
+  const terminal = new FakeTerminal();
+  const presenter = new TuiPresenter({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    provider: "fake",
+    model: "ctrlc-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const tui = new InteractiveTui(runtime, presenter, { terminal });
+  try {
+    const running = tui.run();
+    await delay(25);
+    terminal.sendText("draft that should clear");
+    await delay(25);
+    assert.match(terminal.output, /ctrl\+c to clear/);
+    terminal.sendText("\u0003");
+    await delay(25);
+    assert.equal(terminal.stopped, false);
+    assert.match(terminal.output, /ctrl\+c to quit/);
+    terminal.sendText("\u0003");
+    await Promise.race([
+      running,
+      delay(2_000).then(() => { throw new Error("interactive TUI did not exit after empty Ctrl+C"); }),
+    ]);
+    assert.equal(terminal.stopped, true);
+  } finally {
+    await tui.close();
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("interactive TUI renders command help and exits through the editor", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-interactive-"));
+  const runtime = await TuiRuntime.create({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    userSkillsRoot: join(root, "user-skills"),
+    skillCompatibilityRoots: [],
+    modelPort: new ScriptedModelPort([]),
+    model: { provider: "fake", model: "interactive-v1" },
+  });
+  const terminal = new FakeTerminal();
+  const presenter = new TuiPresenter({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    provider: "fake",
+    model: "interactive-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const tui = new InteractiveTui(runtime, presenter, { terminal });
+  try {
+    const running = tui.run();
+    await delay(25);
+    terminal.sendText("/help\r");
+    await delay(25);
+    assert.match(terminal.output, /Qi|QI|栖/);
+    assert.match(terminal.output, /Keyboard shortcuts|Slash commands|键盘快捷键|常用 Slash 命令/);
+    assert.match(terminal.output, /\/settings|\/mounts|\/mode/);
+    // Esc closes the temporary panel (does not write Session).
+    terminal.sendText("\u001b");
+    await delay(25);
+    terminal.sendText("/settings\r");
+    await waitUntil(() => /Providers|提供商|Language|语言/.test(terminal.output));
+    assert.match(terminal.output, /Theme|主题/);
+    terminal.sendText("\u001b");
+    await delay(25);
+    terminal.sendText("/skills\r");
+    await waitUntil(() => /Install skill|安装技能|Discovered skills|已发现技能/.test(terminal.output));
+    terminal.sendText("\r");
+    await waitUntil(() => /No installed Skills were discovered/.test(terminal.output));
+    assert.match(terminal.output, /\/skills/);
+    assert.equal(presenter.inspections().length, 0);
+    assert.equal(runtime.events().length, 0);
+    // Esc pops inspect → skills hub; second Esc returns to the composer.
+    terminal.sendText("\u001b");
+    await delay(25);
+    terminal.sendText("\u001b");
+    await delay(25);
+    terminal.sendText("/quit\r");
+    await Promise.race([
+      running,
+      delay(2_000).then(() => { throw new Error("interactive TUI did not exit"); }),
+    ]);
+    assert.equal(terminal.stopped, true);
+  } finally {
+    await tui.close();
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("slash inspect commands open temporary panels without writing Session", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-inspect-"));
+  const model = new ScriptedModelPort([
+    [
+      { type: "text.delta", delta: "# Done\n\n- item one\n- item two" },
+      { type: "completed", finishReason: "stop" },
+    ],
+  ]);
+  const runtime = await TuiRuntime.create({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    modelPort: model,
+    model: { provider: "fake", model: "inspect-v1" },
+  });
+  const terminal = new FakeTerminal();
+  const presenter = new TuiPresenter({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    provider: "fake",
+    model: "inspect-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const tui = new InteractiveTui(runtime, presenter, { terminal });
+  try {
+    const running = tui.run();
+    await delay(25);
+    terminal.sendText("Ship a short Markdown reply\r");
+    await waitUntil(() => /item one/.test(terminal.output));
+    assert.match(terminal.output, /Ship a short Markdown reply/);
+    assert.match(terminal.output, /• item one/);
+    assert.doesNotMatch(terminal.output, /── Handoff ──/);
+    assert.doesNotMatch(terminal.output, /Session timeline/);
+    const eventsBefore = runtime.events().length;
+    terminal.sendText("/config\r");
+    await waitUntil(() => /Effective configuration/.test(terminal.output));
+    assert.match(terminal.output, /Ship a short Markdown reply/);
+    assert.equal(presenter.inspections().length, 0);
+    assert.equal(runtime.events().length, eventsBefore);
+    terminal.sendText("\u001b");
+    await delay(25);
+    terminal.sendText("/quit\r");
+    await Promise.race([
+      running,
+      delay(2_000).then(() => { throw new Error("interactive TUI did not exit"); }),
+    ]);
+  } finally {
+    await tui.close();
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("discovery tip recommends rg/fd when accelerators are missing", () => {
+  assert.equal(discoveryAcceleratorTip("en", []), undefined);
+  assert.match(
+    discoveryAcceleratorTip("en", ["rg", "fd"]) ?? "",
+    /Tip: install rg \+ fd on PATH/,
+  );
+  assert.match(
+    discoveryAcceleratorTip("zh", ["rg"]) ?? "",
+    /提示: 建议安装 rg 到 PATH/,
+  );
+  if (process.platform === "win32") {
+    assert.match(
+      discoveryAcceleratorTip("en", ["rg", "fd"]) ?? "",
+      /winget install BurntSushi\.ripgrep\.MSVC sharkdp\.fd/,
+    );
+  }
+});
+
+test("empty composer placeholder shows → Add prompt with static caret on A", () => {
+  const idle = renderComposerPlaceholder(80, {
+    left: "→ Add a message",
+    right: "ctrl+c to quit",
+  });
+  assert.equal(idle.length, 3);
+  assert.match(idle[0] ?? "", /─{10,}/);
+  assert.match(idle[1] ?? "", /→ /);
+  assert.match(idle[1] ?? "", /dd a message/);
+  assert.match(idle[1] ?? "", /ctrl\+c to quit/);
+  // Static reverse-video caret on the A — not a hardware CURSOR_MARKER.
+  assert.match(idle[1] ?? "", /\u001b\[7mA\u001b\[0m/);
+  assert.doesNotMatch(idle.join("\n"), /\u001b_pi:c\u0007/);
+
+  const followUp = renderComposerPlaceholder(80, {
+    left: "→ Add a follow-up",
+    right: "ctrl+c to stop",
+  });
+  assert.match(followUp[1] ?? "", /\u001b\[7mA\u001b\[0m/);
+  assert.match(followUp[1] ?? "", /dd a follow-up/);
+  assert.match(followUp[1] ?? "", /ctrl\+c to stop/);
+});
+
+test("chat-only Runs match the Cursor-style compact transcript", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "D:\\lab-ws\\projects\\todo-demo",
+    dataRoot: "D:\\lab-ws\\projects\\todo-demo\\.qi",
+    provider: "xai",
+    model: "grok-4.5",
+    capabilities: ["write", "host execute"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+    branch: "main",
+    version: "0.4.0",
+  });
+  presenter.update([], {
+    sessionId: "ses_chat",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "hi",
+        stepOrder: ["stp_1"],
+        steps: {
+          stp_1: {
+            stepId: "stp_1",
+            status: "completed",
+            context: { estimatedTokens: 3400, budgetTokens: 240_000, includedBlockIds: [], omittedBlockIds: [] },
+            model: { text: "Hi — what would you like to work on?", finishReason: "stop" },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "idle" },
+  });
+  const rendered = presenter.render(80).join("\n");
+  assert.match(rendered, /Qi  v0\.4\.0/);
+  assert.match(rendered, /⟦user⟧hi/);
+  assert.match(rendered, /^Hi — what would you like to work on\?$/m);
+  assert.doesNotMatch(rendered, /Step 1\/1/);
+  assert.doesNotMatch(rendered, /── Handoff ──/);
+  assert.doesNotMatch(rendered, /Session timeline|╭ Run /);
+  const status = presenter.formatStatusline(false, 80).join("\n");
+  assert.match(status, /xai\/grok-4\.5/);
+  assert.match(status, /Agent/);
+  assert.match(status, /todo-demo · main/);
+  assert.doesNotMatch(status, /write\+host execute/);
+  assert.match(presenter.renderWorking(true, 0).join("\n"), /Running\s+Waiting/);
+});
+
+test("chat render reuses settled-run blocks and indexes Action events", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "perf",
+    capabilities: ["write"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const actor = { kind: "runtime", id: "t" };
+  const runs = {};
+  const runOrder = [];
+  const events = [];
+  let sequence = 1;
+  for (let i = 1; i <= 12; i += 1) {
+    const runId = `run_${i}`;
+    const stepId = `stp_${i}`;
+    const actionId = `act_${i}`;
+    runOrder.push(runId);
+    runs[runId] = {
+      runId,
+      trigger: "user",
+      mode: "agent",
+      status: "completed",
+      input: `prompt ${i}`,
+      stepOrder: [stepId],
+      steps: {
+        [stepId]: {
+          stepId,
+          status: "completed",
+          context: { estimatedTokens: 100, budgetTokens: 64_000, includedBlockIds: [], omittedBlockIds: [] },
+          model: { text: `done ${i}`, finishReason: "stop" },
+        },
+      },
+      actions: {
+        [actionId]: {
+          actionId,
+          stepId,
+          toolName: "edit",
+          effect: "write",
+          status: "completed",
+          resources: [`file://${i}.ts`],
+        },
+      },
+      evaluations: {},
+      steering: [],
+      delegations: {},
+      terminal: { type: "completed", reason: "response" },
+    };
+    events.push({
+      type: "action.proposed",
+      sequence: sequence++,
+      occurredAt: new Date(0).toISOString(),
+      actor,
+      data: {
+        runId,
+        stepId,
+        actionId,
+        toolName: "edit",
+        effect: "write",
+        input: { path: `src/f${i}.ts`, old_string: "a", new_string: "b" },
+        resources: [`file://${i}.ts`],
+      },
+    });
+    events.push({
+      type: "action.started",
+      sequence: sequence++,
+      occurredAt: new Date(0).toISOString(),
+      actor,
+      data: { runId, stepId, actionId, leaseId: `lease_${i}` },
+    });
+    events.push({
+      type: "action.completed",
+      sequence: sequence++,
+      occurredAt: new Date(0).toISOString(),
+      actor,
+      data: {
+        runId,
+        stepId,
+        actionId,
+        modelOutput: [{ type: "text", text: JSON.stringify({ path: `src/f${i}.ts`, diff: `+line ${i}` }) }],
+      },
+    });
+  }
+  // Active trailing Run forces live path while settled Runs stay cacheable.
+  runOrder.push("run_live");
+  runs.run_live = {
+    runId: "run_live",
+    trigger: "user",
+    mode: "agent",
+    status: "active",
+    input: "keep going",
+    stepOrder: ["stp_live"],
+    steps: {
+      stp_live: {
+        stepId: "stp_live",
+        status: "running",
+        context: { estimatedTokens: 200, budgetTokens: 64_000, includedBlockIds: [], omittedBlockIds: [] },
+      },
+    },
+    actions: {},
+    evaluations: {},
+    steering: [],
+    delegations: {},
+  };
+  presenter.update(events, {
+    sessionId: "ses_perf",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder,
+    currentRunId: "run_live",
+    runs,
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "busy", reason: "running" },
+  });
+  const first = presenter.render(100).join("\n");
+  const second = presenter.render(100).join("\n");
+  assert.equal(second, first);
+  assert.match(first, /⟦user⟧prompt 1/);
+  assert.match(first, /Edited src\/f12\.ts/);
+  assert.match(first, /⟦user⟧keep going/);
+  presenter.selectRun("run_12");
+  const actions = presenter.historyActionItems();
+  assert.equal(actions.length, 1);
+  assert.match(actions[0].description, /src\/f12\.ts/);
+  // Indexed propose pass feeds files-changed for the executing Run (live has none).
+  assert.doesNotMatch(presenter.formatStatusline(true, 80).join("\n"), /\d+ files/);
+});
+
+test("eventAffectsTranscript classifies chrome-only Session facts", () => {
+  assert.equal(eventAffectsTranscript({ type: "authority.requested" }), false);
+  assert.equal(eventAffectsTranscript({ type: "authority.granted" }), false);
+  assert.equal(eventAffectsTranscript({ type: "authority.denied" }), true);
+  assert.equal(eventAffectsTranscript({ type: "safety.redaction.applied" }), false);
+  assert.equal(eventAffectsTranscript({ type: "context.compiled" }), false);
+  assert.equal(eventAffectsTranscript({ type: "workspace.mount.added" }), false);
+  assert.equal(eventAffectsTranscript({ type: "action.completed" }), true);
+  assert.equal(eventAffectsTranscript({ type: "step.completed" }), true);
+  assert.equal(eventAffectsTranscript({ type: "run.started" }), true);
+});
+
+test("authority denial repaints the visible Action settlement", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "denial",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const runId = "run_denied";
+  const stepId = "stp_denied";
+  const actionId = "act_denied";
+  presenter.update(
+    [{
+      type: "action.proposed",
+      sequence: 1,
+      occurredAt: new Date(0).toISOString(),
+      actor: { kind: "runtime", id: "t" },
+      data: {
+        runId,
+        stepId,
+        actionId,
+        toolName: "edit",
+        effect: "write",
+        input: { path: "src/denied.ts" },
+        resources: ["file://src/denied.ts"],
+      },
+    }],
+    {
+      sessionId: "ses_denied",
+      createdAt: new Date(0).toISOString(),
+      version: 1,
+      mode: "agent",
+      runOrder: [runId],
+      currentRunId: runId,
+      runs: {
+        [runId]: {
+          runId,
+          trigger: "user",
+          mode: "agent",
+          status: "active",
+          input: "try edit",
+          stepOrder: [stepId],
+          steps: {
+            [stepId]: {
+              stepId,
+              status: "running",
+              context: { estimatedTokens: 100, budgetTokens: 64_000, includedBlockIds: [], omittedBlockIds: [] },
+            },
+          },
+          actions: {
+            [actionId]: {
+              actionId,
+              stepId,
+              toolName: "edit",
+              effect: "write",
+              status: "denied",
+              resources: ["file://src/denied.ts"],
+            },
+          },
+          evaluations: {},
+          steering: [],
+          delegations: {},
+        },
+      },
+      goals: {},
+      goalOrder: [],
+      evidence: {},
+      controlReceipts: {},
+      memories: {},
+      memoryOrder: [],
+      tasks: {},
+      taskOrder: [],
+      plans: {},
+      planOrder: [],
+      presence: { state: "busy", reason: "running" },
+    },
+  );
+  assert.match(
+    stripVTControlCharacters(presenter.render(100).join("\n")),
+    /⊘ edit\s+src\/denied\.ts.*denied/,
+  );
+});
+
+test("active Run folds older Steps and collapses Action cards without edit gutters", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "fold",
+    capabilities: ["write"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 40,
+    maxActionsPerStep: 6,
+  });
+  const actor = { kind: "runtime", id: "t" };
+  const runId = "run_long";
+  const stepOrder = [];
+  const steps = {};
+  const actions = {};
+  const events = [];
+  let sequence = 1;
+  for (let i = 1; i <= 12; i += 1) {
+    const stepId = `stp_${i}`;
+    const actionId = `act_${i}`;
+    stepOrder.push(stepId);
+    steps[stepId] = {
+      stepId,
+      status: i === 12 ? "running" : "completed",
+      context: { estimatedTokens: 100, budgetTokens: 64_000, includedBlockIds: [], omittedBlockIds: [] },
+      ...(i === 12
+        ? {}
+        : { model: { text: `narration ${i}`, finishReason: "actions" } }),
+    };
+    actions[actionId] = {
+      actionId,
+      stepId,
+      toolName: "edit",
+      effect: "write",
+      status: i === 12 ? "running" : "completed",
+      resources: [`file://f${i}.ts`],
+    };
+    events.push({
+      type: "action.proposed",
+      sequence: sequence++,
+      occurredAt: new Date(0).toISOString(),
+      actor,
+      data: {
+        runId,
+        stepId,
+        actionId,
+        toolName: "edit",
+        effect: "write",
+        input: { path: `src/f${i}.ts`, old_string: "a", new_string: "b" },
+        resources: [`file://f${i}.ts`],
+      },
+    });
+    if (i < 12) {
+      events.push({
+        type: "action.started",
+        sequence: sequence++,
+        occurredAt: new Date(0).toISOString(),
+        actor,
+        data: { runId, stepId, actionId, leaseId: `lease_${i}` },
+      });
+      events.push({
+        type: "action.completed",
+        sequence: sequence++,
+        occurredAt: new Date(0).toISOString(),
+        actor,
+        data: {
+          runId,
+          stepId,
+          actionId,
+          modelOutput: [{
+            type: "text",
+            text: JSON.stringify({
+              path: `src/f${i}.ts`,
+              diff: [
+                "--- a/src/f.ts",
+                "+++ b/src/f.ts",
+                "@@ -1 +1 @@",
+                `-old ${i}`,
+                `+new ${i}`,
+              ].join("\n"),
+            }),
+          }],
+        },
+      });
+    }
+  }
+  presenter.update(events, {
+    sessionId: "ses_fold",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: [runId],
+    currentRunId: runId,
+    runs: {
+      [runId]: {
+        runId,
+        trigger: "user",
+        mode: "agent",
+        status: "active",
+        input: "explore the codebase",
+        stepOrder,
+        steps,
+        actions,
+        evaluations: {},
+        steering: [],
+        delegations: {},
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "busy", reason: "running" },
+  });
+  const first = presenter.render(100);
+  const firstText = first.join("\n");
+  assert.match(firstText, /… 4 earlier steps · 4 actions · Ctrl\+O/);
+  assert.doesNotMatch(firstText, /· narration 1$/m);
+  assert.doesNotMatch(firstText, /src\/f1\.ts/);
+  assert.doesNotMatch(firstText, /▎/);
+  assert.doesNotMatch(firstText, /Edited src\/f5\.ts/);
+  // Visible prior Steps (5–11) are one-line summaries, not Cursor edit cards.
+  assert.match(firstText, /edit\s+src\/f11\.ts/);
+  assert.match(firstText, /· narration 11/);
+  const second = presenter.render(100);
+  assert.equal(second.join("\n"), firstText);
+  assert.equal(presenter.toggleExpand(), "Expanded earlier steps");
+  const expanded = presenter.render(100).join("\n");
+  assert.match(expanded, /· narration 1$/m);
+  assert.match(expanded, /edit\s+src\/f1\.ts/);
+  assert.doesNotMatch(expanded, /▎/);
+  assert.equal(presenter.toggleExpand(), "Collapsed earlier steps");
+  const collapsedAgain = presenter.render(100).join("\n");
+  assert.match(collapsedAgain, /… 4 earlier steps · 4 actions · Ctrl\+O/);
+  assert.doesNotMatch(collapsedAgain, /· narration 1$/m);
+
+  presenter.applyActivity({
+    type: "model.text",
+    sessionId: "ses_fold",
+    runId,
+    stepId: "stp_12",
+    text: "earlier model text\nlatest model tail",
+    provisional: true,
+  });
+  const modelWorking = presenter.renderWorking(true, 0, 40);
+  assert.equal(modelWorking.length, 2);
+  assert.match(modelWorking[1], /latest model tail/);
+  assert.doesNotMatch(modelWorking[1], /earlier model text/);
+
+  presenter.applyActivity({
+    type: "action.output",
+    sessionId: "ses_fold",
+    runId,
+    stepId: "stp_12",
+    actionId: "act_12",
+    stream: "stderr",
+    text: "old tool output\nlatest tool tail",
+    truncated: false,
+    provisional: true,
+  });
+  const actionWorking = presenter.renderWorking(true, 0, 40);
+  assert.equal(actionWorking.length, 2);
+  assert.match(actionWorking[1], /stderr · latest tool tail/);
+  assert.doesNotMatch(actionWorking[1], /old tool output/);
+  assert.ok(actionWorking[1].length <= 40);
+});
+
+test("line-mode panel snapshots append after the transcript without interleaving", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "inspect-order",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const actor = { kind: "runtime", id: "t" };
+  const completedRun = (runId, input, text) => ({
+    runId,
+    trigger: "user",
+    mode: "agent",
+    status: "completed",
+    input,
+    stepOrder: [`stp_${runId}`],
+    steps: {
+      [`stp_${runId}`]: {
+        stepId: `stp_${runId}`,
+        status: "completed",
+        model: { text, finishReason: "stop", requestId: "r", provider: "fake", model: "m" },
+      },
+    },
+    actions: {},
+    evaluations: {},
+    steering: [],
+    delegations: {},
+    terminal: { type: "completed", reason: "response" },
+  });
+
+  presenter.update(
+    [
+      { schemaVersion: 1, eventId: "evt_1", sessionId: "ses_order", sequence: 1, occurredAt: "2026-07-23T00:00:00.000Z", actor, type: "session.created", data: { mode: "agent" } },
+      { schemaVersion: 1, eventId: "evt_2", sessionId: "ses_order", sequence: 2, occurredAt: "2026-07-23T00:00:01.000Z", actor: { kind: "user", id: "u" }, type: "run.triggered", data: { runId: "run_a", trigger: "user", mode: "agent", input: "first question" } },
+      { schemaVersion: 1, eventId: "evt_3", sessionId: "ses_order", sequence: 3, occurredAt: "2026-07-23T00:00:02.000Z", actor, type: "run.started", data: { runId: "run_a" } },
+      { schemaVersion: 1, eventId: "evt_4", sessionId: "ses_order", sequence: 4, occurredAt: "2026-07-23T00:00:03.000Z", actor, type: "run.completed", data: { runId: "run_a", completionKind: "response", evaluationIds: [] } },
+      { schemaVersion: 1, eventId: "evt_5", sessionId: "ses_order", sequence: 5, occurredAt: "2026-07-23T00:00:04.000Z", actor: { kind: "user", id: "u" }, type: "run.triggered", data: { runId: "run_b", trigger: "user", mode: "agent", input: "second question" } },
+      { schemaVersion: 1, eventId: "evt_6", sessionId: "ses_order", sequence: 6, occurredAt: "2026-07-23T00:00:05.000Z", actor, type: "run.started", data: { runId: "run_b" } },
+      { schemaVersion: 1, eventId: "evt_7", sessionId: "ses_order", sequence: 7, occurredAt: "2026-07-23T00:00:06.000Z", actor, type: "run.completed", data: { runId: "run_b", completionKind: "response", evaluationIds: [] } },
+    ],
+    {
+      sessionId: "ses_order",
+      createdAt: "2026-07-23T00:00:00.000Z",
+      version: 7,
+      mode: "agent",
+      runOrder: ["run_a", "run_b"],
+      currentRunId: "run_b",
+      runs: {
+        run_a: completedRun("run_a", "first question", "first answer"),
+        run_b: completedRun("run_b", "second question", "second answer"),
+      },
+      goals: {},
+      goalOrder: [],
+      evidence: {},
+      controlReceipts: {},
+      memories: {},
+      memoryOrder: [],
+      tasks: {},
+      taskOrder: [],
+      plans: {},
+      planOrder: [],
+      presence: { state: "sleeping", reason: "idle" },
+    },
+  );
+  presenter.pushInspection("config");
+  const rendered = presenter.render(100).join("\n");
+  const first = rendered.indexOf("⟦user⟧first question");
+  const second = rendered.indexOf("⟦user⟧second question");
+  const config = rendered.indexOf("/config");
+  assert.ok(first >= 0 && second >= 0 && config >= 0);
+  assert.ok(first < second, "Runs stay chronological");
+  assert.ok(second < config, "line-mode panel snapshot trails the transcript");
+  assert.match(rendered, /Effective configuration/);
+  assert.doesNotMatch(rendered, /[╭╰]/);
+});
+
+test("follow-ups panel renders queued items and edit hints", () => {
+  const queue = new FollowUpQueue();
+  queue.enqueue("first follow-up");
+  queue.enqueue("second follow-up");
+  const panel = new FollowUpsComponent(queue, () => "en");
+  const browse = panel.render(80).join("\n");
+  assert.match(browse, /follow-ups/);
+  assert.match(browse, /first follow-up/);
+  assert.match(browse, /second follow-up/);
+  assert.match(browse, /enter send now/);
+  queue.selectLast();
+  queue.beginEdit();
+  const editing = panel.render(80).join("\n");
+  assert.match(editing, /editing · enter done/);
+  assert.match(editing, /›/);
+});
+
+test("statusline keeps mode on narrow terminals", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/very/long/path/to/workspace/project",
+    dataRoot: "/very/long/path/to/workspace/project/.qi",
+    provider: "fake",
+    model: "very-long-model-name-v1",
+    capabilities: ["write", "host execute", "network"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  presenter.update([], {
+    sessionId: "ses_narrow",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "plan",
+    runOrder: [],
+    currentRunId: undefined,
+    runs: {},
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "sleeping", reason: "idle" },
+  });
+  const narrow = presenter.formatStatusline(false, 36).join("\n");
+  assert.match(narrow, /Plan/);
+});
+
+test("renderPanel exposes config for temporary panels", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "panel-v1",
+    capabilities: ["write"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const lines = presenter.renderPanel("config").join("\n");
+  assert.match(lines, /Effective configuration/);
+  assert.match(lines, /fake\/panel-v1/);
+  assert.match(presenter.renderWelcome(80).join("\n"), /QI|栖/);
+});
+
+test("info notices survive clearRunNotice; run notices do not", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "notice-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  presenter.setNotice("Switched to xai/grok-4.5");
+  presenter.clearRunNotice();
+  assert.equal(presenter.notice(), "Switched to xai/grok-4.5");
+  presenter.setNotice("Run parked: indeterminate effect", "run");
+  presenter.clearRunNotice();
+  assert.equal(presenter.notice(), undefined);
+});
+
+test("long pasted user input collapses until Ctrl+O expands it", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "paste-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const pasted = Array.from({ length: 8 }, (_, index) => `line ${index + 1} of a long paste`).join("\n");
+  presenter.update([], {
+    sessionId: "ses_paste",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: pasted,
+        stepOrder: [],
+        steps: {},
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "idle" },
+  });
+  const collapsed = presenter.render().join("\n");
+  assert.match(collapsed, /\[Pasted text · 8 lines · \d+ chars\]/);
+  assert.doesNotMatch(collapsed, /line 4 of a long paste/);
+  assert.match(presenter.toggleExpand(), /Expanded pasted input/);
+  const expanded = presenter.render().join("\n");
+  assert.match(expanded, /line 4 of a long paste/);
+});
+
+test("background ProcessTasks remain visible after their Run and can be stopped explicitly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-task-"));
+  const taskSecret = "fixture-process-task-secret-9274";
+  const activities = [];
+  const model = new ScriptedModelPort([
+    [
+      {
+        type: "action.requested",
+        callId: "call_server",
+        name: "task",
+        input: {
+          command: process.execPath,
+          args: ["-e", `console.log('api_key=${taskSecret}'); setInterval(() => console.log('tick'), 100)`],
+          lifetimeMs: 10_000,
+        },
+      },
+      { type: "completed", finishReason: "actions" },
+    ],
+    [{ type: "text.delta", delta: "Server started." }, { type: "completed", finishReason: "stop" }],
+  ]);
+  const runtime = await TuiRuntime.create({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    modelPort: model,
+    model: { provider: "fake", model: "task-v1" },
+    allowBackground: true,
+    onActivity: (activity) => activities.push(activity),
+  });
+  try {
+    const result = await runtime.run("Start the development server in the background.");
+    assert.equal(result.status, "completed");
+    const [task] = runtime.tasks();
+    assert.equal(task?.status, "running");
+    assert.equal(task?.command, process.execPath);
+    await waitUntil(() => activities.some((activity) => activity.type === "task.output"));
+    assert.doesNotMatch(JSON.stringify(activities), new RegExp(taskSecret));
+    const taskLog = join(root, ".qi", "tasks", `${task.taskId}.log`);
+    await waitUntil(async () => {
+      try { return (await readFile(taskLog, "utf8")).includes("REDACTED"); }
+      catch { return false; }
+    });
+    assert.doesNotMatch(await readFile(taskLog, "utf8"), new RegExp(taskSecret));
+
+    const presenter = new TuiPresenter({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi"),
+      provider: "fake",
+      model: "task-v1",
+      capabilities: ["background tasks"],
+      contextWindowTokens: 128_000,
+      contextBudgetTokens: 112_000,
+      outputReserveTokens: 16_000,
+      historyBudgetTokens: 16_000,
+      maxSteps: 20,
+      maxActionsPerStep: 6,
+    });
+    presenter.update(runtime.events(), runtime.view());
+    presenter.pushInspection("tasks");
+    const tasksView = presenter.render().join("\n");
+    assert.match(tasksView, /ProcessTasks 1/);
+    assert.match(tasksView, /\/task stop tsk_/);
+    assert.match(presenter.formatStatusline(false, 120).join("\n"), /tasks 1/);
+
+    await runtime.stopTask(task.taskId);
+    await waitUntil(() => runtime.tasks()[0]?.status === "exited");
+    assert.equal(runtime.tasks()[0]?.terminalReason, "stopped");
+  } finally {
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Action settlement glyphs stay distinct and plan_document has its own card", () => {
+  assert.equal(statusGlyph("completed"), "✓");
+  assert.equal(statusGlyph("failed"), "!");
+  assert.equal(statusGlyph("denied"), "⊘");
+  assert.equal(statusGlyph("indeterminate"), "?");
+  assert.equal(statusGlyph("cancelled"), "×");
+  assert.equal(statusGlyph("running"), "●");
+  const card = renderToolCard({
+    actionId: "act_plan",
+    toolName: "plan_document",
+    status: "completed",
+    input: {
+      title: "Ship feature",
+      overview: "Explore then implement.",
+      items: [{ title: "Inspect" }, { title: "Implement" }],
+    },
+    output: { planId: "pln_1", revision: 2, path: "/tmp/plans/pln_1.md", artifactRef: "art_1", itemCount: 2 },
+  }, { expanded: true });
+  const text = card.join("\n");
+  assert.match(text, /plan_document/);
+  assert.match(text, /Ship feature/);
+  assert.match(text, /rev 2/);
+  assert.match(text, /• Inspect/);
+  assert.doesNotMatch(text, /│/);
+});
+
+test("pending Next Run handoff points at the choice panel, not composer digits", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "next-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  presenter.update([], {
+    sessionId: "ses_next",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    currentPlanId: "pln_1",
+    pendingQuestion: {
+      questionId: "q_next_1",
+      kind: "next_run",
+      status: "pending",
+      prompt: "Start the next Plan item: Implement?",
+      choices: [
+        { id: "continue", label: "Continue" },
+        { id: "stop", label: "Stop" },
+        { id: "return_to_plan", label: "Return to Plan" },
+      ],
+      planId: "pln_1",
+      revision: 1,
+      completedRunId: "run_1",
+      nextPlanItemId: "pit_b",
+    },
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "do item",
+        planBinding: {
+          planId: "pln_1",
+          revision: 1,
+          planItemId: "pit_a",
+        },
+        stepOrder: ["stp_1"],
+        steps: {
+          stp_1: {
+            stepId: "stp_1",
+            status: "completed",
+            finishReason: "response",
+            model: {
+              requestId: "req_1",
+              provider: "fake",
+              model: "next-v1",
+              finishReason: "stop",
+              text: "Item done.",
+            },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {
+      pln_1: {
+        planId: "pln_1",
+        latestRevision: 1,
+        acceptedRevision: 1,
+        revisions: {
+          1: {
+            revision: 1,
+            title: "Demo",
+            overview: "Overview",
+            artifactRef: "artifact://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            path: "/tmp/plans/pln_1.md",
+            items: [
+              { planItemId: "pit_a", title: "Inspect", description: "d1", dependsOn: [] },
+              { planItemId: "pit_b", title: "Implement", description: "d2", dependsOn: [] },
+            ],
+          },
+        },
+      },
+    },
+    planOrder: ["pln_1"],
+    presence: { state: "waiting", reason: "Awaiting next-Run answer" },
+  });
+  const rendered = presenter.render().join("\n");
+  assert.match(rendered, /Next Run pending/);
+  assert.match(rendered, /↑↓ \/ Enter in the choice panel/);
+  assert.match(rendered, /stop 后可用 \/next/);
+  assert.doesNotMatch(rendered, /1 \/next continue/);
+  assert.doesNotMatch(rendered, /── Handoff ──/);
+});
+
+test("unadvertised write-tool failure guides to /permissions", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "edit-v1",
+    language: "en",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  const actor = { kind: "runtime", id: "t" };
+  const diagnostic = `diagnostic:inline:${encodeURIComponent("Error: Model requested unadvertised tool edit")}`;
+  presenter.update([
+    {
+      type: "session.created",
+      sessionId: "ses_edit",
+      sequence: 1,
+      occurredAt,
+      actor,
+      data: { workspaceRoot: "/tmp/ws", createdAt: occurredAt },
+    },
+    {
+      type: "run.triggered",
+      sessionId: "ses_edit",
+      sequence: 2,
+      occurredAt,
+      actor,
+      data: { runId: "run_1", trigger: "user", mode: "agent", input: "edit the file" },
+    },
+    {
+      type: "run.failed",
+      sessionId: "ses_edit",
+      sequence: 3,
+      occurredAt,
+      actor,
+      data: { runId: "run_1", code: "INVALID_MODEL_ACTION", diagnosticRef: diagnostic },
+    },
+  ], {
+    sessionId: "ses_edit",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "failed",
+        input: "edit the file",
+        stepOrder: [],
+        steps: {},
+        actions: {},
+        actionOrder: [],
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "failed", reason: "INVALID_MODEL_ACTION" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "Run failed" },
+  });
+  const rendered = presenter.render().join("\n");
+  assert.match(rendered, /INVALID_MODEL_ACTION/);
+  assert.match(rendered, /unadvertised tool edit/);
+  assert.match(rendered, /\/permissions/);
+  assert.match(rendered, /Write/);
+  assert.equal(
+    presenter.selectedRunFailureGuidance(),
+    "Needs Write: enable it with /permissions, then retry",
+  );
+});
+
+test("parked budget handoff shows reason and continue guidance", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "park-v1",
+    capabilities: ["write"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  const actor = { kind: "runtime", id: "qi" };
+  presenter.update([
+    {
+      eventId: "evt_1",
+      sessionId: "ses_park",
+      sequence: 1,
+      type: "run.parked",
+      occurredAt,
+      actor,
+      data: { runId: "run_1", reason: "budget", detail: "Reached maxSteps=20" },
+    },
+  ], {
+    sessionId: "ses_park",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "parked",
+        input: "keep going",
+        stepOrder: [],
+        steps: {},
+        actions: {},
+        actionOrder: [],
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "parked", reason: "budget", detail: "Reached maxSteps=20" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "Run parked" },
+  });
+  const rendered = presenter.render().join("\n");
+  assert.match(rendered, /Status\s+parked|状态\s+已暂停/);
+  assert.match(rendered, /budget: Reached maxSteps=20/);
+  assert.match(rendered, /Step budget exhausted|Step 预算已用尽/);
+  assert.equal(presenter.selectedRunFailureDetail(), "budget: Reached maxSteps=20");
+});
+
+test("pending Plan Review handoff stays compact for the interactive panel", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "review-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  presenter.update([], {
+    sessionId: "ses_review",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "plan",
+    currentPlanId: "pln_1",
+    pendingReview: { planId: "pln_1", revision: 1, status: "pending" },
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "plan",
+        status: "completed",
+        input: "draft plan",
+        stepOrder: ["stp_1"],
+        steps: {
+          stp_1: {
+            stepId: "stp_1",
+            status: "completed",
+            finishReason: "response",
+            model: {
+              requestId: "req_1",
+              provider: "fake",
+              model: "review-v1",
+              finishReason: "stop",
+              text: "Plan ready for review.",
+            },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {
+      pln_1: {
+        planId: "pln_1",
+        latestRevision: 1,
+        revisions: {
+          1: {
+            revision: 1,
+            title: "Demo",
+            overview: "Overview",
+            artifactRef: "artifact://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            path: "/tmp/plans/pln_1.md",
+            items: [
+              { planItemId: "pit_a", title: "One", description: "d1", dependsOn: [] },
+              { planItemId: "pit_b", title: "Two", description: "d2", dependsOn: [] },
+            ],
+          },
+        },
+      },
+    },
+    planOrder: ["pln_1"],
+    presence: { state: "waiting", reason: "Awaiting Plan review" },
+  });
+  const rendered = presenter.render().join("\n");
+  assert.match(rendered, /Plan Review pending/);
+  assert.match(rendered, /开始实现/);
+  assert.doesNotMatch(rendered, /── Handoff ──/);
+  // Todo stays out of the stream until 开始实现 starts a Plan-bound Run.
+  assert.doesNotMatch(rendered, /^Todo\s+/m);
+});
+
+test("shell cards use compact $ command · duration grammar", () => {
+  const collapsed = renderToolCard({
+    actionId: "act_shell",
+    toolName: "shell",
+    status: "completed",
+    elapsed: "6.1s",
+    input: { command: "git", args: ["status"] },
+    output: { exitCode: 0, stdout: "line1\nline2\nline3\nnothing to commit\n" },
+  });
+  const text = collapsed.join("\n");
+  assert.match(text, /\$ git status 6\.1s/);
+  assert.match(text, /output lines hidden · Ctrl\+O/);
+  assert.match(text, /nothing to commit/);
+  assert.doesNotMatch(text, /cwd /);
+});
+
+test("write/edit cards show Cursor-style Edited header, gutter, and context", () => {
+  const shortDiff = [
+    "--- a/a.ts",
+    "+++ b/a.ts",
+    "@@ -1,1 +1,2 @@",
+    " keep",
+    "+added line",
+  ].join("\n");
+  const shortCard = renderToolCard({
+    actionId: "act_w1",
+    toolName: "write",
+    status: "completed",
+    elapsed: "183ms",
+    input: { path: "a.ts" },
+    output: { path: "a.ts", diff: shortDiff },
+  }).join("\n");
+  assert.match(shortCard, /Edited a\.ts \+1/);
+  assert.match(shortCard, /▎ \+added line/);
+  assert.match(shortCard, /▎  keep/);
+  assert.doesNotMatch(shortCard, /\(\+1/);
+  assert.doesNotMatch(shortCard, /@@/);
+  assert.doesNotMatch(shortCard, /^  --- a\//m);
+  assert.doesNotMatch(shortCard, /^  \+\+\+ b\//m);
+  assert.doesNotMatch(shortCard, /truncated/);
+
+  const longBody = Array.from({ length: 40 }, (_, i) => `+line ${i + 1}`).join("\n");
+  const longDiff = ["--- a/pkg/b.ts", "+++ b/pkg/b.ts", "@@ -0,0 +1,40 @@", longBody].join("\n");
+  const longCard = renderToolCard({
+    actionId: "act_w2",
+    toolName: "edit",
+    status: "completed",
+    input: { path: "pkg/b.ts" },
+    output: { path: "pkg/b.ts", diff: longDiff },
+    // Shared Action budget is tiny; mutation cards must still keep a Cursor-like context window.
+  }, { outputLines: 4 }).join("\n");
+  assert.match(longCard, /Edited pkg\/b\.ts \+40/);
+  assert.match(longCard, /▎ \+line 1/);
+  assert.match(longCard, /truncated \(\d+ more lines\) · Ctrl\+O/);
+  assert.match(longCard, /▎ \+line 40/);
+
+  // Leading context must not push the real +/− code lines into the hidden middle.
+  const contextHeavy = [
+    "--- a/frontend/index.html",
+    "+++ b/frontend/index.html",
+    "@@ -360,6 +360,9 @@",
+    ...Array.from({ length: 20 }, (_, i) => ` context ${i + 1}`),
+    "+real added",
+    "+second added",
+    ...Array.from({ length: 20 }, (_, i) => ` trailing ${i + 1}`),
+  ].join("\n");
+  const contextCard = renderToolCard({
+    actionId: "act_w3",
+    toolName: "edit",
+    status: "completed",
+    input: { path: "frontend/index.html" },
+    output: { path: "frontend/index.html", diff: contextHeavy },
+  }, { outputLines: 4 }).join("\n");
+  assert.match(contextCard, /Edited frontend\/index\.html \+2/);
+  assert.match(contextCard, /▎ \+real added/);
+  assert.match(contextCard, /▎ \+second added/);
+  assert.doesNotMatch(contextCard, /@@/);
+});
+
+test("read cards stay header-only and never dump file contents", () => {
+  const card = renderToolCard({
+    actionId: "act_r1",
+    toolName: "read",
+    status: "completed",
+    elapsed: "12ms",
+    input: { path: "src/app.ts" },
+    output: { path: "src/app.ts", content: "line one\nline two\nsecret body\n" },
+  }).join("\n");
+  assert.match(card, /read\s+src\/app\.ts/);
+  assert.match(card, /3 lines/);
+  assert.doesNotMatch(card, /secret body/);
+  assert.doesNotMatch(card, /line one/);
+});
+
+test("step timeline shows narration before tools when finishReason is actions", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "chrono-v1",
+    capabilities: ["host execute"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  const actor = { kind: "runtime", id: "t" };
+  presenter.update([
+    {
+      type: "session.created",
+      sessionId: "ses_chrono",
+      sequence: 1,
+      occurredAt,
+      actor,
+      data: { workspaceRoot: "/tmp/ws", createdAt: occurredAt },
+    },
+    {
+      type: "run.triggered",
+      sessionId: "ses_chrono",
+      sequence: 2,
+      occurredAt,
+      actor,
+      data: { runId: "run_1", trigger: "user", mode: "agent", input: "status?" },
+    },
+    {
+      type: "step.started",
+      sessionId: "ses_chrono",
+      sequence: 3,
+      occurredAt,
+      actor,
+      data: { runId: "run_1", stepId: "stp_1" },
+    },
+    {
+      type: "model.completed",
+      sessionId: "ses_chrono",
+      sequence: 4,
+      occurredAt,
+      actor,
+      data: {
+        runId: "run_1",
+        stepId: "stp_1",
+        requestId: "req_1",
+        provider: "fake",
+        model: "chrono-v1",
+        finishReason: "actions",
+        text: "我先查看一下当前的 git 状态。",
+        actionCalls: [{ callId: "call_1", name: "shell", input: { command: "git", args: ["status"] } }],
+      },
+    },
+    {
+      type: "action.proposed",
+      sessionId: "ses_chrono",
+      sequence: 5,
+      occurredAt,
+      actor,
+      data: {
+        runId: "run_1",
+        stepId: "stp_1",
+        actionId: "act_1",
+        toolName: "shell",
+        effect: "execute",
+        input: { command: "git", args: ["status"] },
+      },
+    },
+    {
+      type: "action.started",
+      sessionId: "ses_chrono",
+      sequence: 6,
+      occurredAt,
+      actor,
+      data: { runId: "run_1", stepId: "stp_1", actionId: "act_1" },
+    },
+    {
+      type: "action.completed",
+      sessionId: "ses_chrono",
+      sequence: 7,
+      occurredAt,
+      actor,
+      data: {
+        runId: "run_1",
+        stepId: "stp_1",
+        actionId: "act_1",
+        modelOutput: [{ type: "text", text: JSON.stringify({ exitCode: 0, stdout: "clean\n" }) }],
+      },
+    },
+  ], {
+    sessionId: "ses_chrono",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "status?",
+        stepOrder: ["stp_1"],
+        steps: {
+          stp_1: {
+            stepId: "stp_1",
+            status: "completed",
+            finishReason: "action-requested",
+            model: {
+              requestId: "req_1",
+              provider: "fake",
+              model: "chrono-v1",
+              finishReason: "actions",
+              text: "我先查看一下当前的 git 状态。",
+            },
+          },
+        },
+        actions: {
+          act_1: {
+            actionId: "act_1",
+            stepId: "stp_1",
+            toolName: "shell",
+            effect: "execute",
+            status: "completed",
+            resources: [],
+          },
+        },
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "idle" },
+  });
+  const rendered = presenter.render().join("\n");
+  const narrationAt = rendered.indexOf("我先查看一下当前的 git 状态");
+  const shellAt = rendered.indexOf("$ git status");
+  assert.ok(narrationAt >= 0, "expected narration");
+  assert.ok(shellAt >= 0, "expected shell card");
+  assert.ok(narrationAt < shellAt, "narration should appear before the tool card");
+});
+
+test("ListPanel Enter selects and Esc closes without inventing Session state", () => {
+  const selected = [];
+  let closed = false;
+  const panel = new ListPanel({
+    title: "Mode",
+    items: [
+      { id: "ask", label: "Ask" },
+      { id: "plan", label: "Plan" },
+      { id: "agent", label: "Agent", current: true },
+    ],
+    onSelect: (item) => selected.push(item.id),
+    onClose: () => { closed = true; },
+  });
+  const rendered = panel.render(80).join("\n");
+  assert.match(rendered, /Mode/);
+  assert.match(rendered, /Ask/);
+  panel.handleInput("\u001b[B"); // down
+  panel.handleInput("\r");
+  assert.deepEqual(selected, ["plan"]);
+  panel.handleInput("\u001b");
+  assert.equal(closed, true);
+});
+
+test("MultiSelectPanel Space toggles and Enter applies selected capability ids", () => {
+  /** @type {string[] | undefined} */
+  let applied;
+  let closed = false;
+  const panel = new MultiSelectPanel({
+    title: "Select capability grants",
+    items: [
+      { id: "write", label: "Write", description: "edit files" },
+      { id: "network", label: "Network", description: "fetch text" },
+      { id: "delegate", label: "Delegate", description: "subagent" },
+    ],
+    selectedIds: ["write"],
+    currentIds: ["write"],
+    onApply: (ids) => { applied = [...ids].sort(); },
+    onClose: () => { closed = true; },
+  });
+  const rendered = panel.render(80).join("\n");
+  assert.match(rendered, /Select capability grants/);
+  assert.match(rendered, /\[x\] Write/);
+  assert.match(rendered, /← current/);
+  panel.handleInput(" "); // toggle write off
+  panel.handleInput("\u001b[B"); // network
+  panel.handleInput(" "); // toggle network on
+  panel.handleInput("\r");
+  assert.deepEqual(applied, ["network"]);
+  assert.equal(closed, false);
+  panel.handleInput("\u001b");
+  assert.equal(closed, true);
+});
+
+test("history run list selects observational Run via Enter", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "hist-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  presenter.update([], {
+    sessionId: "ses_hist",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_a", "run_b"],
+    currentRunId: "run_b",
+    runs: {
+      run_a: {
+        runId: "run_a",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "first",
+        stepOrder: [],
+        steps: {},
+        actions: {},
+        actionOrder: [],
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+      run_b: {
+        runId: "run_b",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "second",
+        stepOrder: [],
+        steps: {},
+        actions: {},
+        actionOrder: [],
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "Idle" },
+  });
+  const items = presenter.historyRunItems();
+  assert.equal(items.length, 2);
+  assert.equal(items[1]?.current, true);
+  /** @type {string | undefined} */
+  let selected;
+  const panel = new ListPanel({
+    title: "Runs",
+    items,
+    initialSelected: items.findIndex((item) => item.current),
+    onSelect: (item) => { selected = item.id; },
+    onClose: () => {},
+  });
+  panel.handleInput("\u001b[A"); // up to run_a
+  panel.handleInput("\r");
+  assert.equal(selected, "run_a");
+  assert.match(presenter.selectRun("run_a"), /Inspecting Run 1/);
+  assert.equal(presenter.selectedRun()?.runId, "run_a");
+});
+
+test("Running strip keeps parent tokens; Subagent rows show child tokens", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "delegate-v1",
+    capabilities: ["delegate"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  presenter.setChildViewLookup((id) => {
+    if (id !== "ses_child_1") return undefined;
+    return {
+      sessionId: "ses_child_1",
+      createdAt: new Date(0).toISOString(),
+      version: 1,
+      mode: "agent",
+      currentRunId: "run_child",
+      runOrder: ["run_child"],
+      runs: {
+        run_child: {
+          runId: "run_child",
+          trigger: "user",
+          mode: "agent",
+          status: "active",
+          stepOrder: ["stp_child"],
+          steps: {
+            stp_child: {
+              stepId: "stp_child",
+              status: "running",
+              context: { estimatedTokens: 1_200, budgetTokens: 8_000 },
+            },
+          },
+          actions: {},
+          evaluations: {},
+          steering: [],
+          delegations: {},
+        },
+      },
+      goals: {},
+      goalOrder: [],
+      evidence: {},
+      controlReceipts: {},
+      memories: {},
+      memoryOrder: [],
+      tasks: {},
+      taskOrder: [],
+      plans: {},
+      planOrder: [],
+      presence: { state: "working", reason: "child" },
+    };
+  });
+  const occurredAt = new Date(0).toISOString();
+  presenter.update([], {
+    sessionId: "ses_parent",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    currentRunId: "run_parent",
+    runOrder: ["run_parent"],
+    runs: {
+      run_parent: {
+        runId: "run_parent",
+        trigger: "user",
+        mode: "agent",
+        status: "active",
+        input: "use subagent",
+        stepOrder: ["stp_parent"],
+        steps: {
+          stp_parent: {
+            stepId: "stp_parent",
+            status: "running",
+            context: { estimatedTokens: 5_900, budgetTokens: 64_000 },
+          },
+        },
+        actions: {
+          act_delegate: {
+            actionId: "act_delegate",
+            stepId: "stp_parent",
+            toolName: "delegate",
+            status: "running",
+            effect: "other",
+          },
+        },
+        evaluations: {},
+        steering: [],
+        delegations: {
+          dlg_1: {
+            delegationId: "dlg_1",
+            childSessionId: "ses_child_1",
+            outcome: "只读调研日志打印",
+            returnPolicy: "result",
+            status: "running",
+            depth: 1,
+            receiptId: "rcp_1",
+            parentLeaseId: "lea_1",
+            childLeaseId: "lea_2",
+            childSubject: "subagent:dlg_1",
+            contextRefs: [],
+            contractRef: "artifact://c".padEnd(74, "c"),
+            resourceEnvelope: {},
+            evidenceRefs: [],
+          },
+        },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "working", reason: "parent" },
+  });
+  const working = presenter.renderWorking(true, 0).join("\n");
+  assert.match(working, /waiting on subagent/);
+  assert.match(working, /5\.9k tokens/);
+  assert.doesNotMatch(working, /1\.2k/);
+  const overview = presenter.render().join("\n");
+  assert.match(overview, /Subagents · 1 running/);
+  assert.match(overview, /只读调研日志打印/);
+  assert.match(overview, /Running · 1\.2k tokens/);
+});
+
+class FakeTerminal {
+  columns = 120;
+  rows = 50;
+  kittyProtocolActive = false;
+  output = "";
+  stopped = false;
+  #input;
+
+  start(onInput) {
+    this.#input = onInput;
+  }
+
+  stop() { this.stopped = true; }
+  async drainInput() {}
+  write(data) { this.output += data; }
+  moveBy() {}
+  hideCursor() {}
+  showCursor() {}
+  clearLine() {}
+  clearFromCursor() {}
+  clearScreen() {}
+  setTitle() {}
+  setProgress() {}
+
+  sendText(text) {
+    for (const character of text) this.#input?.(character);
+  }
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitUntil(predicate, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error("condition was not reached");
+    await delay(20);
+  }
+}

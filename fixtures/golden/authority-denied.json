@@ -1,0 +1,115 @@
+[
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_001",
+    "sessionId": "ses_golden_001",
+    "sequence": 1,
+    "occurredAt": "2026-07-22T03:00:00.000Z",
+    "actor": { "kind": "runtime", "id": "qi" },
+    "type": "session.created",
+    "data": { "title": "Deployment boundary" }
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_002",
+    "sessionId": "ses_golden_001",
+    "sequence": 2,
+    "occurredAt": "2026-07-22T03:00:01.000Z",
+    "actor": { "kind": "user", "id": "user_local" },
+    "causationId": "evt_golden_001",
+    "type": "run.triggered",
+    "data": { "runId": "run_golden_001", "trigger": "user", "input": "Deploy the current branch" }
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_003",
+    "sessionId": "ses_golden_001",
+    "sequence": 3,
+    "occurredAt": "2026-07-22T03:00:02.000Z",
+    "actor": { "kind": "runtime", "id": "qi" },
+    "causationId": "evt_golden_002",
+    "type": "run.started",
+    "data": { "runId": "run_golden_001" }
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_004",
+    "sessionId": "ses_golden_001",
+    "sequence": 4,
+    "occurredAt": "2026-07-22T03:00:03.000Z",
+    "actor": { "kind": "runtime", "id": "qi" },
+    "causationId": "evt_golden_003",
+    "type": "step.started",
+    "data": { "runId": "run_golden_001", "stepId": "stp_golden_001" }
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_005",
+    "sessionId": "ses_golden_001",
+    "sequence": 5,
+    "occurredAt": "2026-07-22T03:00:04.000Z",
+    "actor": { "kind": "agent", "id": "agent_main" },
+    "causationId": "evt_golden_004",
+    "type": "action.proposed",
+    "data": {
+      "runId": "run_golden_001",
+      "stepId": "stp_golden_001",
+      "actionId": "act_golden_001",
+      "toolName": "deploy",
+      "effect": "publish"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_006",
+    "sessionId": "ses_golden_001",
+    "sequence": 6,
+    "occurredAt": "2026-07-22T03:00:05.000Z",
+    "actor": { "kind": "runtime", "id": "qi" },
+    "causationId": "evt_golden_005",
+    "type": "step.completed",
+    "data": { "runId": "run_golden_001", "stepId": "stp_golden_001", "finishReason": "action-requested" }
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_007",
+    "sessionId": "ses_golden_001",
+    "sequence": 7,
+    "occurredAt": "2026-07-22T03:00:06.000Z",
+    "actor": { "kind": "runtime", "id": "capability_broker" },
+    "causationId": "evt_golden_005",
+    "type": "authority.requested",
+    "data": { "runId": "run_golden_001", "stepId": "stp_golden_001", "actionId": "act_golden_001" }
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_008",
+    "sessionId": "ses_golden_001",
+    "sequence": 8,
+    "occurredAt": "2026-07-22T03:00:07.000Z",
+    "actor": { "kind": "runtime", "id": "capability_broker" },
+    "causationId": "evt_golden_007",
+    "type": "authority.denied",
+    "data": {
+      "runId": "run_golden_001",
+      "stepId": "stp_golden_001",
+      "actionId": "act_golden_001",
+      "reason": "No publish capability was granted"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt_golden_009",
+    "sessionId": "ses_golden_001",
+    "sequence": 9,
+    "occurredAt": "2026-07-22T03:00:08.000Z",
+    "actor": { "kind": "runtime", "id": "qi" },
+    "causationId": "evt_golden_008",
+    "type": "run.parked",
+    "data": {
+      "runId": "run_golden_001",
+      "reason": "authority-denied",
+      "detail": "The requested publish action is outside the current control lease"
+    }
+  }
+]

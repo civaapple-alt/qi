@@ -1,0 +1,54 @@
+name: Preview acceptance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installable-preview:
+    name: Installable preview (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run installable-preview gate
+        run: >-
+          node scripts/preview-acceptance.mjs
+          --output "${{ runner.temp }}/preview-acceptance.json"
+
+      - name: Upload preview evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-acceptance-${{ runner.os }}
+          path: ${{ runner.temp }}/preview-acceptance.json
+          if-no-files-found: error
+          retention-days: 14

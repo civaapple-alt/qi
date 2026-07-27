@@ -1,0 +1,9 @@
+# The repository root is a private monorepo, not the publishable Qi CLI.
+# `npm run pack:cli` builds the public CLI from an isolated staging directory,
+# while each package under `packages/*` owns an explicit `files` allowlist.
+*
+
+# Keep an accidental root pack metadata-only and auditable.
+!package.json
+!README.md
+!LICENSE

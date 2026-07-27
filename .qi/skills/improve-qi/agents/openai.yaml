@@ -1,0 +1,4 @@
+interface:
+  display_name: "Improve Qi"
+  short_description: "Governed self-inspection and improvement workflow"
+  default_prompt: "Use $improve-qi to identify and implement one bounded Qi improvement with evidence."

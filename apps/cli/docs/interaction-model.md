@@ -1,0 +1,207 @@
+# TUI interaction contract
+
+## Technology decision
+
+The interactive surface uses [`@earendil-works/pi-tui`](https://github.com/earendil-works/pi/tree/main/packages/tui).
+It matches Qi's thin application boundary: components render arrays of terminal lines, while the Session
+projection remains the state model. Its differential rendering, synchronized output, editor, paste handling,
+autocomplete, and IME support solve terminal mechanics without introducing React application state.
+
+Alternatives considered:
+
+| Option | Useful property | Reason not selected |
+| --- | --- | --- |
+| React + Ink, as used by Gemini CLI | Mature component ecosystem and test tooling | Adds React/reconciler state and a larger dependency surface to a projection-only application |
+| Solid + OpenTUI, as used by OpenCode | Rich full-screen primitives and shared Solid concepts | Oriented around a heavier Bun/native rendering stack than Qi's Node ESM runtime needs |
+| readline plus hand-written ANSI updates | No new dependency | Reimplements diff rendering, cursor control, paste, completion, resizing, and IME behavior poorly |
+
+The dependency is a rendering mechanism, not a source of authority or Session truth. Non-TTY execution stays on
+the existing readline-compatible path.
+
+Interactive paint cost: composer keystrokes and the Running spinner refresh only the Working strip and footer.
+The chat transcript component caches its last paint until Session events, expand, or other transcript-affecting
+state change. Live streaming (`onActivity`) updates a bounded one-line model/tool tail in the Working strip
+without invalidating the transcript. Chrome-only Session facts (`authority.requested`, `authority.granted`,
+`safety.*`, `context.compiled`, mounts/memory/presence) use the same path; `authority.denied` repaints the
+transcript because it visibly settles the Action as `⊘`. Inside `TuiPresenter`, Action propose/start/terminal
+lookups are indexed once per `update()`, settled Runs reuse a fingerprint cache, and settled Steps inside an
+active Run cache their card/Markdown formatting by width and visible state. Non-final Steps render one-line
+Action summaries (no edit gutters); an active Run with more than eight prior Steps folds older Steps into
+`… N earlier steps · M actions · Ctrl+O` (inspired by kimi-code fold / pi-tui paint classification — not a
+virtual transcript list).
+
+## Projection hierarchy
+
+```text
+Session
+└── selected Run       /runs → Runs
+    ├── Subagents      /runs → Agents   (depth-1 delegation projection)
+    └── selected Step  /runs → Steps
+        └── Action     /runs → Actions
+```
+
+The current Run remains the execution target. Inspecting an older Run changes only the visible projection — pick
+it from the interactive `/runs` lists (↑↓ / Enter). A new
+event refreshes the projection from `EventStore`; it never mutates a locally inferred action state.
+
+The default screen is a chat transcript: full-width user bars (with vertical padding), plain Agent text, and tool
+cards only when Actions
+exist. Within a Step, narration from `model.completed` with `finishReason: actions` (or live model text) renders
+before that Step’s Action cards so the timeline reads narration → tools → later Step answers. While a Run is
+active, a sticky `Running · <phase> · <tool> · <tokens>` line sits above the composer and always tracks the
+executing Run, not an observationally selected older Run. While busy, the composer shows `→ Add a follow-up`;
+plain text Enter enqueues a **follow-up** (UI-only until drained). A `follow-ups` panel lists queued items:
+`enter send now · ↑ select/edit · esc cancel`, and while editing `editing · enter done · esc close`. After the
+current Run settles and no Plan review / Next Run gate is pending, Qi drains the queue FIFO into the next
+user Run. Mid-Run direction still uses `/steer` at the next safe Step boundary (system-design §9.3). Plan Todo
+is not sticky: after `开始实现` it appears in the chat transcript (`✔` / `◐` / `○`) and updates there as
+Plan-bound Runs settle.
+
+Slash inspect and navigate commands (`/config`, `/skills`, `/help`, `/status`, `/runs`, `/sessions`, …) open a
+temporary panel that replaces the composer, with a title, horizontal rules, scroll/search when needed, and Esc to
+close. Panels are UI-only: they never write to the Session event stream and do not append into the chat transcript.
+Unknown slash names stay on the chat surface with a short notice (they do not open `/help`). When a Run fails
+because the model requested an unadvertised capability-gated tool (for example `edit` without Write), the handoff
+next-step line and the composer notice guide the operator to `/permissions`. Non-TTY line
+mode still dumps the panel body after the transcript for pipes and accessibility. Mode changes update the
+statusline only; they do not emit a top-of-transcript notice. Transient `notice` lines appear in the strip
+above the composer so long chats do not hide them. Operator info notices (login, permissions, unknown slash,
+…) stay visible through the next Run; only previous Run-outcome notices clear when that next Run completes
+successfully.
+
+`/settings` opens a multi-level panel stack (Mode, Permissions, Providers, Config, Context, Theme, Language,
+Status, Session history).
+`/providers` and empty `/login` open the provider list; selecting a provider offers API-key form or Kimi device
+login without writing secrets into Session events or TOML. Esc pops one panel level; an empty stack restores the
+composer.
+
+Provider login details:
+
+- API-key providers: Key + Base URL (prefilled) + Model; successful login persists `provider` / `model` /
+  `base_url` / `account_alias` into `~/.qi/config.toml`.
+- **OpenAI Compatible** (`compatible`): OpenAI Chat Completions gateways. Login requires a display **Name**
+  (e.g. `qianwenai` / `zhipu`). Multiple endpoints are stored under `[[compatible]]`. Selecting a saved
+  endpoint opens Switch / Reconfigure (API key) / Logout — same pattern as other providers. Slash:
+  `/login use <name>`.
+- Sealed provider accounts are marked **configured** in Providers. Switch without re-entering the key via
+  **Switch to this provider**, or `/login use <provider>` (e.g. `/login use deepseek`). Model/base URL are
+  restored from credential metadata. **Switch** only activates another sealed account; **Logout** clears only
+  the selected provider or compatible name (other sealed accounts and catalog entries remain).
+- **Kimi device/OAuth**: confirm **Model** (prefilled `kimi-for-coding`) before the browser authorize step, or
+  `/login kimi device model <id>`.
+
+Primary slash commands are intentionally few: overlapping inspect entries live under `/settings`, mount
+operations under `/mounts`, capability grants under `/permissions`, skill/task management under `/skills` and
+`/tasks`, Session history under `/runs` (interactive list selection; no `/run N` style selectors), and Workspace
+Session resume under `/sessions`. List shortcuts `/steps` `/actions` `/agents` remain aliases.
+Previous command names that only selected by index/id were removed. UI copy for slash help, settings, and
+these hubs follows `language` in `~/.qi/config.toml` (`zh` default, or `en`).
+
+`/status` (alias) opens the denser Session/Run/Step/Action engineering panel. `Ctrl+O` expands or collapses the
+focused Action card, long paste, or Markdown code block. Focus and expansion are observational; they do not hide
+committed history.
+
+Session mode is durable (`ask` / `plan` / `agent`). Plan mode records managed `plan_document` revisions. When a
+review is pending, the TUI opens a Plan Review panel (`开始实现` / `修改计划` / `拒绝计划`, ↑↓ / Enter, Esc to
+chat). Ordinary messages while review is pending remain Plan-mode discussion; only `开始实现` or `/plan accept`
+settles the review, switches to Agent, and starts exactly one item Run ([ADR 0011](../../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)).
+`修改计划` (or reject with feedback) collects requirements, settles as revise, and runs a Plan turn to update
+`plan_document`. After an item Run ends, a Next Run panel opens (`继续下一项` / `先停在这里` / `回到 Plan`,
+↑↓ / Enter, Esc to chat). No composer digit shortcuts. After **先停在这里**, `/next` (or `/next continue`)
+re-asks the Question when incomplete items remain. After **回到 Plan**, revise via chat/`plan_document`,
+take a new Plan Review, then `开始实现` (starts the first incomplete item). If you did not change the plan,
+`/mode agent` then `/next` reopens the gate. `/providers` projects real launch auth/profile data; `/coord`,
+`/work`, `/gate`, and `/extensions` stay explicit empty states until their backends exist.
+
+## Tool rendering
+
+Settlement glyphs stay distinct: `✓` completed, `!` failed, `⊘` denied, `?` indeterminate, `×` cancelled, `●`
+running, `○` other. The TUI must not collapse these into a binary error flag.
+
+- Shell/script/verify: compact `$ command duration` (or script/verify equivalents) with the last output line and
+  `… N output lines hidden · Ctrl+O`. Expansion reveals cwd and a bounded stdout/stderr window. Elapsed time comes
+  only from committed event timestamps. Non-zero exits and timeouts are failed settlements. Live tails use a flat
+  `·` prefix rather than box-drawing chrome.
+- Read: header-only (`path · N lines`); file contents are never echoed into the transcript.
+- Write/edit: completed cards read `Edited <path> +N -M` (Cursor-style). The body uses a `▎` gutter, shows
+  change lines with nearby context, and omits `---`/`+++`/`@@` chrome. Long patches collapse surplus middle as
+  `… truncated (N more lines) · Ctrl+O`; short patches are never stats-only. Full unified diffs remain on the
+  durable Action card / Artifact reference.
+- `plan_document`: compact card for title/overview/item count; expansion lists item titles; durable Plan truth
+  remains under `/plan` and `plan.revision.recorded`.
+- Plan: durable `plan.revision.recorded` items drive Todo progress and `/plan`. Managed Markdown under
+  `dataRoot/plans/` is written only by `plan_document`; ordinary Workspace writes do not create Plan authority.
+- Discovery Actions (read/list/search/…) each keep their own compact card in the transcript; they are not folded
+  into an explore summary.
+- Delegate: parent timeline shows a Subagents progress block (`Running` / `Finished` per depth-1 delegation) with
+  child context tokens on each Subagent row; the sticky Running strip keeps parent-agent tokens only
+  (`waiting on subagent` while `delegate` is in flight). Child transcripts stay in the child Session
+  (`runtime.childView` / `/agents`). Inspect panels (`/help`, …) dismiss with Esc and must not cancel the parent
+  Run or in-flight Subagents. The UI never invents parallel fan-out beyond durable running delegations
+  (Plan Subagents remain serial).
+- Plan Todo: after accept/`开始实现`, the transcript projects accepted Plan items; parked/failed items are never
+  counted as complete. Pending review before start does not show Todo.
+- Network, Skill, Artifact, and ProcessTask Actions use separate compact card grammars. One card changes lifecycle
+  state instead of emitting unrelated start/completed rows.
+
+Model deltas and process pipes may arrive before their durable terminal events. The TUI shows only a redacted,
+bounded, process-local tail labelled `live`; it never treats this provisional channel as settlement or evidence.
+Committed terminal output replaces the live interpretation. See [ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-activity-outside-durable-session-truth).
+
+## Composer and background work
+
+The composer uses `Enter` to submit and the pi-tui defaults `Shift+Enter` or `Ctrl+J` to insert a newline.
+Bracketed multi-line paste remains one submission; long pastes collapse in the timeline until `Ctrl+O` expands
+them. An empty composer paints Cursor-style placeholder chrome (`→ Add a message` when idle, `→ Add a follow-up`
+while a Run is active, `ctrl+c to stop|quit` on the right) with a **static** reverse-video caret on the first
+letter after `→` (e.g. `A` in Add); the terminal hardware cursor stays hidden so it does not blink as a second
+vertical bar while typing. A fixed two-line
+statusline under the editor reports phase, model, context %, changed files, workspace, capabilities, and active
+ProcessTask count.
+
+Finite `shell` Actions wait for exit. Long-lived servers and watchers require the separate `background`
+capability and `task` tool. `task.started`, `task.stop.requested`, `task.exited`, and `task.lost` make ownership and
+recovery durable while output remains a bounded live/log channel. `/tasks` lists indexed tasks; `/task stop
+<N|ID>` is the explicit user stop path. Tasks have a hard expiry and runtime-owned tasks stop on TUI exit. See
+[ADR 0006](../../../design/decisions.md#adr-0006-represent-long-lived-processes-as-bounded-processtasks).
+
+The Kernel still records response-only terminal Runs as `run.completed` with `completionKind: response`. The TUI
+renders this as `responded`, not `completed`; `verified` is reserved for evidence-backed completion.
+
+## Context rendering
+
+Every Step shows `estimatedTokens / budgetTokens` from `context.compiled`. Optional block omissions are listed
+directly. Cross-Run history compaction records each omitted Run as `history:omitted:<runId>`; the TUI therefore
+reports compaction only after the runtime has recorded it.
+
+The effective configuration distinguishes the provider/model window, prompt working budget, and output reserve.
+Within a Run, `/context` lists reclaimed estimated tokens from committed `context.compacted` events. A settled
+exchange remains complete for its first model consumer, then may become an Artifact-backed causal summary under
+pressure. If required context still cannot fit, the Run parks at the safe Step boundary with reason `budget`.
+
+## Read-only directory mounts
+
+Cross-directory reads use human-gated mounts, not model-owned authority. Project policy lives at
+`$QI_HOME/projects/<workspace-slug>/config.toml` (`[capabilities]`, `[shell]`, `[[mounts]]`); merge order is
+CLI flags > project TOML > global `~/.qi/config.toml`. `/mounts add <path>`, `/mounts`, and
+`/mounts unmount <id>` manage mounts in-session. `/permissions` (also under `/settings`) lists effective Session
+capabilities with Space multi-select, applies the selection to the current Session (tool catalog + leases)
+immediately when no Run is active, and writes `[capabilities]` into the project config. In-process New Session /
+resume re-reads that project config (CLI `--allow-*` / `--safe` from the original launch still win).
+External TOML edits during a live Runtime still wait for relaunch.
+When a read/discovery tool hits a path outside the primary Workspace and
+mounts, the Action fails with `PATH_GRANT_REQUIRED` and the TUI offers allow (persist read mount) or deny.
+Authorized paths use `mount:<id>/…`; write/edit/move/remove remain confined to the primary Workspace. See
+[ADR 0015](../../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts).
+
+## Skill discovery and installation
+
+`/skills` projects the current merged catalog from Workspace and user roots. Scope and same-name shadowing are
+visible rather than silently flattened. Catalog metadata may enter the Run context; full instructions and
+resources enter only after a `skill` Action requests them.
+
+`/skills` → **Install skill** opens a scope list (user vs Workspace) then a form for a Skill name or local path.
+Installation is disabled while a Run or another TUI management action is active. A model does not receive
+global-install authority: its `skill install-workspace` operation requires the
+write lease, settles as an ordinary Action, and can only publish a Workspace draft or a named Skill from a
+configured local compatibility root.

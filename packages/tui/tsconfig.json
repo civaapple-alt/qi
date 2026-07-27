@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tui.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../protocol" },
+    { "path": "../kernel" },
+    { "path": "../tools" },
+    { "path": "../loop" }
+  ],
+  "include": ["src/**/*.ts"]
+}

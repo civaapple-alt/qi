@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/web.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/kernel" },
+    { "path": "../../packages/session-store" },
+    { "path": "../../packages/stream" }
+  ],
+  "include": ["src/**/*.ts"]
+}

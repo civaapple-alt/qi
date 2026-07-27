@@ -1,0 +1,95 @@
+---
+name: analyze-qi-session
+version: 1.1.1
+description: Analyze a Qi Session from a Session ID plus Workspace path, or from a local Qi Web URL containing `?session=ses_...`. Use when asked to review Run, Step, and Action behavior; explain failed, parked, denied, indeterminate, recovered, looping, context-pressure, tool-fallback, verification, or evidence problems; or propose concrete runtime and project fixes from durable Session evidence. Prefer this Skill's extractor over ad-hoc SQLite scripts.
+---
+
+# Analyze a Qi Session
+
+Treat the append-only Session events as truth and Web views as derived projections. Diagnose before changing code.
+
+## Acquire the trace
+
+Accept either input form:
+
+- Web URL: `http://127.0.0.1:4317/?session=ses_...` (optional `&project=<slug>` enables local DB fallback)
+- Session and Workspace: `ses_...` plus the Workspace root the TUI was launched against
+
+Run the bundled read-only extractor from this Skill directory (do **not** invent a temporary inspect script).
+
+**Argument order matters.** Qi options must come *after* the script path. Node treats flags before the
+script as its own options (`node: bad option: --workspace…`). npm also steals `--workspace` for package
+workspaces — prefer `--workspace-root`, or pass `node …` / `npm exec -- …` directly.
+
+```text
+# correct
+node scripts/extract-session.mjs --url <url>
+node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root>
+node scripts/extract-session.mjs --session <session-id> --project <slug>
+node scripts/extract-session.mjs --session <session-id> --db <sqlite-path>
+
+# wrong — Node/npm may consume the flag
+node --workspace-root <workspace-root> scripts/extract-session.mjs --session <session-id>
+npm exec extract-session --workspace <workspace-root>
+```
+
+`--workspace` remains a deprecated alias of `--workspace-root` (same placement rules). You can also set
+`QI_WORKSPACE` instead of passing a path flag.
+
+With `--workspace-root`, the extractor resolves `qi.sqlite` in this order (first existing path wins):
+
+1. `$QI_HOME/projects/<workspace-slug>/qi.sqlite` — TUI default (`QI_HOME` or `~/.qi`)
+2. `<workspace>/.qi/qi.sqlite` — legacy / Workspace-local
+
+`--project <slug>` opens `$QI_HOME/projects/<slug>/qi.sqlite` directly (handy with Web URLs that
+already show `project=D-lab-ws-lab`). Use `--db` only when you already know the exact database path.
+
+The URL path first requests the Web `/workbench` projection; if that fails and the URL includes
+`?project=<slug>`, it falls back to the matching QI_HOME project database. Extracted JSON is bounded and
+passed through Qi's high-confidence secret redaction before output. Do not copy, edit, migrate, or
+compact the source database.
+
+If execution or local-network authority is unavailable, state the missing capability and ask for the extractor
+JSON or exported event history. Do not infer a trace from a screenshot alone.
+
+## Analyze in order
+
+1. Reconstruct each Run's user intent, terminal state, terminal reason, and whether completion was `response` or
+   evidence-backed `verified`.
+2. Follow Steps in sequence. Explain model response/action boundaries, context pressure, compaction, omitted blocks,
+   repeated strategies, and whether the Run made progress.
+3. Join every Action by `actionId`: proposal, authority request/decision, executor start, settlement, tool input,
+   result, error, diff, and recovery. Never interpret `step.completed · action-requested` as settled tool work.
+4. Separate four categories:
+   - target-Workspace defects;
+   - Qi runtime/tool/projection defects;
+   - model strategy or tool-selection mistakes;
+   - expected control behavior such as denial or honest parking.
+5. Inspect relevant Workspace source only after the trace identifies an owning component or target file. Use Git
+   status/diff and tests as corroborating evidence; do not silently modify either Qi or the target project.
+6. Read [references/analysis-checklist.md](references/analysis-checklist.md) when classifying findings and writing
+   recommendations.
+
+## Evidence rules
+
+- Cite Run, Step, Action, event sequence, tool, and error code wherever available.
+- Label every conclusion as **fact**, **inference**, or **proposal**.
+- Treat `responded` as a conversational outcome, not verified completion.
+- Treat Action success as a tool result, not automatically an Evidence Ledger record.
+- Preserve `failed`, `cancelled`, `parked`, `denied`, and `indeterminate` as distinct meanings.
+- Report a recovered failure even when the Run later completed; do not report the whole Run as failed.
+- Prefer the earliest causal failure over downstream symptoms and repeated retries.
+- State confidence and what evidence would falsify a root-cause inference.
+
+## Deliver the review
+
+Respond in the user's language. Lead with the overall judgment, then provide:
+
+1. **Session summary** — tasks, terminal outcomes, Step/Action counts, mutations, verification, and formal evidence.
+2. **Execution narrative** — concise Run-by-Run progression, emphasizing state transitions and recovery.
+3. **Findings** — ordered by severity; include evidence, cause, impact, and confidence.
+4. **Solutions** — distinguish immediate fix, systemic Qi fix, and regression evidence. Name likely owning packages
+   and files only after inspecting them.
+5. **Open questions** — only uncertainties that materially change the solution.
+
+Do not implement proposed fixes unless the user explicitly asks for implementation.

@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tui.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/kernel" },
+    { "path": "../../packages/session-store" },
+    { "path": "../../packages/llm" },
+    { "path": "../../packages/capability" },
+    { "path": "../../packages/coordinator" },
+    { "path": "../../packages/eval" },
+    { "path": "../../packages/introspection" },
+    { "path": "../../packages/skills" },
+    { "path": "../../packages/tools" },
+    { "path": "../../packages/tui" },
+    { "path": "../../packages/loop" },
+    { "path": "../../packages/workspace" }
+  ],
+  "include": ["src/**/*.ts"]
+}

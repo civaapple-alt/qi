@@ -1,0 +1,71 @@
+# `@civaapple/qi-workspace`
+
+Isolated world adapters, freshness observations, process boundaries, and durable effect settlement.
+
+## Purpose
+
+Workspace adapters define the concrete slice of the world an Agent can observe or change. The Effect Journal
+protects non-read operations from duplicate execution when retries or crashes make settlement uncertain.
+
+## Non-goals
+
+- Workspace isolation does not grant authority; capability checks remain separate.
+- It does not decide which tool or task should run.
+- It does not treat host access or Docker availability as implicit success.
+
+## Core model
+
+`LocalWorkspace` uses lexical root containment and freshness observations. `ContainerWorkspaceAdapter` runs a
+configured Workspace mount with network disabled and both container root and Workspace read-only by default.
+`GitWorktreeAdapter` isolates repository changes. `SqliteEffectJournal` reserves, starts, and settles effects by
+stable intent and idempotency keys.
+
+## Behavioral invariants
+
+- `LocalWorkspace` rejects lexical traversal outside the configured root. Symlink rejection is enforced by the
+  higher-level file tools; this adapter alone is not a symbolic-link security boundary.
+- Writes based on stale observations are rejected.
+- Non-read effects are serialized through a durable journal.
+- Completed effects replay their settlement; indeterminate effects block automatic re-entry.
+- Host process helpers scrub credential-like environment names by default and can terminate process trees on
+  timeout or cancel.
+
+## Failure semantics
+
+Unavailable isolation fails honestly. Executor uncertainty becomes `indeterminate`, not ordinary failure.
+Callers need explicit reconciliation before retrying an unknown effect.
+
+## Install and minimal use
+
+```sh
+npm install @civaapple/qi-workspace
+```
+
+```ts
+import { LocalWorkspace } from "@civaapple/qi-workspace";
+
+const workspace = new LocalWorkspace(process.cwd());
+const observation = await workspace.observe("README.md");
+```
+
+## Public API
+
+`LocalWorkspace`, `ContainerWorkspaceAdapter`, `GitWorktreeAdapter`, host-process helpers
+(`scrubCredentialEnvironment`, `runHostProcess`, `terminateProcessTree`), `EffectJournal`, and
+`SqliteEffectJournal`.
+
+## Change guide
+
+Keep authority, isolation, and effect settlement independent. New adapters must document trust assumptions and
+prove path, process, crash, and cleanup behavior.
+
+## Verification
+
+`tests/workspace-safety.test.mjs` is the primary evidence; built-in integration is covered by
+`tests/tools-capability.test.mjs`.
+
+## Further reading
+
+- [Effect Journal](docs/effect-journal.md)
+- [Isolation model](docs/isolation.md)
+- [Workspace design](../../design/system-design.md#4-workspace-authority-and-effects)
