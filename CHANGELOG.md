@@ -30,6 +30,8 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- Made CodeAct container staging paths portable across Windows, Linux, and macOS.
+
 ### Security
 
 - Expanded ignored-file protection for local credentials, registry configuration, logs, Runtime artifacts,

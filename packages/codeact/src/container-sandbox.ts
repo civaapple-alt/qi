@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { copyFile, mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { CodeActApi, ProgramSandbox } from "./runner.js";
 
@@ -40,8 +40,8 @@ export class ContainerProgramSandbox implements ProgramSandbox {
   async run(api: CodeActApi, signal?: AbortSignal): Promise<unknown> {
     const program = await realpath(this.#options.programFile);
     if (!(await stat(program)).isFile()) throw new Error("CodeAct programFile must be a file");
-    const staging = await mkdtemp(`${tmpdir()}\\qi-codeact-`);
-    const stagedProgram = `${staging}\\program.mjs`;
+    const staging = await mkdtemp(join(tmpdir(), "qi-codeact-"));
+    const stagedProgram = join(staging, "program.mjs");
     await copyFile(program, stagedProgram);
     const runtime = this.#options.runtime ?? "docker";
     const timeoutMs = this.#options.timeoutMs ?? 60_000;
