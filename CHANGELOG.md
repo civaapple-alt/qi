@@ -26,6 +26,7 @@ steps and investigation history belong in pull requests, not release notes.
 - MIT licensing and public-package metadata for the CLI and 21 Runtime packages.
 - Isolated package consumers, release-candidate auditing, and installable CLI preview checks.
 - `@civaapple/qi-agent`, `@civaapple/qi-introspection`, and reusable `@civaapple/qi-tui` package surfaces.
+- Tokenless GitHub Actions publishing with npm trusted-publisher provenance.
 
 ### Changed
 

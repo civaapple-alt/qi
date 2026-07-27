@@ -1,0 +1,104 @@
+name: Publish npm release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact coordinated release version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.version }} to npm
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Confirm coordinated version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(node -p "require('./package.json').version")"
+          test "$actual" = "$RELEASE_VERSION"
+          npm run packages:plan -- --require-registry-ready
+
+      - name: Run release gates
+        run: |
+          npm run typecheck
+          npm test
+          npm run packages:check
+          npm run accept:preview
+
+      - name: Publish Runtime packages in dependency order
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          publish_package() {
+            directory="$1"
+            name="$(node -p "require('./packages/${directory}/package.json').name")"
+            version="$(node -p "require('./packages/${directory}/package.json').version")"
+            test "$version" = "$RELEASE_VERSION"
+
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "::notice::${name}@${version} is already published; skipping"
+              return
+            fi
+
+            npm publish "./packages/${directory}" --access public
+          }
+
+          for directory in capability llm protocol skills workspace; do
+            publish_package "$directory"
+          done
+          for directory in context kernel tools; do
+            publish_package "$directory"
+          done
+          for directory in eval introspection loop mcp memory session-store stream; do
+            publish_package "$directory"
+          done
+          for directory in agent codeact coordinator graph scheduler tui; do
+            publish_package "$directory"
+          done
+
+      - name: Build CLI package
+        run: npm run pack:cli
+
+      - name: Publish CLI package
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="@civaapple/qi"
+          if npm view "${name}@${RELEASE_VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::${name}@${RELEASE_VERSION} is already published; skipping"
+            exit 0
+          fi
+          npm publish "./.cli-package/civaapple-qi-${RELEASE_VERSION}.tgz" --access public
