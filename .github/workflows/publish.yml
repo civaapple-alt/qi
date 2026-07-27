@@ -55,10 +55,12 @@ jobs:
 
       - name: Publish Runtime packages in dependency order
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
 
           publish_package() {
             directory="$1"
@@ -71,7 +73,7 @@ jobs:
               return
             fi
 
-            npm publish "./packages/${directory}" --access public
+            npm publish "./packages/${directory}" --access public --provenance
           }
 
           for directory in capability llm protocol skills workspace; do
@@ -92,13 +94,15 @@ jobs:
 
       - name: Publish CLI package
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
           name="@civaapple/qi"
           if npm view "${name}@${RELEASE_VERSION}" version >/dev/null 2>&1; then
             echo "::notice::${name}@${RELEASE_VERSION} is already published; skipping"
             exit 0
           fi
-          npm publish "./.cli-package/civaapple-qi-${RELEASE_VERSION}.tgz" --access public
+          npm publish "./.cli-package/civaapple-qi-${RELEASE_VERSION}.tgz" --access public --provenance
