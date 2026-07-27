@@ -13,12 +13,8 @@ fixes. The supported-version table will become release-specific when the canonic
 Do not disclose a suspected vulnerability, credential, private Session database, or exploit trace in a public
 issue.
 
-Use the canonical repository host's private vulnerability-reporting channel after maintainers enable and link it
-from the public repository. If that channel is not present, contact a listed maintainer through a previously
-verified private channel and request reporting instructions before sending sensitive material.
-
-The absence of a configured private reporting destination is an open-source release blocker, not permission to
-post sensitive details publicly.
+Report vulnerabilities privately to [civaapple@gmail.com](mailto:civaapple@gmail.com). Do not include sensitive
+details in a public issue or discussion.
 
 ## Include
 

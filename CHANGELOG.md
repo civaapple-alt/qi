@@ -41,6 +41,7 @@ steps and investigation history belong in pull requests, not release notes.
 - Replaced iteration-oriented notes with concise contributor-facing architecture and release documentation.
 - Restored the foundational product vision around life-like continuity, human-Agent coexistence,
   同行/追寻/守望, and bounded Turn/Goal/Time/Proactive control.
+- Added the Contributor Covenant and a private maintainer email as the security disclosure channel.
 
 ## [0.4.0] - 2026-07-24
 

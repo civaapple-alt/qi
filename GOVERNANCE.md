@@ -31,5 +31,6 @@ evidence and maintainer approval.
 ## Community conduct
 
 Participation requires respectful, technical, good-faith collaboration. Harassment, threats, disclosure of
-private information, and knowingly unsafe contribution practices are not accepted. A more detailed code of
-conduct and moderation contact will be confirmed with the canonical public repository before release.
+private information, and knowingly unsafe contribution practices are not accepted. The
+[Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md) defines the community standard, enforcement process,
+and private moderation contact.
