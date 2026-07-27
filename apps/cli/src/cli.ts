@@ -14,6 +14,7 @@ import {
 import { resolveProviderConfig, type ProviderConfig } from "./provider.js";
 import {
   TUI_DEFAULT_CONTEXT_WINDOW_TOKENS,
+  TUI_DEFAULT_MAX_STEPS,
   TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
 } from "./runtime.js";
 
@@ -43,6 +44,9 @@ export interface TuiCliOptions {
   theme: import("./theme/colors.js").ThemeName;
   contextWindowTokens: number;
   outputReserveTokens: number;
+  maxSteps: number;
+  /** Explicit CLI override retained across in-process Session relaunches. */
+  maxStepsOverride?: number;
   configPath?: string;
   projectConfigPath?: string;
   mounts: readonly CliMountSpec[];
@@ -58,7 +62,7 @@ const HELP_TEXT =
   "qi [WORKSPACE] [options]\n" +
   "  WORKSPACE defaults to the current directory (same as `qi --workspace .`).\n" +
   "  Options: [--workspace PATH] [--data PATH] [--provider openai|xai] [--model ID] [--base-url URL]\n" +
-  "           [--session ID] [--config PATH|--no-config] [--add-dir PATH]…\n" +
+  "           [--session ID] [--max-steps 8..100] [--config PATH|--no-config] [--add-dir PATH]…\n" +
   "           [--allow-write|--no-write] [--allow-verify|--no-verify] [--allow-network|--no-network]\n" +
   "           [--allow-execute|--no-execute] [--allow-background|--no-background]\n" +
   "           [--allow-delegate|--no-delegate] [--safe]\n";
@@ -69,7 +73,7 @@ const BOOLEAN_FLAGS = [
 ] as const;
 
 const VALUE_FLAGS = [
-  "--workspace", "--data", "--provider", "--model", "--base-url", "--session", "--config", "--add-dir",
+  "--workspace", "--data", "--provider", "--model", "--base-url", "--session", "--config", "--add-dir", "--max-steps",
 ] as const;
 
 export function qiCliVersion(packageVersion = process.env.npm_package_version ?? "0.5.0"): string {
@@ -162,6 +166,9 @@ export async function parseTuiCliArguments(
     : defaultSessionDataRoot(workspaceRoot, environment);
   const contextWindowTokens = loaded.config.contextWindowTokens ?? TUI_DEFAULT_CONTEXT_WINDOW_TOKENS;
   const outputReserveTokens = Math.min(TUI_DEFAULT_OUTPUT_RESERVE_TOKENS, Math.floor(contextWindowTokens / 8));
+  const maxSteps = values.has("--max-steps")
+    ? parseMaxSteps(values.get("--max-steps")!, "--max-steps")
+    : project.config.maxSteps ?? loaded.config.maxSteps ?? TUI_DEFAULT_MAX_STEPS;
   const mounts = buildLaunchMounts(project.config.mounts ?? [], addDirs, cwd);
 
   return {
@@ -184,6 +191,8 @@ export async function parseTuiCliArguments(
       }),
       contextWindowTokens,
       outputReserveTokens,
+      maxSteps,
+      ...(values.has("--max-steps") ? { maxStepsOverride: maxSteps } : {}),
       language: resolveLanguage(loaded.config),
       theme: resolveTheme(loaded.config),
       ...capabilities,
@@ -200,6 +209,13 @@ export async function parseTuiCliArguments(
   };
 }
 
+function parseMaxSteps(value: string, label: string): number {
+  if (!/^\d+$/.test(value)) throw new TypeError(`${label} must be an integer from 8 to 100`);
+  const parsed = Number(value);
+  if (parsed < 8 || parsed > 100) throw new TypeError(`${label} must be an integer from 8 to 100`);
+  return parsed;
+}
+
 /**
  * Re-read user + project policy for an in-process relaunch (`/sessions` New Session or resume).
  * Preserves CLI `--allow-*` / `--safe` overrides from the original parse.
@@ -214,6 +230,7 @@ export async function refreshLaunchCapabilities(
   allowExecute: boolean;
   allowBackground: boolean;
   allowDelegate: boolean;
+  maxSteps: number;
   projectConfigPath: string;
   shell?: import("./config.js").QiShellConfig;
 }> {
@@ -221,7 +238,11 @@ export async function refreshLaunchCapabilities(
     ?? projectConfigPathForWorkspace(options.workspaceRoot, environment);
   if (options.noConfig) {
     const caps = mergeCapabilities(undefined, undefined, options.capabilityOverrides);
-    return { ...caps, projectConfigPath };
+    return {
+      ...caps,
+      projectConfigPath,
+      maxSteps: options.maxStepsOverride ?? TUI_DEFAULT_MAX_STEPS,
+    };
   }
   const loaded = options.configPath
     ? await loadUserConfig(options.configPath)
@@ -236,6 +257,10 @@ export async function refreshLaunchCapabilities(
   return {
     ...caps,
     projectConfigPath,
+    maxSteps: options.maxStepsOverride
+      ?? project.config.maxSteps
+      ?? loaded.config.maxSteps
+      ?? TUI_DEFAULT_MAX_STEPS,
     ...(shell === undefined ? {} : { shell }),
   };
 }

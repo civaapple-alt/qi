@@ -7,12 +7,32 @@ import {
   candidateSessionDatabases,
   parseArguments,
   resolveSessionDatabase,
+  selectedOperation,
   workspaceProjectSlug,
 } from "../.qi/skills/analyze-qi-session/scripts/extract-session.mjs";
 
 test("analyze-qi-session slug matches TUI Cursor-style encoding", () => {
   assert.equal(workspaceProjectSlug("D:\\lab-ws\\lab"), "D-lab-ws-lab");
   assert.equal(workspaceProjectSlug("/home/alwar/work/fastai"), "home-alwar-work-fastai");
+});
+
+test("analyze-qi-session defaults to bounded Runs and validates narrow query selectors", () => {
+  const base = ["--session", "ses_x", "--db", "qi.sqlite"];
+  assert.equal(selectedOperation(parseArguments(base)), "runs");
+  assert.equal(selectedOperation(parseArguments([...base, "--run", "last"])), "run");
+  assert.equal(selectedOperation(parseArguments([...base, "--run", "run_123", "--problems"])), "problems");
+  assert.equal(selectedOperation(parseArguments([...base, "--last-step"])), "last-step");
+  assert.equal(selectedOperation(parseArguments([...base, "--step", "stp_123", "--detail"])), "step");
+  assert.equal(selectedOperation(parseArguments([...base, "--action", "act_123"])), "action");
+  assert.equal(parseArguments([...base, "--all"]).all, true);
+  assert.throws(
+    () => parseArguments([...base, "--problems", "--last-step"]),
+    /mutually exclusive/,
+  );
+  assert.throws(
+    () => parseArguments([...base, "--all", "--detail"]),
+    /cannot be combined/,
+  );
 });
 
 test("analyze-qi-session accepts --workspace-root and QI_WORKSPACE", () => {

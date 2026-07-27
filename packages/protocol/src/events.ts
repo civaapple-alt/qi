@@ -740,6 +740,7 @@ export const SessionEventSchema = Type.Union([
         finishReason: Type.Union([
           Type.Literal("action-requested"),
           Type.Literal("response"),
+          Type.Literal("handoff"),
           Type.Literal("error"),
         ]),
       },

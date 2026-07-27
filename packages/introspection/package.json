@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@civaapple/qi-context": "0.5.0",
+    "@civaapple/qi-kernel": "0.5.0",
+    "@civaapple/qi-protocol": "0.5.0",
     "@civaapple/qi-tools": "0.5.0",
     "@sinclair/typebox": "0.34.52"
   },

@@ -36,6 +36,8 @@ for untrusted serialized input.
   Session event and cannot serve as settlement evidence.
 - `run.triggered` may freeze `mode` and an optional Plan-item binding; legacy events without `mode` replay as
   Agent.
+- `step.completed.finishReason = handoff` explicitly marks a budget continuation summary. Older Sessions without
+  this additive value keep their prior history behavior.
 
 ## Failure semantics
 

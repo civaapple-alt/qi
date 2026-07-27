@@ -43,8 +43,15 @@ before it can enter the Tool Registry.
 - Only validated metadata enters normal context. Instructions and declared resources load on demand.
 - Skills contribute knowledge, never authority.
 - Bare-name installation resolves only from explicit local compatibility roots; it does not search the network.
-- Installation validates recognized content in a temporary sibling and publishes atomically.
-- Model-facing installation can publish only a validated Workspace draft and cannot overwrite or install globally.
+- Installation validates recognized content in a temporary sibling and publishes atomically; it remains
+  create-only and cannot silently overwrite an existing Skill.
+- Ordinary file tools never receive `.qi` authority. The dedicated Skill service may export an installed
+  Workspace Skill to a new ordinary draft directory, then update it only when the exported digest is still
+  current.
+- Workspace updates revalidate paths, symlinks, file bounds, metadata, and digest immediately before publication.
+  They use sibling staging, backup, and recovery markers under Effect Journal control; uncertain publication is
+  indeterminate and is never retried automatically.
+- Model-facing Skill mutation is limited to Workspace scope and cannot install or update globally.
 
 ## ADR-0005: keep provisional activity outside durable Session truth
 

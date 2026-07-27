@@ -10,6 +10,7 @@ ownership, invariants, architecture decisions, maturity, release gaps, and verif
 - Validate and query `QiSelfModel`.
 - Produce bounded Context blocks with explicit provenance and an authority disclaimer.
 - Provide the read-only `qi_introspect` Tool definition.
+- Provide bounded, read-only projections for Qi to inspect Sessions in its current project.
 - Detect drift between the self model, workspace packages, package READMEs, and the consolidated decision record.
 
 ## Non-goals
@@ -41,6 +42,12 @@ const context = createQiSelfContext(["identity", "invariants", "gaps"]);
 Register `createQiIntrospectionTool()` through an ordinary `ToolRegistry`. Execution still requires a
 matching read lease for `qi:self-model:<section>`.
 
+`inspectQiSession(source, query)` lists project Sessions or narrows one Session to Runs, a selected/latest Run,
+problems, the last Step, or one Step/Action. Summary and detail projections retain IDs, event sequence bounds,
+status, and error codes while bounding text, results, and lists and reporting every omission.
+`createQiSessionInspectionTool(source, currentSessionId)` exposes the same semantics as `qi_session_inspect`.
+The CLI injects only its current project EventStore; callers cannot supply a database path or cross-project root.
+
 ## Public API
 
 - `QiSelfModelSchema` and `parseQiSelfModel()`
@@ -48,6 +55,8 @@ matching read lease for `qi:self-model:<section>`.
 - `queryQiSelfModel()`
 - `createQiSelfContext()`
 - `createQiIntrospectionTool()`
+- `inspectQiSession()` and `createQiSessionInspectionTool()`
+- `QiSessionInspectionQuery`, `QiSessionInspectionResult`, and `QiSessionInspectionSource`
 
 ## Change guidance
 

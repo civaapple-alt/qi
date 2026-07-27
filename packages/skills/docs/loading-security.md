@@ -40,6 +40,16 @@ Effect-Journaled, and restricted to Workspace scope. The model may publish a dra
 directory or install a named Skill from a configured local compatibility root; ordinary file tools still cannot
 write `.qi`.
 
+Updating is deliberately separate from create-only installation. The dedicated service first exports an existing
+Workspace Skill into a new ordinary Workspace directory and returns an `expectedDigest`. `update-workspace`
+accepts only that ordinary draft, revalidates its bounded allowlist and metadata, and compares the current
+installed digest immediately before publication. A stale draft fails as `SKILL_STALE`.
+
+Publication uses staging, backup, and a recovery marker beside the target under `.qi/skills`. A confirmed failure
+restores the backup. If restoration or publication cannot be confirmed, the Action is `indeterminate`, the
+recovery marker is retained, and automatic retry is forbidden. This dedicated, authorized, Effect-Journaled path
+is the only model-facing mechanism that may modify `.qi/skills`.
+
 ## Declarative Agents
 
 Agent definitions describe identity, commitments, boundaries, and selected resources. The loader never imports or

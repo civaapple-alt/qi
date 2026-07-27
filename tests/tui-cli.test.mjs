@@ -99,6 +99,54 @@ test("CLI defaults data to QI_HOME/projects/<workspace-slug> and honors --safe",
     assert.equal(parsed.options.allowNetwork, false);
     assert.equal(parsed.options.allowBackground, false);
     assert.equal(parsed.options.allowDelegate, false);
+    assert.equal(parsed.options.maxSteps, 32);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI max_steps precedence is flag over project over user over default and enforces 8..100", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-cli-max-steps-"));
+  try {
+    const workspace = join(root, "workspace");
+    const qiHome = join(root, "qi-home");
+    const userConfig = join(root, "user.toml");
+    await mkdir(workspace);
+    await writeFile(userConfig, "version = 1\nmax_steps = 16\n");
+    const projectDir = join(qiHome, "projects", workspaceProjectSlug(workspace));
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(join(projectDir, "config.toml"), "version = 1\nmax_steps = 24\n");
+    const environment = { OPENAI_API_KEY: "test-key", QI_HOME: qiHome };
+
+    const project = await parseTuiCliArguments(
+      ["--workspace", workspace, "--config", userConfig],
+      { cwd: root, environment },
+    );
+    assert.equal(project.kind, "run");
+    assert.equal(project.options.maxSteps, 24);
+
+    const flag = await parseTuiCliArguments(
+      ["--workspace", workspace, "--config", userConfig, "--max-steps", "40"],
+      { cwd: root, environment },
+    );
+    assert.equal(flag.kind, "run");
+    assert.equal(flag.options.maxSteps, 40);
+
+    await rm(join(projectDir, "config.toml"));
+    const user = await parseTuiCliArguments(
+      ["--workspace", workspace, "--config", userConfig],
+      { cwd: root, environment },
+    );
+    assert.equal(user.kind, "run");
+    assert.equal(user.options.maxSteps, 16);
+    await assert.rejects(
+      () => parseTuiCliArguments(["--no-config", "--max-steps", "7"], { cwd: root, environment }),
+      /8 to 100/,
+    );
+    await assert.rejects(
+      () => parseTuiCliArguments(["--no-config", "--max-steps", "101"], { cwd: root, environment }),
+      /8 to 100/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

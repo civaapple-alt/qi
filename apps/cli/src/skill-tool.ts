@@ -1,5 +1,9 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { SkillCatalog } from "@civaapple/qi-skills";
+import {
+  SkillStaleError,
+  SkillUpdateIndeterminateError,
+  type SkillCatalog,
+} from "@civaapple/qi-skills";
 import { ToolFailure, defineTool } from "@civaapple/qi-tools";
 import { Type, type Static } from "@sinclair/typebox";
 
@@ -12,10 +16,13 @@ const SkillToolInputSchema = Type.Object(
       Type.Literal("load"),
       Type.Literal("read-resource"),
       Type.Literal("install-workspace"),
+      Type.Literal("export-workspace-draft"),
+      Type.Literal("update-workspace"),
     ]),
     name: Type.Optional(SkillNameSchema),
     path: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
     source: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
+    expectedDigest: Type.Optional(Type.String({ pattern: "^sha256:[a-f0-9]{64}$" })),
   },
   { additionalProperties: false },
 );
@@ -26,10 +33,13 @@ export function createTuiSkillTool(catalog: SkillCatalog, workspaceRoot: string)
   const root = resolve(workspaceRoot);
   return defineTool({
     description:
-      "Discover and progressively load installed Qi Skills. Use list to refresh metadata, load only a relevant Skill's instructions, and read-resource only for a resource named by that Skill. With write authority, install-workspace publishes a validated Skill draft from an ordinary Workspace directory into .qi/skills; Skills never grant authority.",
+      "Discover and progressively load installed Qi Skills. Use list/load/read-resource for bounded reads. With write authority, install-workspace creates a new Workspace Skill; export-workspace-draft copies an existing Workspace Skill to a new ordinary Workspace directory; update-workspace validates and atomically publishes that draft when expectedDigest is still current. Skills never grant authority.",
     input: SkillToolInputSchema,
     output: Type.Unknown(),
-    effect: (input: SkillToolInput) => input.operation === "install-workspace" ? "write" : "read",
+    effect: (input: SkillToolInput) =>
+      ["install-workspace", "export-workspace-draft", "update-workspace"].includes(input.operation)
+        ? "write"
+        : "read",
     resources: (input: SkillToolInput) => {
       switch (input.operation) {
         case "list": return ["skill-catalog:local"];
@@ -39,6 +49,14 @@ export function createTuiSkillTool(catalog: SkillCatalog, workspaceRoot: string)
           input.source && isBareSkillName(input.source)
             ? `skill-source:local:${input.source}`
             : `file:${input.source ?? "*"}`,
+          `skill:workspace:${input.name ?? "*"}`,
+        ];
+        case "export-workspace-draft": return [
+          `skill:workspace:${input.name ?? "*"}`,
+          `file:${input.path ?? "*"}`,
+        ];
+        case "update-workspace": return [
+          `file:${input.source ?? "*"}`,
           `skill:workspace:${input.name ?? "*"}`,
         ];
       }
@@ -96,6 +114,49 @@ export function createTuiSkillTool(catalog: SkillCatalog, workspaceRoot: string)
             installed: true,
           };
         }
+        case "export-workspace-draft": {
+          const name = requireSkillField(input.name, "name", "export-workspace-draft");
+          const path = requireSkillField(input.path, "path", "export-workspace-draft");
+          const destination = resolveWorkspaceDraft(root, path);
+          try {
+            return await catalog.exportWorkspaceDraft(name, destination);
+          } catch (error) {
+            throw new ToolFailure("SKILL_EXPORT_INVALID", errorMessage(error));
+          }
+        }
+        case "update-workspace": {
+          const name = requireSkillField(input.name, "name", "update-workspace");
+          const sourceRaw = requireSkillField(input.source, "source", "update-workspace");
+          const expectedDigest = requireSkillField(input.expectedDigest, "expectedDigest", "update-workspace");
+          const source = resolveWorkspaceDraft(root, sourceRaw);
+          try {
+            const updated = await catalog.updateWorkspace(name, source, expectedDigest);
+            return {
+              name: updated.name,
+              version: updated.version,
+              description: updated.description,
+              scope: updated.scope,
+              previousDigest: updated.previousDigest,
+              digest: updated.digest,
+              fileCount: updated.fileCount,
+              totalBytes: updated.totalBytes,
+              ...(updated.recoveryMarker === undefined ? {} : {
+                recoveryPending: true,
+                recoveryMarker: updated.recoveryMarker,
+              }),
+              updated: true,
+            };
+          } catch (error) {
+            if (error instanceof SkillStaleError) {
+              throw new ToolFailure("SKILL_STALE", error.message, {
+                expectedDigest: error.expectedDigest,
+                actualDigest: error.actualDigest,
+              });
+            }
+            if (error instanceof SkillUpdateIndeterminateError) throw error;
+            throw new ToolFailure("SKILL_UPDATE_INVALID", errorMessage(error));
+          }
+        }
       }
     },
   });
@@ -124,4 +185,8 @@ function resolveWorkspaceDraft(workspaceRoot: string, source: string): string {
   if (!path.startsWith(prefix)) throw new ToolFailure("SKILL_SOURCE_SCOPE", "Agent Skill install source escapes the Workspace");
   if (relative(workspaceRoot, path).startsWith("..")) throw new ToolFailure("SKILL_SOURCE_SCOPE", "Agent Skill install source escapes the Workspace");
   return path;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

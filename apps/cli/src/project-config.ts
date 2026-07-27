@@ -22,6 +22,7 @@ export interface ProjectMountConfig {
 
 export interface QiProjectConfig {
   readonly version: 1;
+  readonly maxSteps?: number;
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
   readonly mounts?: readonly ProjectMountConfig[];
@@ -57,6 +58,7 @@ export async function saveProjectConfig(path: string, config: QiProjectConfig): 
   await mkdir(dirname(absolute), { recursive: true });
   const body = stringify({
     version: 1,
+    ...(config.maxSteps === undefined ? {} : { max_steps: config.maxSteps }),
     ...(config.capabilities === undefined ? {} : { capabilities: { ...config.capabilities } }),
     ...(config.shell === undefined ? {} : { shell: { ...config.shell, ...(config.shell.allowed ? { allowed: [...config.shell.allowed] } : {}) } }),
     ...(config.mounts === undefined || config.mounts.length === 0
@@ -142,6 +144,7 @@ function validateProjectConfig(value: unknown, path: string): QiProjectConfig {
   }
   const root = value as Record<string, unknown>;
   if (root.version !== 1) throw new TypeError(`${path}: version must be 1`);
+  const maxSteps = validateMaxSteps(root.max_steps, path);
   const capabilities = root.capabilities === undefined
     ? undefined
     : validateCapabilities(root.capabilities, path);
@@ -149,10 +152,19 @@ function validateProjectConfig(value: unknown, path: string): QiProjectConfig {
   const mounts = root.mounts === undefined ? undefined : validateMounts(root.mounts, path);
   return {
     version: 1,
+    ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(shell === undefined ? {} : { shell }),
     ...(mounts === undefined ? {} : { mounts }),
   };
+}
+
+function validateMaxSteps(value: unknown, path: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || (value as number) < 8 || (value as number) > 100) {
+    throw new TypeError(`${path}: max_steps must be an integer from 8 to 100`);
+  }
+  return value as number;
 }
 
 function validateCapabilities(value: unknown, path: string): QiCapabilityConfig {

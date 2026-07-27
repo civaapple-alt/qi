@@ -1,7 +1,7 @@
 import { lstat, mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { InMemoryCapabilityBroker, type CapabilityLease } from "@civaapple/qi-capability";
-import { createQiIntrospectionTool } from "@civaapple/qi-introspection";
+import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-introspection";
 import type { EventStore, SessionSummary, SessionView } from "@civaapple/qi-kernel";
 import type { ModelPort, ModelRef } from "@civaapple/qi-llm";
 import {
@@ -78,6 +78,7 @@ export interface TuiRuntimeOptions {
   resolveModel?: () => ModelRef;
   contextWindowTokens?: number;
   outputReserveTokens?: number;
+  maxSteps?: number;
   allowWrite?: boolean;
   allowVerify?: boolean;
   allowExecute?: boolean;
@@ -111,7 +112,7 @@ export interface AppliedCapabilities {
 export const TUI_DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 export const TUI_DEFAULT_OUTPUT_RESERVE_TOKENS = 16_000;
 export const TUI_HISTORY_BUDGET_TOKENS = 16_000;
-export const TUI_MAX_STEPS = 20;
+export const TUI_DEFAULT_MAX_STEPS = 32;
 export const TUI_MAX_ACTIONS_PER_STEP = 6;
 
 export class TuiRuntime {
@@ -122,6 +123,7 @@ export class TuiRuntime {
   readonly #resolveModel: () => ModelRef;
   readonly #contextBudgetTokens: number;
   readonly #outputReserveTokens: number;
+  readonly #maxSteps: number;
   readonly #subject: string;
   readonly #eventStore: EventStore;
   readonly #ownedStore: SqliteEventStore | undefined;
@@ -178,6 +180,10 @@ export class TuiRuntime {
     this.#outputReserveTokens = options.outputReserveTokens
       ?? Math.min(TUI_DEFAULT_OUTPUT_RESERVE_TOKENS, Math.floor(contextWindowTokens / 8));
     this.#contextBudgetTokens = contextBudgetFromWindow(contextWindowTokens, this.#outputReserveTokens);
+    this.#maxSteps = options.maxSteps ?? TUI_DEFAULT_MAX_STEPS;
+    if (!Number.isInteger(this.#maxSteps) || this.#maxSteps < 8 || this.#maxSteps > 100) {
+      throw new RangeError("maxSteps must be an integer from 8 to 100");
+    }
     this.#subject = options.subject ?? "main-agent";
     this.#eventStore = eventStore;
     this.#ownedStore = ownedStore;
@@ -213,6 +219,7 @@ export class TuiRuntime {
 
   static async create(options: TuiRuntimeOptions): Promise<TuiRuntime> {
     const dataRoot = resolve(options.dataRoot);
+    const runtimeSessionId = options.sessionId ?? (createId("ses") as SessionId);
     await mkdir(dataRoot, { recursive: true });
     const ownedStore = options.eventStore ? undefined : new SqliteEventStore(resolve(dataRoot, "qi.sqlite"));
     const eventStore = options.eventStore ?? ownedStore;
@@ -246,6 +253,7 @@ export class TuiRuntime {
     registry.register("artifact", builtinTools.artifact);
     registry.register("skill", createTuiSkillTool(skills, options.workspaceRoot));
     registry.register("qi_introspect", createQiIntrospectionTool());
+    registry.register("qi_session_inspect", createQiSessionInspectionTool(eventStore, runtimeSessionId));
     const humanControl = new HumanControlService({
       eventStore,
       ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
@@ -272,7 +280,7 @@ export class TuiRuntime {
       resolveShellConfig(options.shell, false),
     );
     const runtime = new TuiRuntime(
-      options,
+      { ...options, sessionId: runtimeSessionId },
       eventStore,
       ownedStore,
       artifactStore,
@@ -665,7 +673,8 @@ export class TuiRuntime {
         contextBudgetTokens: this.#contextBudgetTokens,
         maxOutputTokens: this.#outputReserveTokens,
         historyBudgetTokens: TUI_HISTORY_BUDGET_TOKENS,
-        maxSteps: TUI_MAX_STEPS,
+        maxSteps: this.#maxSteps,
+        reserveFinalHandoff: true,
         maxActionsPerStep: TUI_MAX_ACTIONS_PER_STEP,
         mode,
         ...(options.existingRunId === undefined ? {} : { existingRunId: options.existingRunId }),
@@ -706,6 +715,7 @@ export class TuiRuntime {
     const loaded = await loadProjectConfig(this.#projectConfigPath);
     const next: QiProjectConfig = {
       version: 1,
+      ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
       ...(capabilities === undefined ? {} : { capabilities }),
       ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
       ...(this.#mounts.length === 0
@@ -725,6 +735,7 @@ export class TuiRuntime {
     const loaded = await loadProjectConfig(this.#projectConfigPath);
     const next: QiProjectConfig = {
       version: 1,
+      ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
       ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
       ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
       mounts: mounts.map((mount) => ({ id: mount.id, path: mount.path, mode: "read" as const })),
@@ -753,7 +764,7 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
     {
       leaseId: "lea_tui_read",
       subject,
-      tools: ["read", "list", "search", "find", "tree", "git", "skill", "qi_introspect"],
+      tools: ["read", "list", "search", "find", "tree", "git", "skill", "qi_introspect", "qi_session_inspect"],
       effects: ["read"],
       resources: [
         "file:**",
@@ -762,6 +773,8 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
         "skill-catalog:local",
         "skill:**",
         "qi:self-model:**",
+        "qi:session-catalog",
+        "qi:session:**",
       ],
       expiresAt,
     },

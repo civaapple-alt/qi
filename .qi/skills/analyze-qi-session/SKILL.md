@@ -1,6 +1,6 @@
 ---
 name: analyze-qi-session
-version: 1.1.1
+version: 1.2.0
 description: Analyze a Qi Session from a Session ID plus Workspace path, or from a local Qi Web URL containing `?session=ses_...`. Use when asked to review Run, Step, and Action behavior; explain failed, parked, denied, indeterminate, recovered, looping, context-pressure, tool-fallback, verification, or evidence problems; or propose concrete runtime and project fixes from durable Session evidence. Prefer this Skill's extractor over ad-hoc SQLite scripts.
 ---
 
@@ -28,6 +28,14 @@ node scripts/extract-session.mjs --session <session-id> --workspace-root <worksp
 node scripts/extract-session.mjs --session <session-id> --project <slug>
 node scripts/extract-session.mjs --session <session-id> --db <sqlite-path>
 
+# bounded projection queries
+node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root> --list-runs
+node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root> --run last --problems
+node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root> --run <run-id> --last-step
+node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root> --step <step-id> --detail
+node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root> --action <action-id> --detail
+node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root> --all
+
 # wrong — Node/npm may consume the flag
 node --workspace-root <workspace-root> scripts/extract-session.mjs --session <session-id>
 npm exec extract-session --workspace <workspace-root>
@@ -48,6 +56,13 @@ The URL path first requests the Web `/workbench` projection; if that fails and t
 `?project=<slug>`, it falls back to the matching QI_HOME project database. Extracted JSON is bounded and
 passed through Qi's high-confidence secret redaction before output. Do not copy, edit, migrate, or
 compact the source database.
+
+The default output is the Session summary plus a bounded newest-first Run list. The extractor directly reuses
+`@civaapple/qi-introspection` for the same projection used by the model-facing `qi_session_inspect` Tool.
+Always list Runs first, then request `--problems`, `--last-step`, or one explicit Step/Action. Use `--detail`
+only after narrowing the entity. The legacy bounded full report is available only with explicit `--all`.
+Unknown IDs, mutually exclusive selectors, and Run/entity ownership mismatches fail with a diagnostic; they
+never fall back to full output.
 
 If execution or local-network authority is unavailable, state the missing capability and ask for the extractor
 JSON or exported event history. Do not infer a trace from a screenshot alone.

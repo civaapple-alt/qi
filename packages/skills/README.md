@@ -28,6 +28,8 @@ source code. `version` is optional and projects as `unversioned` when absent.
 - Full resources remain unloaded until explicitly requested.
 - Installation copies a bounded allowlist of files through a sibling staging directory and atomic rename.
 - Installation never follows symbolic links, overwrites an existing Skill, or grants runtime capabilities.
+- Workspace updates require an exported ordinary-directory draft plus a fresh digest, and retain recovery state
+  when atomic publication cannot be confirmed.
 
 ## Failure semantics
 
@@ -56,6 +58,9 @@ const parsed = parseFrontmatter(
 `SkillCatalog.install()` accepts an explicit local directory or a bare name found under configured compatibility
 roots such as `~/.codex/skills` (including `.system/<name>`). It has no implicit network registry. User scope is
 the API default; callers must request Workspace scope explicitly.
+
+`exportWorkspaceDraft()` and `updateWorkspace()` are the create-draft/update pair for existing Workspace Skills.
+They do not weaken the generic `.qi` file boundary; callers must still provide effect and path authority.
 
 ## Change guide
 

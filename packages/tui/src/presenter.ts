@@ -1407,14 +1407,20 @@ export class TuiPresenter {
       ];
     }
     const lastStepId = run.stepOrder.at(-1);
-    const text = lastStepId ? run.steps[lastStepId]?.model?.text?.trim() ?? "" : "";
+    const lastStep = lastStepId ? run.steps[lastStepId] : undefined;
+    const text = lastStep?.model?.text?.trim() ?? "";
     const progress = this.durablePlanProgress();
     const remaining = progress?.remaining ?? [];
     const failure = runOutcomeDetail(run, this.#events);
     const statusKey = handoffStatusKey(run);
     const summary = text
       ? t(locale, "handoff.withReply", { result: oneLine(text.split(/\n\n/)[0] ?? text, 160) })
-      : t(locale, "handoff.noReply");
+      : lastStep?.finishReason === "handoff"
+        ? t(locale, "handoff.deterministic", {
+          steps: String(run.stepOrder.length),
+          actions: String(Object.keys(run.actions).length),
+        })
+        : t(locale, "handoff.noReply");
     const lines = [
       "",
       `· ${summary}`,

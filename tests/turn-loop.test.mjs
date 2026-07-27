@@ -86,6 +86,69 @@ test("TurnLoop completes a response-only Run with durable context and model boun
   });
 });
 
+test("TurnLoop reserves the final Step for a zero-Action handoff and carries it into the next Run", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    const registry = new ToolRegistry(broker);
+    registry.register("read", readTool);
+    const model = new ScriptedModelPort([
+      (request) => {
+        assert.match(JSON.stringify(request.messages), /next and final Step is reserved/i);
+        return [
+          { type: "action.requested", callId: "call_read_before_handoff", name: "read", input: { path: "README.md" } },
+          { type: "completed", finishReason: "actions" },
+        ];
+      },
+      (request) => {
+        assert.equal(request.tools.length, 0);
+        assert.match(JSON.stringify(request.messages), /final Step 2 of 2/i);
+        return [
+          { type: "text.delta", delta: "Completed: inspected the request. Blocked: read lease denied. Next: grant read and continue. Verification: none run." },
+          { type: "action.requested", callId: "call_forbidden_final", name: "read", input: { path: "README.md" } },
+          { type: "completed", finishReason: "actions" },
+        ];
+      },
+      (request) => {
+        const history = request.messages
+          .flatMap((message) => message.content)
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("\n");
+        assert.match(history, /previous Run was paused for budget; it was not completed/i);
+        assert.match(history, /Blocked: read lease denied/);
+        return [
+          { type: "text.delta", delta: "Continuing from the explicit budget handoff." },
+          { type: "completed", finishReason: "stop" },
+        ];
+      },
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+
+    const parked = await loop.run(turnRequest(root, artifactStore, {
+      maxSteps: 2,
+      reserveFinalHandoff: true,
+    }));
+    assert.equal(parked.status, "parked");
+    const parkedRun = parked.view.runs[parked.runId];
+    assert.deepEqual(
+      parkedRun.stepOrder.map((stepId) => parkedRun.steps[stepId].finishReason),
+      ["action-requested", "handoff"],
+    );
+    assert.equal(Object.keys(parkedRun.actions).length, 1);
+    const finalStep = parkedRun.steps[parkedRun.stepOrder.at(-1)];
+    assert.deepEqual(finalStep.rejectedActionCalls.map((call) => call.errorCode), ["ACTION_BATCH_LIMIT"]);
+
+    const continued = await loop.run(turnRequest(root, artifactStore, {
+      input: "Continue the unfinished work.",
+      maxSteps: 2,
+      reserveFinalHandoff: true,
+    }));
+    assert.equal(continued.status, "completed");
+    assert.equal(continued.text, "Continuing from the explicit budget handoff.");
+  });
+});
+
 test("TurnLoop restores bounded completed conversation history across Runs", async () => {
   await withRuntime(async ({ root, artifactStore }) => {
     const store = new InMemoryEventStore();

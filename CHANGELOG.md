@@ -7,7 +7,18 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+- Added configurable 8–100 Step budgets (default 32), a tool-free final handoff Step, and explicit
+  `step.completed.finishReason = handoff` continuation history.
+- Added digest-guarded Workspace Skill draft export/update through the dedicated Skill service, including sibling
+  staging, backup, stale-draft detection, and indeterminate recovery markers.
+- Added bounded Session/Run/Step/Action queries and the read-only `qi_session_inspect` Tool in
+  `@civaapple/qi-introspection`, plus matching analyze-qi-session filters.
+- Added `npm run verify:focused -- tests/<name>.test.mjs …` for build-once targeted iteration.
+
 ### Changed
+
+- Development verification now favors affected tests during iteration, one full typecheck/test pass for
+  cross-package completion, and package/CLI gates only when those surfaces change; releases still run all gates.
 
 ### Deprecated
 
@@ -15,9 +26,21 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- Plan/Ask mode Kernel projection now allows the read-only `qi_introspect` tool, matching capability mode
+  policy. Previously a Plan-mode model call to inspect self-model sections failed the whole Run with
+  `INVALID_MODEL_ACTION` / `MODE_TOOL_DENIED`.
+- Ask/Plan mode tool or effect denials are recovered as `model.action.rejected` (`TOOL_INPUT`) feedback so the
+  model can correct course. Kernel and capability mode allowlists are exported and lockstep-tested so dual-copy
+  drift is caught in CI.
+
 ### Security
 
+- Generic file tools continue to deny `.qi`, `.git`, and `.artifacts`; only the authorized, Effect-Journaled
+  Skill service can update `.qi/skills`, and uncertain updates cannot auto-retry.
+
 ### Documentation
+
+- Documented budget handoff recovery, Session self-inspection, and the Workspace Skill update boundary.
 
 ## [0.5.0] - 2026-07-27
 

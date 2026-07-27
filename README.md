@@ -137,6 +137,7 @@ Important commands:
 | `npm run build` | Compile the TypeScript project graph |
 | `npm run typecheck` | Type-check the project graph without emitting files |
 | `npm test` | Build and run the deterministic and integration test suite |
+| `npm run verify:focused` | Build once, then run named tests during iteration; pass `-- tests/<name>.test.mjs …` |
 | `npm run clean` | Remove TypeScript project-reference build output |
 | `npm run qi` | Start the CLI from source after build |
 | `npm run qi:web` | Start the read-only Web workbench |

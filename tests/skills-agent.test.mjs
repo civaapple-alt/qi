@@ -108,6 +108,45 @@ test("Skill catalog installs a compatible local Skill atomically and omits cache
   });
 });
 
+test("Workspace Skill draft export and digest-guarded update preserve create-only install semantics", async () => {
+  await temporary(async (root) => {
+    const workspace = join(root, "workspace");
+    const installed = join(workspace, ".qi", "skills", "review");
+    await mkdir(installed, { recursive: true });
+    await writeFile(
+      join(installed, "SKILL.md"),
+      "---\nname: review\nversion: 1.0.0\ndescription: Review code\n---\nOriginal instructions.\n",
+    );
+    const catalog = new SkillCatalog({
+      workspaceRoot: workspace,
+      userSkillsRoot: join(root, "user-skills"),
+      compatibilityRoots: [],
+    });
+    const draft = join(workspace, "skill-drafts", "review");
+    const exported = await catalog.exportWorkspaceDraft("review", draft);
+    assert.match(exported.expectedDigest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(exported.draftDigest, exported.expectedDigest);
+    assert.equal(exported.fileCount, 1);
+    await assert.rejects(catalog.exportWorkspaceDraft("review", draft), /already exists/);
+
+    await writeFile(
+      join(draft, "SKILL.md"),
+      "---\nname: review\nversion: 1.1.0\ndescription: Review code\n---\nUpdated instructions.\n",
+    );
+    const updated = await catalog.updateWorkspace("review", draft, exported.expectedDigest);
+    assert.notEqual(updated.digest, exported.expectedDigest);
+    assert.match(await readFile(join(installed, "SKILL.md"), "utf8"), /Updated instructions/);
+    await assert.rejects(
+      catalog.updateWorkspace("review", draft, exported.expectedDigest),
+      (error) => error?.name === "SkillStaleError",
+    );
+    await assert.rejects(
+      catalog.install({ source: draft, scope: "workspace", expectedName: "review" }),
+      /already installed/,
+    );
+  });
+});
+
 test("Agent definition is declarative and never executes agent.ts", async () => {
   await temporary(async (root) => {
     const agent = join(root, "agents", "researcher");

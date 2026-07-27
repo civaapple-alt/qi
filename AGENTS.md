@@ -82,17 +82,23 @@ While editing:
   changes. Put it under `## [Unreleased]` in the matching fixed subsection (`Added` → `Changed` → `Deprecated` →
   `Removed` → `Fixed` → `Security` → `Documentation`); do not invent new headings or reorder them.
 
-Before finishing:
+During iteration, run only the narrow tests affected by the change:
+
+```bash
+npm run verify:focused -- tests/<name>.test.mjs
+```
+
+Before finishing a cross-package change, run typecheck and the complete test suite once. Run package and CLI
+acceptance gates only when their corresponding surface changed:
 
 ```bash
 npm run typecheck
 npm test
-npm run packages:check
-npm run accept:preview
 ```
 
-For a package-only internal change, a narrower test may be used during iteration, but the full suite is required
-before a release or cross-package change.
+- Run `npm run packages:check` for public package API, manifest, or dependency changes.
+- Run `npm run accept:preview` for CLI packaging, installation, or startup changes.
+- Releases still run all four gates.
 
 ## Documentation rules
 

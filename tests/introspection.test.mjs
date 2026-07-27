@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ASK_MODE_TOOLS, InMemoryCapabilityBroker } from "@civaapple/qi-capability";
 import {
   createQiIntrospectionTool,
+  createQiSessionInspectionTool,
   createQiSelfContext,
+  inspectQiSession,
   qiSelfModel,
   parseQiSelfModel,
   queryQiSelfModel,
 } from "@civaapple/qi-introspection";
 import { SkillLoader } from "@civaapple/qi-skills";
-import { ToolRegistry } from "@civaapple/qi-tools";
+import { InMemoryEventStore } from "@civaapple/qi-kernel";
+import { ScriptedModelPort } from "@civaapple/qi-llm";
+import { TurnLoop } from "@civaapple/qi-loop";
+import { FileArtifactStore, ToolRegistry, readTool } from "@civaapple/qi-tools";
 import { parse } from "yaml";
 
 const root = process.cwd();
@@ -141,6 +147,138 @@ test("qi_introspect remains default-deny and executes only with an explicit read
   );
   assert.equal(settlement.output.release, "0.5.0");
   assert.match(settlement.output.authorityNotice, /cannot grant capabilities/u);
+});
+
+test("Session inspection returns bounded Run/Step projections and the model Tool stays read-only", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "qi-session-inspect-"));
+  try {
+    const artifacts = join(temporary, "artifacts");
+    await mkdir(artifacts);
+    const store = new InMemoryEventStore();
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: new ScriptedModelPort([[
+        { type: "text.delta", delta: "A".repeat(900) },
+        { type: "completed", finishReason: "stop" },
+      ]]),
+      toolRegistry: new ToolRegistry(new InMemoryCapabilityBroker()),
+    });
+    const result = await loop.run({
+      sessionId: "ses_inspect_trace",
+      title: "Inspection trace",
+      subject: "main-agent",
+      input: "Inspect this",
+      model: { provider: "fake", model: "inspect-v1" },
+      contextBlocks: [],
+      contextBudgetTokens: 4_000,
+      maxSteps: 2,
+      workspaceRoot: temporary,
+      artifactStore: new FileArtifactStore(artifacts),
+    });
+
+    const runs = inspectQiSession(store, {
+      operation: "runs",
+      sessionId: result.sessionId,
+      limit: 1,
+    });
+    assert.equal(runs.items[0].runId, result.runId);
+    assert.equal(runs.items[0].status, "completed");
+    assert.equal(runs.truncated, false);
+
+    const lastStep = inspectQiSession(store, {
+      operation: "last-step",
+      sessionId: result.sessionId,
+      runId: "last",
+    });
+    assert.equal(lastStep.items[0].kind, "step");
+    assert.equal(lastStep.items[0].modelText.length, 501);
+    assert.equal(lastStep.truncated, true);
+    assert.ok(lastStep.omissions.textCharacters > 0);
+    assert.throws(
+      () => inspectQiSession(store, {
+        operation: "step",
+        sessionId: result.sessionId,
+        stepId: "stp_missing",
+      }),
+      /Step stp_missing was not found/,
+    );
+
+    const actionRegistry = new ToolRegistry(new InMemoryCapabilityBroker());
+    actionRegistry.register("read", readTool);
+    const problemRun = await new TurnLoop({
+      eventStore: store,
+      modelPort: new ScriptedModelPort([
+        [
+          { type: "action.requested", callId: "call_denied_read", name: "read", input: { path: "README.md" } },
+          { type: "completed", finishReason: "actions" },
+        ],
+        [
+          { type: "text.delta", delta: "Read authority was denied." },
+          { type: "completed", finishReason: "stop" },
+        ],
+      ]),
+      toolRegistry: actionRegistry,
+    }).run({
+      sessionId: result.sessionId,
+      subject: "main-agent",
+      input: "Read without a lease",
+      model: { provider: "fake", model: "inspect-v1" },
+      contextBlocks: [],
+      contextBudgetTokens: 4_000,
+      maxSteps: 3,
+      workspaceRoot: temporary,
+      artifactStore: new FileArtifactStore(artifacts),
+    });
+    const problems = inspectQiSession(store, {
+      operation: "problems",
+      sessionId: result.sessionId,
+      runId: problemRun.runId,
+      detail: "detail",
+    });
+    const denied = problems.items.find((item) => item.kind === "action");
+    assert.equal(denied.status, "denied");
+    assert.equal(denied.errorCode, "AUTHORITY_DENIED");
+    assert.ok(Number.isInteger(denied.sequenceStart));
+    assert.ok(Number.isInteger(denied.sequenceEnd));
+
+    assert.ok(ASK_MODE_TOOLS.includes("qi_session_inspect"));
+    const broker = new InMemoryCapabilityBroker();
+    const registry = new ToolRegistry(broker);
+    const registration = registry.register(
+      "qi_session_inspect",
+      createQiSessionInspectionTool(store, result.sessionId),
+    );
+    const context = {
+      sessionId: result.sessionId,
+      runId: "run_inspection_tool",
+      stepId: "stp_inspection_tool",
+      actionId: "act_inspection_tool",
+      subject: "main-agent",
+      workspaceRoot: temporary,
+      artifactStore: new FileArtifactStore(artifacts),
+    };
+    await assert.rejects(
+      registry.execute("qi_session_inspect", registration.identity, { operation: "runs" }, context),
+      /No active lease permits read/,
+    );
+    broker.grant({
+      leaseId: "lea_session_read",
+      subject: "main-agent",
+      tools: ["qi_session_inspect"],
+      effects: ["read"],
+      resources: ["qi:session:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const settlement = await registry.execute(
+      "qi_session_inspect",
+      registration.identity,
+      { operation: "runs" },
+      { ...context, actionId: "act_inspection_tool_granted" },
+    );
+    assert.equal(settlement.output.items[0].runId, problemRun.runId);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 });
 
 test("the governed self-improvement Skill is loadable and has valid interface metadata", async () => {

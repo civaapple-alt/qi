@@ -122,6 +122,7 @@ const messages = {
     "theme.changed": "主题 → {theme}",
 
     "handoff.noReply": "这次没有给出最终回复。",
+    "handoff.deterministic": "已从持久事件生成预算交接：{steps} Steps · {actions} Actions；上一个 Run 已暂停，并非完成。",
     "handoff.withReply": "{result}",
     "handoff.status": "状态  {status}",
     "handoff.reason": "原因  {reason}",
@@ -336,6 +337,7 @@ const messages = {
     "theme.changed": "Theme → {theme}",
 
     "handoff.noReply": "No final reply this turn.",
+    "handoff.deterministic": "Budget handoff derived from durable events: {steps} Steps · {actions} Actions; the previous Run is paused, not complete.",
     "handoff.withReply": "{result}",
     "handoff.status": "Status  {status}",
     "handoff.reason": "Reason  {reason}",

@@ -26,9 +26,11 @@ model proposes Actions
 Batch ordering may optimize safe execution, but each Action retains its own identity, authority, and settlement.
 If one action becomes indeterminate, all siblings not yet started are explicitly settled before the Run parks.
 
-If an advertised tool's input fails schema validation, the Loop records `model.action.rejected`, returns a
-structured `TOOL_INPUT` result in assistant source order, and lets the model correct it in the next Step. No Action
-or authority request is created. An unadvertised tool remains a Run-level fail-closed violation.
+If an advertised tool's input fails schema validation, or Ask/Plan mode forbids the tool/effect after inspect,
+the Loop records `model.action.rejected`, returns a structured `TOOL_INPUT` result in assistant source order, and
+lets the model correct it in the next Step. No Action or authority request is created. An unadvertised tool remains
+a Run-level fail-closed violation. Kernel `MODE_TOOL_DENIED` / `MODE_EFFECT_DENIED` at `action.proposed` is also
+treated as recoverable model feedback rather than `INVALID_MODEL_ACTION`, so dual allowlist drift cannot kill the Run.
 
 The same event carries `ACTION_BATCH_LIMIT` for advertised calls beyond the Step's deterministic batch envelope.
 Allowed calls settle first; all tool feedback is returned in assistant source order so the next Step can reassess
@@ -63,8 +65,11 @@ preview. See [ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-a
 ## Context between Runs
 
 A new user-triggered Run reconstructs completed conversational turns from the same Session as portable user and
-assistant messages. Only the final response of a completed Run is restored: tool transcripts, failed partial
-responses, and active Runs remain durable evidence but do not masquerade as conversation. The newest complete
+assistant messages. Only the final response of a completed Run is normally restored. A budget-parked Run is
+restored only when a Step explicitly completed with `finishReason: handoff`; the injected wrapper states that the
+prior Run was paused, not completed. If the model produced no usable handoff, the Loop derives a deterministic
+summary from durable Step/Action/Plan facts. Tool transcripts, failed partial responses, and active Runs otherwise
+remain durable evidence but do not masquerade as conversation. The newest complete
 turns are retained under `historyBudgetTokens`; when the budget is exhausted, older turns are omitted as whole
 pairs so role ordering and causal meaning remain intact. Every omitted Run is exposed in the next
 `context.compiled.omittedBlockIds` as `history:omitted:<runId>` so control surfaces can show when compaction
@@ -77,6 +82,11 @@ effect settlement, or a safe steering/parking boundary. It must not spin while m
 
 Context that remains too large after eligible exchanges are compacted parks with reason `budget`. It is a
 recoverable resource boundary, not `CONTEXT_BUDGET` fault-shaped failure.
+
+Execution surfaces may reserve the final configured Step for budget handoff. The penultimate Step receives a
+warning; the final Step advertises no tools and asks for completed work/evidence, blockers, the next one to three
+actions, and verification state. Tool requests on that Step create no Action and are recorded as a zero-budget
+`ACTION_BATCH_LIMIT` rejection. The Step finishes as `handoff` and the Run remains `parked/budget`.
 
 A response-only `run.completed` remains a terminal conversation fact, not verified task completion. TUI and Web
 render it as `responded`; only evidence-backed completion is labeled `verified`.

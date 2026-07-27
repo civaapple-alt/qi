@@ -27,6 +27,7 @@ provider = "xai"
 model = "grok-config"
 base_url = "https://api.x.ai/v1"
 context_window_tokens = 256000
+max_steps = 32
 
 [capabilities]
 write = true
@@ -48,6 +49,7 @@ allowed = ["direct", "pwsh"]
       model: "grok-config",
       baseURL: "https://api.x.ai/v1",
       contextWindowTokens: 256000,
+      maxSteps: 32,
       capabilities: { write: true, verify: true, network: true, execute: false, background: true },
       shell: { default: "pwsh", allowed: ["direct", "pwsh"] },
     });
@@ -123,6 +125,10 @@ test("user config is optional, strict, and cannot contain an API key", async () 
     const invalidContext = join(root, "invalid-context.toml");
     await writeFile(invalidContext, "context_window_tokens = 4096\n");
     await assert.rejects(loadUserConfig(invalidContext), /integer between 8192 and 2000000/);
+
+    const invalidSteps = join(root, "invalid-steps.toml");
+    await writeFile(invalidSteps, "max_steps = 101\n");
+    await assert.rejects(loadUserConfig(invalidSteps), /integer between 8 and 100/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -51,6 +51,7 @@ export interface QiUserConfig {
   /** Saved OpenAI-compatible endpoints; active selection is the top-level fields. */
   readonly compatible?: readonly CompatibleEndpoint[];
   readonly contextWindowTokens?: number;
+  readonly maxSteps?: number;
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
 }
@@ -153,6 +154,7 @@ export async function persistUserProviderDefaults(
     ...(loaded.config.contextWindowTokens === undefined
       ? {}
       : { contextWindowTokens: loaded.config.contextWindowTokens }),
+    ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
   };
@@ -209,6 +211,7 @@ export async function removeCompatibleEndpoint(
     ...(loaded.config.contextWindowTokens === undefined
       ? {}
       : { contextWindowTokens: loaded.config.contextWindowTokens }),
+    ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
   };
@@ -304,6 +307,7 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
       ...(config.contextWindowTokens === undefined
         ? {}
         : { context_window_tokens: config.contextWindowTokens }),
+      ...(config.maxSteps === undefined ? {} : { max_steps: config.maxSteps }),
       ...(config.capabilities === undefined ? {} : { capabilities: { ...config.capabilities } }),
       ...(config.shell === undefined
         ? {}
@@ -331,6 +335,7 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
     ...(config.contextWindowTokens === undefined
       ? {}
       : { context_window_tokens: config.contextWindowTokens }),
+    ...(config.maxSteps === undefined ? {} : { max_steps: config.maxSteps }),
     ...(config.capabilities === undefined ? {} : { capabilities: { ...config.capabilities } }),
     ...(config.shell === undefined
       ? {}
@@ -390,6 +395,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "account_alias",
     "compatible",
     "context_window_tokens",
+    "max_steps",
     "capabilities",
     "shell",
   ], path);
@@ -414,6 +420,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     8_192,
     2_000_000,
   );
+  const maxSteps = optionalIntegerField(root.max_steps, `${path}: max_steps`, 8, 100);
   if ((model !== undefined || baseURL !== undefined) && provider === undefined) {
     throw new TypeError(`${path}: provider is required when model or base_url is configured`);
   }
@@ -457,6 +464,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(accountAlias === undefined ? {} : { accountAlias }),
     ...(compatible === undefined ? {} : { compatible }),
     ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+    ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(shell === undefined ? {} : { shell }),
   };

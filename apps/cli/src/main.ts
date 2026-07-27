@@ -21,7 +21,6 @@ import {
   contextBudgetFromWindow,
   TUI_HISTORY_BUDGET_TOKENS,
   TUI_MAX_ACTIONS_PER_STEP,
-  TUI_MAX_STEPS,
   TuiRuntime,
 } from "./runtime.js";
 
@@ -58,6 +57,7 @@ async function main(): Promise<void> {
       options.allowExecute = policy.allowExecute;
       options.allowBackground = policy.allowBackground;
       options.allowDelegate = policy.allowDelegate;
+      options.maxSteps = policy.maxSteps;
       options.projectConfigPath = policy.projectConfigPath;
       delete (options as { shell?: unknown }).shell;
       if (policy.shell !== undefined) options.shell = policy.shell;
@@ -72,6 +72,7 @@ async function main(): Promise<void> {
         }),
         contextWindowTokens: options.contextWindowTokens,
         outputReserveTokens: options.outputReserveTokens,
+        maxSteps: options.maxSteps,
         allowWrite: options.allowWrite,
         allowVerify: options.allowVerify,
         allowExecute: options.allowExecute,
@@ -135,6 +136,7 @@ async function main(): Promise<void> {
     }),
     contextWindowTokens: options.contextWindowTokens,
     outputReserveTokens: options.outputReserveTokens,
+    maxSteps: options.maxSteps,
     allowWrite: options.allowWrite,
     allowVerify: options.allowVerify,
     allowExecute: options.allowExecute,
@@ -653,7 +655,7 @@ async function launchInfo(
     contextBudgetTokens: contextBudgetFromWindow(options.contextWindowTokens, options.outputReserveTokens),
     outputReserveTokens: options.outputReserveTokens,
     historyBudgetTokens: TUI_HISTORY_BUDGET_TOKENS,
-    maxSteps: TUI_MAX_STEPS,
+    maxSteps: options.maxSteps,
     maxActionsPerStep: TUI_MAX_ACTIONS_PER_STEP,
     skillRoots: runtime.skillRoots,
     ...(branch === undefined ? {} : { branch }),

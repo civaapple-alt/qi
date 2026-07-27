@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { redactSensitiveValue } from "@civaapple/qi-capability";
+import { inspectQiSession } from "@civaapple/qi-introspection";
 import { SqliteEventStore } from "@civaapple/qi-session-store";
 import { projectWebSession } from "@civaapple/qi-web";
 
@@ -24,6 +25,8 @@ async function main(argv) {
   node scripts/extract-session.mjs --session SESSION_ID --workspace-root WORKSPACE
   node scripts/extract-session.mjs --session SESSION_ID --db SQLITE_PATH
   node scripts/extract-session.mjs --session SESSION_ID --project PROJECT_SLUG
+  [--list-runs] [--run ID|last] [--problems|--last-step|--step ID|--action ID] [--detail]
+  [--all]  Legacy bounded full report (explicit opt-in)
 
 Do NOT write:  node --workspace-root DIR scripts/extract-session.mjs
 Do NOT pass Qi flags through bare npm without \`--\` (npm's own --workspace steals them).
@@ -51,7 +54,16 @@ Or set QI_WORKSPACE to the Workspace root instead of passing --workspace-root.
           environment: options.environment,
         }),
       );
-    const report = createReport(loaded, options.workspace);
+    const report = options.all
+      ? createReport(loaded, options.workspace)
+      : inspectQiSession(createInspectionSource(loaded), {
+        operation: selectedOperation(options),
+        sessionId: loaded.view.sessionId,
+        ...(options.run === undefined ? {} : { runId: options.run }),
+        ...(options.step === undefined ? {} : { stepId: options.step }),
+        ...(options.action === undefined ? {} : { actionId: options.action }),
+        ...(options.detail ? { detail: "detail" } : {}),
+      });
     const sanitized = redactSensitiveValue(report);
     process.stdout.write(`${JSON.stringify(sanitized.value, null, 2)}\n`);
   } catch (error) {
@@ -62,11 +74,18 @@ Or set QI_WORKSPACE to the Workspace root instead of passing --workspace-root.
 
 export function parseArguments(args, environment = process.env) {
   const values = new Map();
+  const flags = new Set();
+  const booleanOptions = new Set(["--list-runs", "--problems", "--last-step", "--detail", "--all"]);
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index];
     if (item === "--help" || item === "-h") return { help: true, environment };
     if (item === "--") continue;
     if (!item?.startsWith("--")) fail(`Unexpected argument: ${item}`);
+    if (booleanOptions.has(item)) {
+      if (flags.has(item)) fail(`${item} may be provided only once`);
+      flags.add(item);
+      continue;
+    }
     const value = args[index + 1];
     if (!value || value.startsWith("--")) fail(`${item} requires a value`);
     if (values.has(item)) fail(`${item} may be provided only once`);
@@ -89,6 +108,9 @@ export function parseArguments(args, environment = process.env) {
     "--project-root",
     "--project",
     "--db",
+    "--run",
+    "--step",
+    "--action",
   ]);
   for (const key of values.keys()) {
     if (!allowed.has(key)) fail(`Unknown option: ${key}`);
@@ -106,7 +128,47 @@ export function parseArguments(args, environment = process.env) {
   if (values.has("--workspace") && values.has("--workspace-root")) {
     fail("Use --workspace-root (preferred) or --workspace, not both");
   }
-  return { help: false, url, session, workspace, db, project, environment };
+  const selectors = [
+    flags.has("--list-runs") ? "--list-runs" : undefined,
+    flags.has("--problems") ? "--problems" : undefined,
+    flags.has("--last-step") ? "--last-step" : undefined,
+    values.has("--step") ? "--step" : undefined,
+    values.has("--action") ? "--action" : undefined,
+  ].filter(Boolean);
+  if (selectors.length > 1) fail(`Query selectors are mutually exclusive: ${selectors.join(", ")}`);
+  if (flags.has("--all") && (selectors.length > 0 || values.has("--run") || flags.has("--detail"))) {
+    fail("--all cannot be combined with projection query options");
+  }
+  const run = values.get("--run");
+  if (run !== undefined && run !== "last" && !/^run_[A-Za-z0-9_-]+$/.test(run)) {
+    fail("--run must be a Run ID or last");
+  }
+  return {
+    help: false,
+    url,
+    session,
+    workspace,
+    db,
+    project,
+    environment,
+    listRuns: flags.has("--list-runs"),
+    problems: flags.has("--problems"),
+    lastStep: flags.has("--last-step"),
+    detail: flags.has("--detail"),
+    all: flags.has("--all"),
+    run,
+    step: values.get("--step"),
+    action: values.get("--action"),
+  };
+}
+
+export function selectedOperation(options) {
+  if (options.problems) return "problems";
+  if (options.lastStep) return "last-step";
+  if (options.step) return "step";
+  if (options.action) return "action";
+  if (options.run) return "run";
+  return "runs";
 }
 
 function optionalEnv(environment, name) {
@@ -243,10 +305,22 @@ function loadFromDatabase(sessionId, databasePath) {
     const view = store.load(sessionId);
     if (!view) fail(`Session ${sessionId} does not exist in ${resolve(databasePath)}`);
     const events = store.read(sessionId).events;
+    const inspectionCatalog = store.listSessions().slice(0, 50);
+    const ownershipViews = Object.fromEntries(
+      inspectionCatalog
+        .filter((summary) => summary.sessionId !== sessionId)
+        .map((summary) => {
+          const other = store.load(summary.sessionId);
+          return [summary.sessionId, other ? ownershipProjection(other) : undefined];
+        })
+        .filter(([, other]) => other !== undefined),
+    );
     return {
       view,
       events,
       narrative: projectWebSession(view, events),
+      inspectionCatalog,
+      ownershipViews,
       source: { kind: "sqlite", database: resolve(databasePath) },
     };
   } finally {
@@ -258,6 +332,44 @@ function assertBundle(value, label) {
   if (!isRecord(value) || !isRecord(value.view) || !isRecord(value.narrative) || !Array.isArray(value.events)) {
     fail(`${label} is missing view, narrative, or events`);
   }
+}
+
+function createInspectionSource(bundle) {
+  return {
+    listSessions() {
+      return bundle.inspectionCatalog ?? [{
+        sessionId: bundle.view.sessionId,
+        title: bundle.view.title ?? bundle.view.sessionId,
+        version: bundle.events.length,
+        updatedAt: bundle.events.at(-1)?.occurredAt ?? "",
+      }];
+    },
+    load(sessionId) {
+      return sessionId === bundle.view.sessionId
+        ? bundle.view
+        : bundle.ownershipViews?.[sessionId];
+    },
+    read(sessionId, afterVersion = 0) {
+      return {
+        sessionId,
+        version: bundle.events.length,
+        events: sessionId === bundle.view.sessionId ? bundle.events.slice(afterVersion) : [],
+      };
+    },
+  };
+}
+
+function ownershipProjection(view) {
+  return {
+    runOrder: view.runOrder,
+    runs: Object.fromEntries(view.runOrder.map((runId) => {
+      const run = view.runs[runId];
+      return [runId, {
+        steps: Object.fromEntries(Object.keys(run?.steps ?? {}).map((stepId) => [stepId, {}])),
+        actions: Object.fromEntries(Object.keys(run?.actions ?? {}).map((actionId) => [actionId, {}])),
+      }];
+    })),
+  };
 }
 
 function createReport(bundle, workspace) {

@@ -35,7 +35,7 @@ export type ActionStatus =
 export interface StepView {
   stepId: StepId;
   status: StepStatus;
-  finishReason?: "action-requested" | "response" | "error";
+  finishReason?: "action-requested" | "response" | "handoff" | "error";
   compactions?: Array<{
     sourceStepId: StepId;
     artifactRef: string;
@@ -379,7 +379,12 @@ function hasActiveTopLevelRun(view: SessionView): boolean {
   return current !== undefined && (current.status === "triggered" || current.status === "active");
 }
 
-const askTools = new Set([
+/**
+ * Hard projection allowlists for Ask/Plan. Kept intentionally separate from
+ * `@civaapple/qi-capability` mode-policy (Kernel must not depend on capability),
+ * and locked in lockstep by `tests/session-mode.test.mjs`.
+ */
+export const KERNEL_ASK_MODE_TOOLS = [
   "read",
   "list",
   "search",
@@ -389,8 +394,15 @@ const askTools = new Set([
   "fetch",
   "skill",
   "artifact",
-]);
-const planOnlyTools = new Set(["plan_document", "delegate"]);
+  "qi_introspect",
+  "qi_session_inspect",
+] as const;
+
+/** Plan-only tools beyond {@link KERNEL_ASK_MODE_TOOLS}. */
+export const KERNEL_PLAN_MODE_EXTRA_TOOLS = ["plan_document", "delegate"] as const;
+
+const askTools = new Set<string>(KERNEL_ASK_MODE_TOOLS);
+const planOnlyTools = new Set<string>(KERNEL_PLAN_MODE_EXTRA_TOOLS);
 
 function assertActionAllowedForMode(run: RunView, toolName: string, effect: ActionView["effect"]): void {
   if (toolName === "plan_document" && run.mode !== "plan") {

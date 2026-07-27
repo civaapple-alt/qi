@@ -25,13 +25,15 @@ const expectedRuntimeExports = {
   "@civaapple/qi-introspection": [
     "QI_SELF_SECTIONS", "QiSelfDecisionSchema", "QiSelfGapSchema",
     "QiSelfInvariantSchema", "QiSelfModelSchema", "QiSelfPackageSchema",
+    "QiSessionInspectionError",
     "PublicPackageMaturitySchema", "RuntimeMaturitySchema", "SelfModelPackageKindSchema",
-    "createQiIntrospectionTool", "createQiSelfContext", "qiSelfModel",
-    "parseQiSelfModel", "queryQiSelfModel",
+    "createQiIntrospectionTool", "createQiSelfContext", "createQiSessionInspectionTool",
+    "inspectQiSession", "qiSelfModel", "parseQiSelfModel", "queryQiSelfModel",
   ],
   "@civaapple/qi-kernel": [
-    "ConcurrencyError", "InMemoryEventStore", "StateTransitionError",
-    "applySessionEvent", "replaySession",
+    "ConcurrencyError", "InMemoryEventStore", "KERNEL_ASK_MODE_TOOLS",
+    "KERNEL_PLAN_MODE_EXTRA_TOOLS", "StateTransitionError", "applySessionEvent",
+    "replaySession",
   ],
   "@civaapple/qi-llm": [
     "BUILTIN_PROVIDER_PROFILES", "ModelContentPartSchema", "ModelEventSchema",
@@ -59,7 +61,10 @@ const expectedRuntimeExports = {
   ],
   "@civaapple/qi-scheduler": ["SessionEventTriggerSink", "SqliteWatcherScheduler"],
   "@civaapple/qi-session-store": ["SqliteEventStore"],
-  "@civaapple/qi-skills": ["SkillCatalog", "SkillLoader", "loadAgentDefinition", "parseFrontmatter", "requireString"],
+  "@civaapple/qi-skills": [
+    "SkillCatalog", "SkillLoader", "SkillStaleError", "SkillUpdateIndeterminateError",
+    "loadAgentDefinition", "parseFrontmatter", "requireString",
+  ],
   "@civaapple/qi-stream": ["EventStreamService", "SessionEventHub", "encodeSseEvent", "sseStream"],
   "@civaapple/qi-tools": [
     "AuthorityDeniedError", "EffectReplayBlockedError", "FileArtifactStore",

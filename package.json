@@ -25,7 +25,8 @@
     "release:audit": "node scripts/source-release-audit.mjs",
     "release:archive": "node scripts/build-source-archive.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "verify:focused": "node scripts/verify-focused.mjs"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

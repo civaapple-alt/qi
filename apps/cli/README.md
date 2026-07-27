@@ -114,7 +114,7 @@ names the exact Qi data directory; when omitted it defaults to `~/.qi/projects/<
 `$QI_HOME/projects/...`), e.g. `C:\Users\…\.qi\projects\D-ai-project-qi`. Workspace-local
 `.qi` still holds Skills and `qi.verify.json`.
 
-Per-Workspace policy lives in `$QI_HOME/projects/<slug>/config.toml` (`[capabilities]`, `[shell]`,
+Per-Workspace policy lives in `$QI_HOME/projects/<slug>/config.toml` (`max_steps`, `[capabilities]`, `[shell]`,
 `[[mounts]]`), overlaying global `~/.qi/config.toml`; CLI flags still win. `--add-dir PATH` and
 `/mounts add` authorize **read-only** mounts (`mount:<id>/…`); mutations stay in the primary Workspace.
 Outside-root reads fail with `PATH_GRANT_REQUIRED` and open an allow/deny panel
@@ -148,12 +148,22 @@ User TOML may set `context_window_tokens`. The TUI reserves up to 16K tokens for
 prompt budget, reserve, current use, and compacted-exchange savings. `/context` projects committed
 `context.compacted` events; increasing the window does not turn off compaction or remove its Artifact trail.
 
+Main Runs default to 32 Steps. `max_steps` accepts 8–100 in user or project TOML, with
+`--max-steps` > project > user > default precedence. Step 31 warns that only one executable Step remains; Step
+32 is a tool-free handoff and parks the Run for budget with explicit progress, blockers, next actions, and
+verification state.
+
 The Skill catalog combines `<workspace>/.qi/skills` and `~/.qi/skills`; Workspace wins on a name
 collision. Only metadata enters the initial model context. The `skill` tool progressively loads a selected
 `SKILL.md` or named resource. `/skills` → **Install skill** picks user vs Workspace scope, then a form for a
 compatible Skill name or local path (for example from `~/.codex/skills/.system`); Qi does not search or
 download from the network. With write authority, the model can only install to the Workspace and the Action
 remains capability-checked and Effect-Journaled.
+
+The same dedicated `skill` Tool can export an existing Workspace Skill to a new ordinary draft directory and
+publish a digest-guarded update. Ordinary file tools still cannot access `.qi`. The read-only
+`qi_session_inspect` Tool lets Ask, Plan, and Agent inspect bounded Session projections from the current project
+EventStore; this capability adds no TUI command, panel, or query API.
 
 See [the interaction contract](docs/interaction-model.md) for projection and rendering boundaries.
 

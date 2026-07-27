@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   mergeRedactionSummaries,
+  modeAllowsIntent,
   redactSensitiveText,
   redactSensitiveValue,
   type RedactionSummary,
@@ -11,7 +12,13 @@ import {
   compileContext,
   type ContextBlock,
 } from "@civaapple/qi-context";
-import type { EventStore, RunPlanBinding, SessionMode, SessionView } from "@civaapple/qi-kernel";
+import {
+  StateTransitionError,
+  type EventStore,
+  type RunPlanBinding,
+  type SessionMode,
+  type SessionView,
+} from "@civaapple/qi-kernel";
 import type { ModelContentPart, ModelEvent, ModelMessage, ModelPort, ModelRef } from "@civaapple/qi-llm";
 import { createId, type RunId, type SessionEvent, type SessionId, type StepId } from "@civaapple/qi-protocol";
 import {
@@ -50,6 +57,11 @@ export interface TurnRequest {
   maxOutputTokens?: number;
   historyBudgetTokens?: number;
   maxSteps: number;
+  /**
+   * Reserve the final Step for a tool-free budget handoff. Execution surfaces
+   * should enable this; embedded callers retain the historical maxSteps contract.
+   */
+  reserveFinalHandoff?: boolean;
   maxActionsPerStep?: number;
   /** When set, only these tool names are advertised to the model for this Turn. */
   toolAllowlist?: readonly string[];
@@ -215,6 +227,13 @@ export class TurnLoop {
     let finalText = "";
 
     for (let stepNumber = 1; stepNumber <= request.maxSteps; stepNumber += 1) {
+      const finalHandoffStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps;
+      const budgetWarningStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps - 1;
+      const stepContextBlocks = [
+        ...request.contextBlocks,
+        ...(budgetWarningStep ? [createBudgetWarningBlock(stepNumber, request.maxSteps)] : []),
+        ...(finalHandoffStep ? [createBudgetHandoffBlock(stepNumber, request.maxSteps)] : []),
+      ];
       const stepId = createId("stp") as StepId;
       writer.append("step.started", { runId, stepId }, { kind: "runtime", id: "qi" });
       const registeredNames = this.#toolRegistry.catalog().map((tool) => tool.name);
@@ -222,7 +241,7 @@ export class TurnLoop {
       const allowlist = request.toolAllowlist
         ? modeTools.filter((name) => request.toolAllowlist!.includes(name))
         : modeTools;
-      const catalog = this.#toolRegistry.catalog({ tools: allowlist });
+      const catalog = finalHandoffStep ? [] : this.#toolRegistry.catalog({ tools: allowlist });
       const toolCatalogTokens = approximateTokenEstimator.estimate(
         JSON.stringify(catalog.map((tool) => tool.model)),
       );
@@ -247,7 +266,7 @@ export class TurnLoop {
           });
         }
         try {
-          compiled = compileTurnContext(request, conversation, toolCatalogTokens);
+          compiled = compileTurnContext(request, conversation, toolCatalogTokens, stepContextBlocks);
         } catch (error) {
           if (!(error instanceof ContextBudgetError)) throw error;
           const compacted = await this.#compactExchanges({
@@ -265,7 +284,7 @@ export class TurnLoop {
             reason: "hard-limit",
           });
           if (!compacted) throw error;
-          compiled = compileTurnContext(request, conversation, toolCatalogTokens);
+          compiled = compileTurnContext(request, conversation, toolCatalogTokens, stepContextBlocks);
         }
         const conversationTokens = estimateMessages(conversation);
         writer.append(
@@ -290,6 +309,20 @@ export class TurnLoop {
           { kind: "runtime", id: "context_compiler" },
         );
       } catch (error) {
+        if (finalHandoffStep && !request.signal?.aborted) {
+          finalText = deterministicBudgetHandoff(writer.view, runId, request.maxSteps, error);
+          writer.append(
+            "step.completed",
+            { runId, stepId, finishReason: "handoff" },
+            { kind: "runtime", id: "qi" },
+          );
+          writer.append(
+            "run.parked",
+            { runId, reason: "budget", detail: `Reached maxSteps=${request.maxSteps}; deterministic handoff generated` },
+            { kind: "runtime", id: "qi" },
+          );
+          return this.#result(writer, request.sessionId, runId, "parked", finalText);
+        }
         writer.append(
           "step.completed",
           { runId, stepId, finishReason: "error" },
@@ -347,6 +380,20 @@ export class TurnLoop {
           }),
         );
       } catch (error) {
+        if (finalHandoffStep && !request.signal?.aborted) {
+          finalText = deterministicBudgetHandoff(writer.view, runId, request.maxSteps, error);
+          writer.append(
+            "step.completed",
+            { runId, stepId, finishReason: "handoff" },
+            { kind: "runtime", id: "qi" },
+          );
+          writer.append(
+            "run.parked",
+            { runId, reason: "budget", detail: `Reached maxSteps=${request.maxSteps}; deterministic handoff generated` },
+            { kind: "runtime", id: "qi" },
+          );
+          return this.#result(writer, request.sessionId, runId, "parked", finalText);
+        }
         writer.append(
           "step.completed",
           { runId, stepId, finishReason: "error" },
@@ -364,6 +411,25 @@ export class TurnLoop {
       }
 
       if (modelResult.terminal.type === "failed") {
+        if (finalHandoffStep) {
+          finalText = deterministicBudgetHandoff(
+            writer.view,
+            runId,
+            request.maxSteps,
+            new Error(`${modelResult.terminal.code}: ${modelResult.terminal.message}`),
+          );
+          writer.append(
+            "step.completed",
+            { runId, stepId, finishReason: "handoff" },
+            { kind: "runtime", id: "qi" },
+          );
+          writer.append(
+            "run.parked",
+            { runId, reason: "budget", detail: `Reached maxSteps=${request.maxSteps}; deterministic handoff generated` },
+            { kind: "runtime", id: "qi" },
+          );
+          return this.#result(writer, request.sessionId, runId, "parked", finalText);
+        }
         writer.append(
           "step.completed",
           { runId, stepId, finishReason: "error" },
@@ -414,7 +480,39 @@ export class TurnLoop {
       }
       const assistantMessage: ModelMessage = { role: "assistant", content: assistantContent };
       conversation.push(assistantMessage);
-      finalText = modelResult.text;
+      finalText = modelResult.text || (
+        finalHandoffStep
+          ? deterministicBudgetHandoff(writer.view, runId, request.maxSteps)
+          : modelResult.text
+      );
+
+      if (finalHandoffStep) {
+        for (const action of modelResult.actions) {
+          writer.append(
+            "model.action.rejected",
+            {
+              runId,
+              stepId,
+              callId: action.callId,
+              toolName: action.name,
+              errorCode: "ACTION_BATCH_LIMIT",
+              reason: "The final budget handoff Step has an Action budget of zero",
+            },
+            { kind: "runtime", id: "budget_guard" },
+          );
+        }
+        writer.append(
+          "step.completed",
+          { runId, stepId, finishReason: "handoff" },
+          { kind: "runtime", id: "qi" },
+        );
+        writer.append(
+          "run.parked",
+          { runId, reason: "budget", detail: `Reached maxSteps=${request.maxSteps}; handoff recorded` },
+          { kind: "runtime", id: "qi" },
+        );
+        return this.#result(writer, request.sessionId, runId, "parked", finalText);
+      }
 
       if (modelResult.actions.length === 0) {
         writer.append(
@@ -503,6 +601,16 @@ export class TurnLoop {
           };
           try {
             const inspected = this.#toolRegistry.inspect(action.name, registration.identity, action.input, toolContext);
+            const modeGate = modeAllowsIntent(frozenMode, inspected.name, inspected.effect);
+            if (!modeGate.ok) {
+              rejectedCalls.push({
+                callId: action.callId,
+                toolName: action.name,
+                errorCode: "TOOL_INPUT",
+                reason: modeGate.reason,
+              });
+              continue;
+            }
             candidates.push({ callId: action.callId, actionId, inspected, context: toolContext });
           } catch (error) {
             if (!(error instanceof ToolInputError)) throw error;
@@ -527,22 +635,56 @@ export class TurnLoop {
             isError: true,
           });
         }
+        const accepted: CandidateCall[] = [];
         for (const candidate of candidates) {
-          writer.append(
-            "action.proposed",
-            {
-              runId,
-              stepId,
-              actionId: candidate.actionId,
-              toolName: candidate.inspected.name,
-              toolIdentity: candidate.inspected.identity,
-              input: candidate.inspected.input,
-              effect: candidate.inspected.effect,
-              resources: [...candidate.inspected.resources],
-            },
-            { kind: "agent", id: request.subject },
-          );
+          try {
+            writer.append(
+              "action.proposed",
+              {
+                runId,
+                stepId,
+                actionId: candidate.actionId,
+                toolName: candidate.inspected.name,
+                toolIdentity: candidate.inspected.identity,
+                input: candidate.inspected.input,
+                effect: candidate.inspected.effect,
+                resources: [...candidate.inspected.resources],
+              },
+              { kind: "agent", id: request.subject },
+            );
+            accepted.push(candidate);
+          } catch (error) {
+            // Kernel mode hard-gate is a recoverable model correction path when it
+            // drifts from pre-proposal checks; other transition faults stay fatal.
+            if (
+              error instanceof StateTransitionError &&
+              (error.code === "MODE_TOOL_DENIED" || error.code === "MODE_EFFECT_DENIED")
+            ) {
+              writer.append(
+                "model.action.rejected",
+                {
+                  runId,
+                  stepId,
+                  callId: candidate.callId,
+                  toolName: candidate.inspected.name,
+                  errorCode: "TOOL_INPUT",
+                  reason: error.message,
+                },
+                { kind: "runtime", id: "kernel" },
+              );
+              toolResults.set(candidate.callId, {
+                type: "tool-result",
+                callId: candidate.callId,
+                output: { code: "TOOL_INPUT", reason: error.message },
+                isError: true,
+              });
+              continue;
+            }
+            throw error;
+          }
         }
+        candidates.length = 0;
+        candidates.push(...accepted);
       } catch (error) {
         writer.append(
           "step.completed",
@@ -954,14 +1096,95 @@ function compileTurnContext(
   request: TurnRequest,
   conversation: readonly ModelMessage[],
   toolCatalogTokens: number,
+  blocks: readonly ContextBlock[] = request.contextBlocks,
 ) {
   const fixedTokens = estimateMessages(conversation) + toolCatalogTokens;
   const remaining = request.contextBudgetTokens - fixedTokens;
   if (remaining <= 0) throw new ContextBudgetError(fixedTokens, request.contextBudgetTokens);
   return compileContext({
-    blocks: request.contextBlocks,
+    blocks,
     budgetTokens: remaining,
   });
+}
+
+function createBudgetWarningBlock(stepNumber: number, maxSteps: number): ContextBlock {
+  return {
+    id: `budget-warning:${stepNumber}`,
+    kind: "control",
+    source: "qi:runtime",
+    role: "system",
+    content: [
+      `Budget warning: this is Step ${stepNumber} of ${maxSteps}.`,
+      "The next and final Step is reserved for a tool-free handoff.",
+      "Use this Step for the highest-value remaining action and leave enough context for a concise continuation.",
+    ].join("\n"),
+    priority: 1_000,
+    required: true,
+    retentionReason: "The model must know that only one executable Step remains.",
+  };
+}
+
+function createBudgetHandoffBlock(stepNumber: number, maxSteps: number): ContextBlock {
+  return {
+    id: `budget-handoff:${stepNumber}`,
+    kind: "control",
+    source: "qi:runtime",
+    role: "system",
+    content: [
+      `Budget handoff: this is the final Step ${stepNumber} of ${maxSteps}.`,
+      "No tools are available and the Action budget is zero. Do not request a tool.",
+      "Summarize: (1) completed work and evidence; (2) blockers and unfinished items;",
+      "(3) the next 1–3 concrete actions; (4) verification already run and still required.",
+      "This Run will be parked for budget after the response; do not claim that the task is complete.",
+    ].join("\n"),
+    priority: 1_001,
+    required: true,
+    retentionReason: "The final Step must produce a durable continuation handoff.",
+  };
+}
+
+function deterministicBudgetHandoff(
+  view: SessionView | undefined,
+  runId: RunId,
+  maxSteps?: number,
+  cause?: unknown,
+): string {
+  const run = view?.runs[runId];
+  const actions = run ? Object.values(run.actions) : [];
+  const settledActions = actions.filter((action) =>
+    ["completed", "failed", "denied", "cancelled", "indeterminate"].includes(action.status)
+  );
+  const lastAction = actions.at(-1);
+  const completedPlanItems = new Set(
+    view
+      ? Object.values(view.runs)
+        .filter((candidate) => candidate.status === "completed" && candidate.planBinding)
+        .map((candidate) => candidate.planBinding!.planItemId)
+      : [],
+  );
+  const boundPlan = run?.planBinding;
+  const revision = boundPlan === undefined
+    ? undefined
+    : view?.plans[boundPlan.planId]?.revisions[boundPlan.revision];
+  const remainingPlanItems = revision?.items
+    .filter((item) => !completedPlanItems.has(item.planItemId))
+    .slice(0, 3)
+    .map((item) => item.title) ?? [];
+  const budgetLabel = maxSteps === undefined ? "the configured Step budget" : `maxSteps=${maxSteps}`;
+  const causeText = cause === undefined
+    ? ""
+    : ` Handoff generation fallback reason: ${cause instanceof Error ? cause.message : String(cause)}.`;
+  return [
+    `The previous Run was paused after reaching ${budgetLabel}; it was not completed.`,
+    `Progress: ${run?.stepOrder.length ?? 0} Steps recorded and ${settledActions.length}/${actions.length} Actions settled.`,
+    lastAction
+      ? `Last Action: ${lastAction.actionId} (${lastAction.toolName}) ended as ${lastAction.status}.`
+      : "Last Action: none recorded.",
+    remainingPlanItems.length > 0
+      ? `Remaining Plan direction: ${remainingPlanItems.join("; ")}.`
+      : "Remaining Plan direction: inspect the latest durable events, then continue the unfinished user request.",
+    `Verification: derive completed checks from Action results; re-run any required checks not evidenced in the Session.${causeText}`,
+  ].join("\n");
 }
 
 function estimateMessages(messages: readonly ModelMessage[]): number {
@@ -1028,17 +1251,30 @@ function compileConversationHistory(
   const turns: Array<{ runId: RunId; messages: ModelMessage[] }> = [];
   for (const runId of view.runOrder) {
     const run = view.runs[runId];
-    if (!run || run.trigger !== "user" || run.status !== "completed" || !run.input) continue;
+    if (!run || run.trigger !== "user" || !run.input) continue;
+    const isCompleted = run.status === "completed";
+    const isBudgetHandoff = run.status === "parked"
+      && run.terminal?.reason === "budget"
+      && run.steps[run.stepOrder.at(-1) ?? ""]?.finishReason === "handoff";
+    if (!isCompleted && !isBudgetHandoff) continue;
     const finalText = [...run.stepOrder]
       .reverse()
       .map((stepId) => run.steps[stepId]?.model?.text.trim())
       .find((text): text is string => Boolean(text));
-    if (!finalText) continue;
+    const assistantText = isBudgetHandoff
+      ? [
+          "<qi-budget-handoff>",
+          "The previous Run was paused for budget; it was not completed.",
+          finalText || deterministicBudgetHandoff(view, runId),
+          "</qi-budget-handoff>",
+        ].join("\n")
+      : finalText;
+    if (!assistantText) continue;
     turns.push({
       runId,
       messages: [
         { role: "user", content: [{ type: "text", text: run.input }] },
-        { role: "assistant", content: [{ type: "text", text: finalText }] },
+        { role: "assistant", content: [{ type: "text", text: assistantText }] },
       ],
     });
   }

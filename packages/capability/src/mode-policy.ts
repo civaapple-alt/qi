@@ -12,6 +12,7 @@ const askTools = new Set([
   "skill",
   "artifact",
   "qi_introspect",
+  "qi_session_inspect",
 ]);
 const planExtraTools = new Set(["plan_document", "delegate"]);
 

@@ -33,7 +33,7 @@ export interface WebStepProjection {
   stepId: string;
   index: number;
   status: "running" | "model-complete" | "settled";
-  finishReason: "action-requested" | "response" | "error" | undefined;
+  finishReason: "action-requested" | "response" | "handoff" | "error" | undefined;
   modelText: string | undefined;
   provider: string | undefined;
   model: string | undefined;

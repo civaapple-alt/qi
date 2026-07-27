@@ -59,7 +59,9 @@ const stream = new InMemoryEventStore().read(createId("ses"));
 ## Public API
 
 The stable surface is `applySessionEvent()`, `replaySession()`, projection view types, `EventStore`,
-`InMemoryEventStore`, and domain errors.
+`InMemoryEventStore`, domain errors, and the `KERNEL_ASK_MODE_TOOLS` /
+`KERNEL_PLAN_MODE_EXTRA_TOOLS` hard-gate allowlists. The allowlists are exported so cross-package verification can
+prove that Kernel replay and capability policy accept the same Ask/Plan tool names; they do not grant authority.
 
 ## Change guide
 
