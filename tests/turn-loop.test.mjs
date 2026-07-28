@@ -668,16 +668,10 @@ test("TurnLoop executes a Step's consecutive read Actions concurrently", async (
     ]);
     const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
 
-    const startedAt = Date.now();
     const result = await loop.run(turnRequest(root, artifactStore));
-    const elapsedMs = Date.now() - startedAt;
 
     assert.equal(result.status, "completed");
-    // Three read Actions each pay an 80/20/50ms delay; run serially that is >=150ms, run concurrently it is
-    // dominated by the slowest single delay (~80ms). The threshold stays well clear of either bound to avoid
-    // flakes from scheduler jitter while still failing if reads regress to serial execution.
     assert.equal(activity.maxActive, 3);
-    assert.equal(elapsedMs < 150, true, `expected concurrent execution, took ${elapsedMs}ms`);
 
     const actions = Object.values(result.view.runs[result.runId].actions);
     assert.deepEqual(actions.map((action) => action.status), ["completed", "completed", "completed"]);

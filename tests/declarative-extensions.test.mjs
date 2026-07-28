@@ -15,6 +15,7 @@ import {
   resolveLayeredResources,
   validateWorkspaceQiDirectory,
 } from "@civaapple/qi-node/extensions";
+import { removeFixture } from "./helpers/remove-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +34,7 @@ test("Workspace .qi accepts only declaration allowlist content", async () => {
       /Executable content is forbidden/,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -48,7 +49,7 @@ test("Workspace .qi rejects secrets and unknown paths", async () => {
     await assert.rejects(() => validateWorkspaceQiDirectory(root), /not allowed/);
     await rm(join(root, ".qi", "runtime.sqlite"));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -66,7 +67,7 @@ test("Workspace .qi rejects symlinks", async (t) => {
     }
     await assert.rejects(() => validateWorkspaceQiDirectory(root), /Symlinks are forbidden/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -118,7 +119,7 @@ test("local package install is content-addressed, deduplicated, and script-free"
     await writeFile(join(source, "package.json"), '{"scripts":{"postinstall":"node run.js"}}');
     await assert.rejects(() => store.installLocal(source), /must not contain npm lifecycle/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -173,7 +174,7 @@ test("npm package install requires exact metadata integrity and never executes s
     );
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
-    await rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -215,7 +216,7 @@ test("Git package install resolves only an exact commit", async (t) => {
       /exact/,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 

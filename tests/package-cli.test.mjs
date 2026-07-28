@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { runPackageCliCommand } from "../apps/cli/dist/package-command.js";
 import { projectPaths } from "@civaapple/qi-node/paths";
+import { removeFixture } from "./helpers/remove-fixture.mjs";
 
 async function createPlugin(root) {
   const source = join(root, "plugin");
@@ -36,7 +37,7 @@ test("qi install/list/remove manages user declarative package scope", async () =
     assert.deepEqual(lock.packages, {});
     assert.match(await readFile(join(qiHome, "packages", "installed.toml"), "utf8"), /^version = 1/m);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -72,6 +73,6 @@ test("project package scope writes only declarations to .qi and private activati
       /ENOENT/,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
