@@ -15,6 +15,21 @@ export interface ProviderTransportCapabilities {
   readonly requestMetadata: boolean;
 }
 
+export type ProviderThinkingEffort = "low" | "high" | "max";
+
+export interface ProviderModelThinking {
+  readonly mode: "toggle" | "effort";
+  readonly supportedEfforts?: readonly ProviderThinkingEffort[];
+  readonly defaultEffort?: ProviderThinkingEffort;
+}
+
+export interface ProviderModelProfile {
+  readonly id: string;
+  readonly displayName: string;
+  readonly contextTokens: number;
+  readonly thinking?: ProviderModelThinking;
+}
+
 export interface ProviderProfile {
   readonly id: string;
   readonly displayName: string;
@@ -24,6 +39,7 @@ export interface ProviderProfile {
   readonly authSchemes: readonly ProviderAuthScheme[];
   readonly defaultModel?: string;
   readonly contextTokens: number;
+  readonly models?: readonly ProviderModelProfile[];
   readonly capabilities: ProviderTransportCapabilities;
   /** Environment variable preferred for official API-key auth. */
   readonly envApiKey?: string;
@@ -86,9 +102,43 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
     officialBaseURL: "https://api.kimi.com/coding/v1",
     officialHosts: ["api.kimi.com"],
     authSchemes: ["oauth-device", "api-key"],
-    defaultModel: "kimi-for-coding",
-    contextTokens: 128_000,
-    capabilities: { ...chatCaps },
+    defaultModel: "k3",
+    contextTokens: 1_048_576,
+    models: [
+      {
+        id: "k3",
+        displayName: "Kimi K3",
+        contextTokens: 1_048_576,
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "k3-256k",
+        displayName: "Kimi K3 256K",
+        contextTokens: 262_144,
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "kimi-for-coding",
+        displayName: "Kimi K2.7 Code",
+        contextTokens: 262_144,
+        thinking: { mode: "toggle" },
+      },
+      {
+        id: "kimi-for-coding-highspeed",
+        displayName: "Kimi K2.7 Code HighSpeed",
+        contextTokens: 262_144,
+        thinking: { mode: "toggle" },
+      },
+    ],
+    capabilities: { ...chatCaps, reasoning: true },
     envApiKey: "KIMI_API_KEY",
     envBaseURL: "KIMI_BASE_URL",
     envModel: "KIMI_MODEL",
@@ -158,6 +208,17 @@ export function listProviderProfiles(): readonly ProviderProfile[] {
   return BUILTIN_PROVIDER_PROFILES;
 }
 
+export function getProviderModelProfile(
+  profile: ProviderProfile,
+  model: string,
+): ProviderModelProfile | undefined {
+  return profile.models?.find((candidate) => candidate.id === model);
+}
+
+export function providerModelContextTokens(profile: ProviderProfile, model: string): number {
+  return getProviderModelProfile(profile, model)?.contextTokens ?? profile.contextTokens;
+}
+
 export function classifyProfileEndpoint(
   profile: ProviderProfile,
   baseURL: string,
@@ -170,6 +231,7 @@ export function classifyProfileEndpoint(
 export function modelCapabilitiesFromProfile(
   profile: ProviderProfile,
   narrowing: Partial<{
+    model: string;
     contextTokens: number;
     toolCalls: boolean;
     reasoning: boolean;
@@ -177,7 +239,10 @@ export function modelCapabilitiesFromProfile(
   }> = {},
 ): ModelCapabilities {
   const toolCalls = narrowing.toolCalls ?? profile.capabilities.toolCalls;
-  const reasoning = narrowing.reasoning ?? profile.capabilities.reasoning;
+  const modelProfile = narrowing.model === undefined
+    ? undefined
+    : getProviderModelProfile(profile, narrowing.model);
+  const reasoning = narrowing.reasoning ?? (Boolean(modelProfile?.thinking) || profile.capabilities.reasoning);
   const output = new Set<"text" | "reasoning" | "action">(["text"]);
   if (reasoning) output.add("reasoning");
   if (toolCalls) output.add("action");
@@ -186,7 +251,7 @@ export function modelCapabilitiesFromProfile(
   return {
     input,
     output,
-    contextTokens: narrowing.contextTokens ?? profile.contextTokens,
+    contextTokens: narrowing.contextTokens ?? modelProfile?.contextTokens ?? profile.contextTokens,
     parallelActions: toolCalls,
     promptCache: profile.wireApi === "responses",
   };

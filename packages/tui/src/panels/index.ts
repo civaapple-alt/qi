@@ -1,5 +1,10 @@
 export { panelFooter, panelHeader, panelRule, pointer, currentMark } from "./chrome.js";
-export { FormPanel, type FormField, type FormPanelOptions } from "./form-panel.js";
+export {
+  FormPanel,
+  type FormField,
+  type FormFieldOption,
+  type FormPanelOptions,
+} from "./form-panel.js";
 export { ListPanel, type ListPanelOptions } from "./list-panel.js";
 export { MultiSelectPanel, type MultiSelectPanelOptions } from "./multi-select-panel.js";
 export { ScrollPanel, type ScrollPanelOptions } from "./scroll-panel.js";

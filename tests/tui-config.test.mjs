@@ -12,6 +12,7 @@ import {
   persistUserLanguage,
   persistUserProviderDefaults,
   persistUserTheme,
+  parseTuiCliArguments,
   resolveCapabilities,
   resolveLanguage,
   resolveTheme,
@@ -107,6 +108,75 @@ allowed = ["direct", "pwsh"]
   }
 });
 
+test("Kimi model defaults resolve model windows and normalized reasoning effort", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-kimi-model-config-"));
+  const path = join(root, "config.toml");
+  try {
+    await writeFile(path, `
+version = 1
+provider = "kimi"
+model = "k3"
+reasoning_effort = "xhigh"
+`);
+    const loaded = await loadUserConfig(path);
+    assert.equal(loaded.config.reasoningEffort, "max");
+    const persisted = await persistUserProviderDefaults({
+      provider: "kimi",
+      model: "k3-256k",
+      baseURL: "https://api.kimi.com/coding/v1",
+      reasoningEffort: "low",
+      contextWindowTokens: 300_000,
+    }, path);
+    assert.equal(persisted.config.model, "k3-256k");
+    assert.equal(persisted.config.reasoningEffort, "low");
+    assert.equal(persisted.config.contextWindowTokens, 300_000);
+
+    const savedBody = await readFile(path, "utf8");
+    assert.match(savedBody, /model = "k3-256k"/);
+    assert.match(savedBody, /reasoning_effort = "low"/);
+    assert.match(savedBody, /context_window_tokens = 300000/);
+
+    await writeFile(path, `
+version = 1
+provider = "kimi"
+model = "k3"
+reasoning_effort = "max"
+`);
+    const k3 = await parseTuiCliArguments(
+      ["--workspace", root, "--config", path],
+      { environment: { QI_HOME: join(root, "state") } },
+    );
+    assert.equal(k3.kind, "run");
+    assert.equal(k3.options.provider.model, "k3");
+    assert.equal(k3.options.provider.reasoningEffort, "max");
+    assert.equal(k3.options.contextWindowTokens, 1_048_576);
+
+    const k3Compact = await parseTuiCliArguments(
+      ["--workspace", root, "--config", path, "--model", "k3-256k", "--effort", "medium"],
+      { environment: { QI_HOME: join(root, "state") } },
+    );
+    assert.equal(k3Compact.kind, "run");
+    assert.equal(k3Compact.options.provider.reasoningEffort, "high");
+    assert.equal(k3Compact.options.contextWindowTokens, 262_144);
+
+    await writeFile(path, `
+version = 1
+provider = "kimi"
+model = "k3"
+reasoning_effort = "high"
+context_window_tokens = 524288
+`);
+    const overridden = await parseTuiCliArguments(
+      ["--workspace", root, "--config", path],
+      { environment: { QI_HOME: join(root, "state") } },
+    );
+    assert.equal(overridden.kind, "run");
+    assert.equal(overridden.options.contextWindowTokens, 524_288);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("user config is optional, strict, and cannot contain an API key", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-user-config-invalid-"));
   try {
@@ -129,6 +199,10 @@ test("user config is optional, strict, and cannot contain an API key", async () 
     const invalidSteps = join(root, "invalid-steps.toml");
     await writeFile(invalidSteps, "max_steps = 101\n");
     await assert.rejects(loadUserConfig(invalidSteps), /integer between 8 and 100/);
+
+    const invalidEffort = join(root, "invalid-effort.toml");
+    await writeFile(invalidEffort, 'provider = "kimi"\nreasoning_effort = "extreme"\n');
+    await assert.rejects(loadUserConfig(invalidEffort), /Unsupported Kimi reasoning effort/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

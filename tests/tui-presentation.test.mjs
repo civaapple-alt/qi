@@ -9,6 +9,7 @@ import {
   commandHelp,
   FollowUpQueue,
   FollowUpsComponent,
+  FormPanel,
   InteractiveTui,
   ListPanel,
   MultiSelectPanel,
@@ -2116,6 +2117,73 @@ test("ListPanel Enter selects and Esc closes without inventing Session state", (
   assert.deepEqual(selected, ["plan"]);
   panel.handleInput("\u001b");
   assert.equal(closed, true);
+});
+
+test("FormPanel dropdowns support dependent defaults and a final custom text option", () => {
+  let submitted;
+  const panel = new FormPanel({
+    title: "Kimi login",
+    fields: [
+      {
+        id: "model",
+        label: "Model",
+        initialValue: "k3",
+        options: [
+          { value: "k3", label: "K3" },
+          { value: "k3-256k", label: "K3 256K" },
+          { value: "", label: "Enter manually", customInput: true, placeholder: "model id" },
+        ],
+      },
+      {
+        id: "effort",
+        label: "Effort",
+        initialValue: "high",
+        options: [
+          { value: "high", label: "High" },
+          { value: "max", label: "Max" },
+        ],
+      },
+      {
+        id: "context",
+        label: "Context",
+        initialValue: "1048576",
+      },
+    ],
+    onChange: (fieldId, value) => fieldId === "model"
+      ? { context: value === "k3-256k" ? "262144" : "1048576" }
+      : undefined,
+    onSubmit: (values) => { submitted = values; },
+    onClose: () => {},
+  });
+
+  assert.match(stripVTControlCharacters(panel.render(90).join("\n")), /● K3/);
+  panel.handleInput("\u001b[B"); // model dropdown -> k3-256k
+  panel.handleInput("\t"); // effort
+  panel.handleInput("\t"); // context
+  panel.handleInput("\r");
+  assert.deepEqual(submitted, {
+    model: "k3-256k",
+    effort: "high",
+    context: "262144",
+  });
+
+  const custom = new FormPanel({
+    title: "Custom model",
+    fields: [{
+      id: "model",
+      label: "Model",
+      initialValue: "future-kimi",
+      options: [
+        { value: "k3", label: "K3" },
+        { value: "", label: "Enter manually", customInput: true, placeholder: "model id" },
+      ],
+    }],
+    onSubmit: (values) => { submitted = values; },
+    onClose: () => {},
+  });
+  assert.match(stripVTControlCharacters(custom.render(90).join("\n")), /future-kimi/);
+  custom.handleInput("\r");
+  assert.deepEqual(submitted, { model: "future-kimi" });
 });
 
 test("MultiSelectPanel Space toggles and Enter applies selected capability ids", () => {

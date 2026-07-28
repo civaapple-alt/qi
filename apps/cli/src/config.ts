@@ -2,6 +2,7 @@ import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { parse, stringify } from "smol-toml";
+import { normalizeKimiReasoningEffort } from "@civaapple/qi-ai";
 import { defaultLocale, type Locale } from "./i18n.js";
 import {
   normalizeAccountAlias,
@@ -48,6 +49,7 @@ export interface QiUserConfig {
   readonly model?: string;
   readonly baseURL?: string;
   readonly accountAlias?: string;
+  readonly reasoningEffort?: "low" | "high" | "max" | "none";
   /** Saved OpenAI-compatible endpoints; active selection is the top-level fields. */
   readonly compatible?: readonly CompatibleEndpoint[];
   readonly contextWindowTokens?: number;
@@ -122,6 +124,8 @@ export interface UserProviderDefaults {
   readonly model: string;
   readonly baseURL?: string;
   readonly accountAlias?: string;
+  readonly reasoningEffort?: "low" | "high" | "max" | "none";
+  readonly contextWindowTokens?: number;
 }
 
 /**
@@ -142,6 +146,8 @@ export async function persistUserProviderDefaults(
       model: selection.model,
     })
     : loaded.config.compatible;
+  const reasoningEffort = selection.reasoningEffort ?? loaded.config.reasoningEffort;
+  const contextWindowTokens = selection.contextWindowTokens ?? loaded.config.contextWindowTokens;
   const next: QiUserConfig = {
     version: 1,
     ...(loaded.config.language === undefined ? {} : { language: loaded.config.language }),
@@ -150,10 +156,13 @@ export async function persistUserProviderDefaults(
     model: selection.model,
     ...(selection.baseURL === undefined ? {} : { baseURL: selection.baseURL }),
     ...(selection.accountAlias === undefined ? {} : { accountAlias: selection.accountAlias }),
-    ...(catalog === undefined || catalog.length === 0 ? {} : { compatible: catalog }),
-    ...(loaded.config.contextWindowTokens === undefined
+    ...(selection.provider !== "kimi" || reasoningEffort === undefined
       ? {}
-      : { contextWindowTokens: loaded.config.contextWindowTokens }),
+      : { reasoningEffort }),
+    ...(catalog === undefined || catalog.length === 0 ? {} : { compatible: catalog }),
+    ...(contextWindowTokens === undefined
+      ? {}
+      : { contextWindowTokens }),
     ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
@@ -207,6 +216,7 @@ export async function removeCompatibleEndpoint(
     ...(loaded.config.model === undefined ? {} : { model: loaded.config.model }),
     ...(loaded.config.baseURL === undefined ? {} : { baseURL: loaded.config.baseURL }),
     ...(loaded.config.accountAlias === undefined ? {} : { accountAlias: loaded.config.accountAlias }),
+    ...(loaded.config.reasoningEffort === undefined ? {} : { reasoningEffort: loaded.config.reasoningEffort }),
     ...(catalog.length === 0 ? {} : { compatible: catalog }),
     ...(loaded.config.contextWindowTokens === undefined
       ? {}
@@ -303,6 +313,7 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
       ...(config.model === undefined ? {} : { model: config.model }),
       ...(config.baseURL === undefined ? {} : { base_url: config.baseURL }),
       ...(config.accountAlias === undefined ? {} : { account_alias: config.accountAlias }),
+      ...(config.reasoningEffort === undefined ? {} : { reasoning_effort: config.reasoningEffort }),
       ...(encodedCompatible === undefined ? {} : { compatible: encodedCompatible }),
       ...(config.contextWindowTokens === undefined
         ? {}
@@ -329,6 +340,7 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
     ...(config.model === undefined ? {} : { model: config.model }),
     ...(config.baseURL === undefined ? {} : { base_url: config.baseURL }),
     ...(config.accountAlias === undefined ? {} : { account_alias: config.accountAlias }),
+    ...(config.reasoningEffort === undefined ? {} : { reasoning_effort: config.reasoningEffort }),
     ...(encodedCompatible === undefined || encodedCompatible.length === 0
       ? {}
       : { compatible: encodedCompatible }),
@@ -393,6 +405,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "model",
     "base_url",
     "account_alias",
+    "reasoning_effort",
     "compatible",
     "context_window_tokens",
     "max_steps",
@@ -413,6 +426,8 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   const model = optionalStringField(root.model, `${path}: model`, 256);
   const baseURL = optionalStringField(root.base_url, `${path}: base_url`, 2_048);
   const accountAlias = optionalStringField(root.account_alias, `${path}: account_alias`, 128);
+  const rawReasoningEffort = optionalStringField(root.reasoning_effort, `${path}: reasoning_effort`, 32);
+  const reasoningEffort = normalizeKimiReasoningEffort(rawReasoningEffort);
   const compatible = optionalCompatibleList(root.compatible, `${path}: compatible`);
   const contextWindowTokens = optionalIntegerField(
     root.context_window_tokens,
@@ -421,8 +436,11 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     2_000_000,
   );
   const maxSteps = optionalIntegerField(root.max_steps, `${path}: max_steps`, 8, 100);
-  if ((model !== undefined || baseURL !== undefined) && provider === undefined) {
-    throw new TypeError(`${path}: provider is required when model or base_url is configured`);
+  if ((model !== undefined || baseURL !== undefined || reasoningEffort !== undefined) && provider === undefined) {
+    throw new TypeError(`${path}: provider is required when model, base_url, or reasoning_effort is configured`);
+  }
+  if (reasoningEffort !== undefined && provider !== "kimi") {
+    throw new TypeError(`${path}: reasoning_effort is currently supported only when provider = "kimi"`);
   }
   let capabilities: QiCapabilityConfig | undefined;
   if (root.capabilities !== undefined) {
@@ -462,6 +480,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(model === undefined ? {} : { model }),
     ...(baseURL === undefined ? {} : { baseURL }),
     ...(accountAlias === undefined ? {} : { accountAlias }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     ...(compatible === undefined ? {} : { compatible }),
     ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
     ...(maxSteps === undefined ? {} : { maxSteps }),

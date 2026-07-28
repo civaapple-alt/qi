@@ -86,6 +86,7 @@ export interface TuiRuntimeOptions {
    */
   resolveModel?: () => ModelRef;
   contextWindowTokens?: number;
+  contextWindowTokensOverride?: boolean;
   outputReserveTokens?: number;
   maxSteps?: number;
   allowWrite?: boolean;
@@ -129,9 +130,12 @@ export class TuiRuntime {
   readonly skillRoots: { workspace: string; user: string };
   readonly #workspaceRoot: string;
   readonly #model: ModelRef;
+  readonly #modelPort: ModelPort;
   readonly #resolveModel: () => ModelRef;
-  readonly #contextBudgetTokens: number;
-  readonly #outputReserveTokens: number;
+  #contextWindowTokensOverride: boolean;
+  #contextWindowTokens: number;
+  #contextBudgetTokens: number;
+  #outputReserveTokens: number;
   readonly #maxSteps: number;
   readonly #subject: string;
   readonly #eventStore: EventStore;
@@ -186,8 +190,12 @@ export class TuiRuntime {
     this.#workspaceRoot = resolve(options.workspaceRoot);
     this.#dataRoot = resolve(options.dataRoot);
     this.#model = options.model;
+    this.#modelPort = options.modelPort;
     this.#resolveModel = options.resolveModel ?? (() => this.#model);
     const contextWindowTokens = options.contextWindowTokens ?? TUI_DEFAULT_CONTEXT_WINDOW_TOKENS;
+    this.#contextWindowTokensOverride = options.contextWindowTokensOverride
+      ?? options.contextWindowTokens !== undefined;
+    this.#contextWindowTokens = contextWindowTokens;
     this.#outputReserveTokens = options.outputReserveTokens
       ?? Math.min(TUI_DEFAULT_OUTPUT_RESERVE_TOKENS, Math.floor(contextWindowTokens / 8));
     this.#contextBudgetTokens = contextBudgetFromWindow(contextWindowTokens, this.#outputReserveTokens);
@@ -226,6 +234,54 @@ export class TuiRuntime {
 
   get shellProfiles(): ShellProfileSnapshot {
     return this.#shellProfiles;
+  }
+
+  syncModelContextWindow(contextWindowTokens: number): {
+    contextWindowTokens: number;
+    contextBudgetTokens: number;
+    outputReserveTokens: number;
+  } {
+    if (!this.#contextWindowTokensOverride) {
+      this.#contextWindowTokens = contextWindowTokens;
+      this.#outputReserveTokens = Math.min(
+        TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
+        Math.floor(contextWindowTokens / 8),
+      );
+      this.#contextBudgetTokens = contextBudgetFromWindow(
+        this.#contextWindowTokens,
+        this.#outputReserveTokens,
+      );
+    }
+    return {
+      contextWindowTokens: this.#contextWindowTokens,
+      contextBudgetTokens: this.#contextBudgetTokens,
+      outputReserveTokens: this.#outputReserveTokens,
+    };
+  }
+
+  configureContextWindow(contextWindowTokens: number): {
+    contextWindowTokens: number;
+    contextBudgetTokens: number;
+    outputReserveTokens: number;
+  } {
+    if (!Number.isInteger(contextWindowTokens) || contextWindowTokens < 8_192 || contextWindowTokens > 2_000_000) {
+      throw new RangeError("context window must be an integer from 8192 to 2000000 tokens");
+    }
+    this.#contextWindowTokensOverride = true;
+    this.#contextWindowTokens = contextWindowTokens;
+    this.#outputReserveTokens = Math.min(
+      TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
+      Math.floor(contextWindowTokens / 8),
+    );
+    this.#contextBudgetTokens = contextBudgetFromWindow(
+      this.#contextWindowTokens,
+      this.#outputReserveTokens,
+    );
+    return {
+      contextWindowTokens: this.#contextWindowTokens,
+      contextBudgetTokens: this.#contextBudgetTokens,
+      outputReserveTokens: this.#outputReserveTokens,
+    };
   }
 
   static async create(options: TuiRuntimeOptions): Promise<TuiRuntime> {
@@ -725,6 +781,11 @@ export class TuiRuntime {
       this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
       this.syncMountEvents();
       const mode = this.mode();
+      const model = this.#resolveModel();
+      if (!this.#contextWindowTokensOverride) {
+        const capabilities = await this.#modelPort.capabilities(model);
+        this.syncModelContextWindow(capabilities.contextTokens);
+      }
       const skills = await this.refreshSkills();
       const contextBlocks = await buildTuiContextBlocks(
         this.#workspaceRoot,
@@ -741,7 +802,7 @@ export class TuiRuntime {
         title: "Qi TUI",
         subject: this.#subject,
         input: options.input,
-        model: this.#resolveModel(),
+        model,
         contextBlocks,
         contextBudgetTokens: this.#contextBudgetTokens,
         maxOutputTokens: this.#outputReserveTokens,

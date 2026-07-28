@@ -88,12 +88,17 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 
 ## ADR-0009: use explicit provider profiles and execution-side credentials
 
-- Provider profiles declare wire API, base URL, auth schemes, model window, and transport capabilities.
+- Provider profiles declare wire API, base URL, auth schemes, transport capabilities, and model-specific context
+  windows or thinking modes where those differ within one provider.
 - Qi never probes failed endpoints to guess a wire API.
 - Responses and Chat Completions adapters remain thin implementations of one portable model protocol.
+- Provider-specific thinking fields are derived deterministically from the selected model profile and explicit
+  operator configuration; unknown effort values fail before network execution.
 - Credentials are sealed and resolved through a broker only at the provider boundary.
 - Tokens, authorization headers, OAuth codes, and PKCE material never enter TOML, Session events, or Artifacts.
-- `/login` owns interactive authentication; unauthenticated startup is allowed, but Runs fail closed.
+- `/login` owns interactive authentication and may atomically update non-secret provider routing, model effort,
+  and context-window defaults; credentials remain sealed separately. Unauthenticated startup is allowed, but
+  Runs fail closed.
 
 ## ADR-0011: make human control and Ask/Plan/Agent modes durable
 

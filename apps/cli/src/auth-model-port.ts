@@ -16,7 +16,7 @@ export class AuthBackedModelPort implements ModelPort {
     } catch {
       const profile = this.#auth.config.profile;
       return modelCapabilitiesFromProfile(profile, {
-        contextTokens: profile.contextTokens,
+        model: model.model,
       });
     }
   }

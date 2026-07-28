@@ -1,5 +1,10 @@
 export { panelFooter, panelHeader, panelRule, pointer, currentMark } from "./chrome.js";
-export { FormPanel, type FormField, type FormPanelOptions } from "./form-panel.js";
+export {
+  FormPanel,
+  type FormField,
+  type FormFieldOption,
+  type FormPanelOptions,
+} from "./form-panel.js";
 export {
   openHelpPanel,
   openHistoryListPanel,

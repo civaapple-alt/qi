@@ -38,6 +38,26 @@ Compatible endpoints can support different optional request fields. Profiles tha
 that Responses field (for example xAI). Session, Run, and Step correlation remains durable in Qi's local
 event stream. Wire APIs are never inferred from failed business requests.
 
-The composition root must provide the effective model window when it differs from the adapter default. This
+The composition root uses the selected model profile's window unless the operator explicitly overrides it. This
 capability value and the Loop working budget must derive from the same operator configuration; output reserve is
 sent separately as `maxOutputTokens` rather than counted as available prompt space.
+
+## Kimi Code models
+
+The `kimi` profile uses `https://api.kimi.com/coding/v1` with Chat Completions and declares four model IDs:
+
+| Model | Context window | Thinking |
+| --- | ---: | --- |
+| `k3` | 1,048,576 | `low` / `high` / `max`, default `high` |
+| `k3-256k` | 262,144 | `low` / `high` / `max`, default `high` |
+| `kimi-for-coding` | 262,144 | enabled/disabled toggle |
+| `kimi-for-coding-highspeed` | 262,144 | enabled/disabled toggle |
+
+K3 effort aliases are normalized before network execution: `ultra|max|xhigh` → `max`,
+`high|medium` → `high`, and `low|minimum|light` → `low`. `none` sends
+`thinking: { type: "disabled" }`; other values fail locally instead of producing a remote HTTP 400. K2.7 Code
+models send `thinking: { type: "enabled" }` for any enabled effort. Kimi `reasoning_content` / `reasoning`
+stream deltas become portable `reasoning.delta` events. Output reserve is sent as `max_completion_tokens` for
+Kimi reasoning models rather than the legacy `max_tokens` field.
+For a manually entered future Kimi model ID, an explicit effort is passed through using the same normalized
+Kimi wire shape; omitting effort leaves thinking configuration unspecified because the model profile is unknown.

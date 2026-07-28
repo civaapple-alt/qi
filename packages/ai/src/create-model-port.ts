@@ -14,6 +14,7 @@ export interface CreateModelPortOptions {
   apiKey: string;
   baseURL?: string;
   contextTokens?: number;
+  reasoningEffort?: string | null;
   profile?: ProviderProfile;
 }
 
@@ -27,19 +28,19 @@ export function createModelPortForProfile(
     apiKey: options.apiKey,
     ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
   };
-  const contextTokens = options.contextTokens ?? profile.contextTokens;
   if (profile.wireApi === "responses") {
     const portOptions: OpenAIResponsesModelPortOptions = {
       providerNames: [profile.id],
-      contextTokens,
+      contextTokens: options.contextTokens ?? profile.contextTokens,
       requestMetadata: profile.capabilities.requestMetadata,
     };
     return OpenAIResponsesModelPort.fromClientOptions(clientOptions, portOptions);
   }
   const portOptions: OpenAIChatCompletionsModelPortOptions = {
     providerNames: [profile.id],
-    contextTokens,
     profile,
+    ...(options.contextTokens === undefined ? {} : { contextTokens: options.contextTokens }),
+    ...(options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort }),
   };
   return OpenAIChatCompletionsModelPort.fromClientOptions(clientOptions, portOptions);
 }

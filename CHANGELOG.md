@@ -30,6 +30,13 @@ steps and investigation history belong in pull requests, not release notes.
   verification commands from `package.json`, `pom.xml`, `AGENTS.md`, and `README.md`; a human confirms the
   selection in a `MultiSelectPanel`, and `writeVerificationManifest()` writes `.qi/qi.verify.json` through the
   same atomic-write and `loadVerificationProfiles()` validation path used by automatic inference.
+- Added model-level Kimi Code profiles for `k3`, `k3-256k`, `kimi-for-coding`, and
+  `kimi-for-coding-highspeed`, including 1M/256K context windows, K3 effort normalization, K2.7 thinking
+  toggles, and streamed reasoning output.
+- Added Kimi `reasoning_effort` user configuration, `--effort` launch override, and
+  `KIMI_MODEL_THINKING_EFFORT` / `QI_REASONING_EFFORT` environment support.
+- Added terminal dropdown fields with a final custom-input option, used by Kimi `/login` to select a known model
+  or enter a future model ID while showing the effective effort and context-window defaults.
 
 ### Changed
 
@@ -42,6 +49,10 @@ steps and investigation history belong in pull requests, not release notes.
 - `TurnLoop` now authorizes and executes a Step's maximal consecutive runs of `read`-effect Actions concurrently
   instead of one at a time; write/execute/publish/spend effects remain strictly sequential, and model-facing
   tool-result feedback still preserves the model's original request order.
+- Kimi Code now defaults to `k3`; without an explicit `context_window_tokens`, CLI context budgeting follows
+  the selected Kimi model profile.
+- Kimi API-key and device `/login` now persist the selected `model`, `reasoning_effort`, and editable
+  `context_window_tokens` into user `config.toml` and apply all three to the live runtime without restart.
 
 ### Deprecated
 
@@ -51,6 +62,9 @@ steps and investigation history belong in pull requests, not release notes.
   an old non-empty `$QI_HOME`.
 
 ### Fixed
+
+- Shell and script children that explicitly disable color no longer inherit a conflicting `FORCE_COLOR` value
+  that caused Node.js to emit a warning on stderr.
 
 ### Security
 

@@ -1,4 +1,8 @@
-import { listProviderProfiles } from "@civaapple/qi-ai";
+import {
+  listProviderProfiles,
+  providerModelContextTokens,
+  type ProviderProfile,
+} from "@civaapple/qi-ai";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import type { AuthSession } from "../auth.js";
 import {
@@ -46,18 +50,36 @@ export interface PanelFlowContext {
   readonly changeTheme: (theme: ThemeName) => void;
   readonly mode: () => string;
   readonly changeMode: (mode: "ask" | "plan" | "agent") => void;
-  readonly startLoginDevice: (provider: string, options?: { model?: string }) => void;
+  readonly startLoginDevice: (
+    provider: string,
+    options?: {
+      model?: string;
+      reasoningEffort?: string;
+      contextWindowTokens?: number;
+    },
+  ) => void;
   readonly startLoginApiKey: (
     provider: string,
     apiKey: string,
-    options?: { alias?: string; model?: string; baseURL?: string },
+    options?: {
+      alias?: string;
+      model?: string;
+      baseURL?: string;
+      reasoningEffort?: string;
+      contextWindowTokens?: number;
+    },
   ) => void;
   readonly startLogout: (provider: string, alias?: string) => void;
   readonly startUseCompatible: (name: string) => void;
   readonly startUseAccount: (
     provider: string,
     alias?: string,
-    routing?: { model?: string; baseURL?: string },
+    routing?: {
+      model?: string;
+      baseURL?: string;
+      reasoningEffort?: string;
+      contextWindowTokens?: number;
+    },
   ) => void;
   readonly openInspect: (panel: "overview" | "config" | "context" | "runs" | "steps" | "actions" | "agents" | "skills" | "tasks" | "providers", title: string) => void;
   readonly openHistoryList: (kind: "runs" | "steps" | "actions" | "agents") => void;
@@ -951,11 +973,11 @@ async function openProviderAuthPanel(ctx: PanelFlowContext, providerId: string):
 function openDeviceLoginForm(
   ctx: PanelFlowContext,
   providerId: string,
-  profile: { displayName: string; defaultModel?: string },
+  profile: ProviderProfile,
   sealedModel?: string,
 ): void {
   const locale = ctx.locale();
-  const defaultModel = profile.defaultModel ?? "kimi-for-coding";
+  const defaultModel = profile.defaultModel ?? "k3";
   const currentModel = ctx.auth?.status().provider === providerId
     ? ctx.auth.status().model
     : undefined;
@@ -964,23 +986,27 @@ function openDeviceLoginForm(
       ? `设备登录 · ${profile.displayName}`
       : `Device login · ${profile.displayName}`,
     description: locale === "zh"
-      ? "OAuth 设备码登录。先确认模型，再打开浏览器授权；模型写入 ~/.qi/config.toml。"
-      : "OAuth device-code login. Confirm the model, then authorize in the browser; model is saved to ~/.qi/config.toml.",
-    fields: [
-      {
-        id: "model",
-        label: "Model",
-        placeholder: defaultModel,
-        initialValue: currentModel ?? sealedModel ?? defaultModel,
-        required: true,
-      },
-    ],
+      ? "OAuth 设备码登录。模型、effort 和上下文窗口会写入 ~/.qi/config.toml。"
+      : "OAuth device-code login. Model, effort, and context window are saved to ~/.qi/config.toml.",
+    fields: kimiModelFields(
+      profile,
+      currentModel ?? sealedModel ?? defaultModel,
+      ctx.auth?.status(),
+      locale,
+    ),
+    onChange: kimiLoginFieldChange(profile),
     submitLabel: locale === "zh" ? "继续授权" : "Continue",
     onClose: ctx.panels.dismiss,
     onSubmit: (values) => {
       ctx.panels.closeAll();
       const model = (values.model ?? "").trim() || defaultModel;
-      ctx.startLoginDevice(providerId, { model });
+      ctx.startLoginDevice(providerId, {
+        model,
+        ...(values.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: values.reasoningEffort }),
+        contextWindowTokens: parseLoginContextWindow(values.contextWindowTokens),
+      });
     },
   }));
 }
@@ -988,13 +1014,22 @@ function openDeviceLoginForm(
 function openApiKeyForm(
   ctx: PanelFlowContext,
   providerId: string,
-  profile: { displayName: string; defaultModel?: string; officialBaseURL: string },
+  profile: ProviderProfile,
   sealed?: { model?: string; baseURL?: string; alias?: string },
 ): void {
   const locale = ctx.locale();
   const defaultModel = sealed?.model ?? profile.defaultModel ?? "";
   const defaultBase = sealed?.baseURL ?? profile.officialBaseURL;
   const isCompatible = providerId === "compatible";
+  const modelFields = providerId === "kimi"
+    ? kimiModelFields(profile, defaultModel, ctx.auth?.status(), locale)
+    : [{
+        id: "model",
+        label: "Model",
+        placeholder: defaultModel || "model id",
+        ...(defaultModel ? { initialValue: defaultModel } : {}),
+        required: !defaultModel,
+      } satisfies FormField];
   const fields: FormField[] = [
     ...(isCompatible
       ? [{
@@ -1013,13 +1048,7 @@ function openApiKeyForm(
       initialValue: defaultBase,
       required: true as const,
     },
-    {
-      id: "model",
-      label: "Model",
-      placeholder: defaultModel || "model id",
-      ...(defaultModel ? { initialValue: defaultModel } : {}),
-      required: !defaultModel,
-    },
+    ...modelFields,
   ];
   ctx.panels.push(new FormPanel({
     title: isCompatible
@@ -1030,9 +1059,10 @@ function openApiKeyForm(
         ? "OpenAI 兼容 Chat Completions。名称用于显示与账号别名（如 qianwenai、zhipu）；可保存多套并用 /login use <name> 切换。Key 密封；routing 写入 config.toml。"
         : "OpenAI-compatible Chat Completions. Name is the display/account alias (e.g. qianwenai, zhipu); save several and switch with /login use <name>. Keys stay sealed; routing is saved to config.toml.")
       : (locale === "zh"
-        ? "API key 密封保存在 QI_HOME。Base URL / model / provider 写入 ~/.qi/config.toml。已配置时可在提供商菜单直接「切换」。"
-        : "API keys are sealed under QI_HOME. Base URL / model / provider are saved to ~/.qi/config.toml. When already configured, use Switch in the provider menu."),
+        ? `API key 密封保存在 QI_HOME。Base URL / model / provider${providerId === "kimi" ? " / effort / 上下文窗口" : ""} 写入 ~/.qi/config.toml。`
+        : `API keys are sealed under QI_HOME. Base URL / model / provider${providerId === "kimi" ? " / effort / context window" : ""} are saved to ~/.qi/config.toml.`),
     fields,
+    ...(providerId === "kimi" ? { onChange: kimiLoginFieldChange(profile) } : {}),
     submitLabel: "Authenticate",
     onClose: ctx.panels.dismiss,
     onSubmit: (values) => {
@@ -1044,9 +1074,100 @@ function openApiKeyForm(
         ...(alias === undefined ? {} : { alias }),
         ...(model === undefined ? {} : { model }),
         baseURL,
+        ...(providerId !== "kimi"
+          ? {}
+          : {
+              reasoningEffort: values.reasoningEffort,
+              contextWindowTokens: parseLoginContextWindow(values.contextWindowTokens),
+            }),
       });
     },
   }));
+}
+
+function kimiModelFields(
+  profile: ProviderProfile,
+  initialModel: string,
+  status: ReturnType<AuthSession["status"]> | undefined,
+  locale: Locale,
+): FormField[] {
+  const activeStatus = status?.provider === "kimi" ? status : undefined;
+  const model = initialModel || profile.defaultModel || "k3";
+  const modelProfile = profile.models?.find((candidate) => candidate.id === model);
+  const contextWindowTokens = activeStatus?.model === model
+    ? activeStatus.contextWindowTokens
+    : providerModelContextTokens(profile, model);
+  const effort = (activeStatus?.model === model ? activeStatus.reasoningEffort : undefined)
+    ?? modelProfile?.thinking?.defaultEffort
+    ?? "high";
+  return [
+    {
+      id: "model",
+      label: "Model",
+      initialValue: model,
+      required: true,
+      options: [
+        ...(profile.models ?? []).map((candidate) => ({
+          value: candidate.id,
+          label: candidate.displayName,
+          description: `${candidate.id} · ${formatContextWindow(candidate.contextTokens)}`,
+        })),
+        {
+          value: "",
+          label: locale === "zh" ? "手动输入模型 ID…" : "Enter model ID manually…",
+          description: locale === "zh" ? "自定义或未来模型" : "Custom or future model",
+          customInput: true,
+          placeholder: "model id",
+        },
+      ],
+    },
+    {
+      id: "reasoningEffort",
+      label: locale === "zh" ? "Thinking effort" : "Thinking effort",
+      initialValue: effort,
+      required: true,
+      options: [
+        { value: "low", label: "Low", description: locale === "zh" ? "较快" : "Faster" },
+        { value: "high", label: "High", description: locale === "zh" ? "K3 默认（推荐）" : "K3 default (recommended)" },
+        { value: "max", label: "Max", description: locale === "zh" ? "最强思考" : "Maximum reasoning" },
+        { value: "none", label: "None", description: locale === "zh" ? "关闭思考" : "Disable thinking" },
+      ],
+    },
+    {
+      id: "contextWindowTokens",
+      label: locale === "zh" ? "上下文窗口（tokens）" : "Context window (tokens)",
+      placeholder: String(contextWindowTokens),
+      initialValue: String(contextWindowTokens),
+      required: true,
+    },
+  ];
+}
+
+function kimiLoginFieldChange(profile: ProviderProfile): NonNullable<
+  ConstructorParameters<typeof FormPanel>[0]["onChange"]
+> {
+  return (fieldId, value) => {
+    if (fieldId !== "model" || !value) return;
+    const model = profile.models?.find((candidate) => candidate.id === value);
+    return {
+      contextWindowTokens: String(providerModelContextTokens(profile, value)),
+      reasoningEffort: model?.thinking?.defaultEffort ?? "high",
+    };
+  };
+}
+
+function parseLoginContextWindow(value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 8_192 || parsed > 2_000_000) {
+    throw new RangeError("Context window must be an integer from 8192 to 2000000 tokens.");
+  }
+  return parsed;
+}
+
+function formatContextWindow(tokens: number): string {
+  return tokens >= 1_000_000
+    ? `${(tokens / 1_048_576).toFixed(tokens % 1_048_576 === 0 ? 0 : 1)}M`
+    : `${Math.round(tokens / 1_024)}K`;
 }
 
 export function openHelpPanel(ctx: PanelFlowContext, lines: readonly string[]): void {

@@ -54,9 +54,11 @@ export function scrubCredentialEnvironment(
   markers: Readonly<Record<string, string>> = {},
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
+  const disablesColor = Object.keys(markers).some((name) => name.toUpperCase() === "NO_COLOR");
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined) continue;
     if (credentialNamePattern.test(name)) continue;
+    if (disablesColor && name.toUpperCase() === "FORCE_COLOR") continue;
     environment[name] = value;
   }
   for (const [name, value] of Object.entries(markers)) {

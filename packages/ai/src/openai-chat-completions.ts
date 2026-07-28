@@ -18,8 +18,10 @@ import {
 } from "./model.js";
 import {
   assertProfileSupportsRequest,
+  getProviderModelProfile,
   modelCapabilitiesFromProfile,
   requireProviderProfile,
+  type ProviderThinkingEffort,
   type ProviderProfile,
 } from "./provider-profile.js";
 
@@ -38,6 +40,7 @@ export interface OpenAIChatCompletionsModelPortOptions {
   providerNames?: readonly string[];
   contextTokens?: number;
   profile?: ProviderProfile;
+  reasoningEffort?: string | null;
 }
 
 /**
@@ -47,16 +50,21 @@ export interface OpenAIChatCompletionsModelPortOptions {
 export class OpenAIChatCompletionsModelPort implements ModelPort {
   readonly #client: OpenAIChatCompletionsClient;
   readonly #providerNames: ReadonlySet<string>;
-  readonly #contextTokens: number;
+  readonly #contextTokens: number | undefined;
   readonly #profile: ProviderProfile | undefined;
+  readonly #reasoningEffort: string | null | undefined;
 
   constructor(client: OpenAIChatCompletionsClient, options: OpenAIChatCompletionsModelPortOptions = {}) {
     this.#client = client;
     this.#providerNames = new Set(options.providerNames ?? ["openai"]);
-    this.#contextTokens = options.contextTokens ?? options.profile?.contextTokens ?? 128_000;
+    this.#contextTokens = options.contextTokens;
     this.#profile = options.profile;
+    this.#reasoningEffort = options.reasoningEffort;
     if (this.#providerNames.size === 0) throw new TypeError("At least one provider name is required");
-    if (!Number.isInteger(this.#contextTokens) || this.#contextTokens <= 0) {
+    if (
+      this.#contextTokens !== undefined &&
+      (!Number.isInteger(this.#contextTokens) || this.#contextTokens <= 0)
+    ) {
       throw new RangeError("contextTokens must be a positive integer");
     }
   }
@@ -70,13 +78,17 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
 
   async capabilities(model: ModelRef): Promise<ModelCapabilities> {
     this.#assertProvider(model);
-    if (this.#profile) {
-      return modelCapabilitiesFromProfile(this.#profile, { contextTokens: this.#contextTokens });
+    const profile = this.#profile ?? tryProfile(model.provider);
+    if (profile) {
+      return modelCapabilitiesFromProfile(profile, {
+        model: model.model,
+        ...(this.#contextTokens === undefined ? {} : { contextTokens: this.#contextTokens }),
+      });
     }
     return {
       input: new Set(["text"]),
       output: new Set(["text", "action"]),
-      contextTokens: this.#contextTokens,
+      contextTokens: this.#contextTokens ?? 128_000,
       parallelActions: true,
       promptCache: false,
     };
@@ -91,13 +103,21 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
     }
     throwIfAborted(signal);
 
-    const body: ChatCompletionCreateParamsStreaming = {
+    const thinking = profile === undefined
+      ? undefined
+      : kimiThinkingConfig(profile, request.model.model, this.#reasoningEffort);
+    const body: ChatCompletionCreateParamsStreaming & { thinking?: KimiThinkingConfig } = {
       model: request.model.model,
       messages: toChatMessages(request.messages),
       tools: request.tools.map(toChatTool),
       stream: true,
       stream_options: { include_usage: true },
-      ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
+      ...(request.maxOutputTokens === undefined
+        ? {}
+        : profile?.id === "kimi"
+          ? { max_completion_tokens: request.maxOutputTokens }
+          : { max_tokens: request.maxOutputTokens }),
+      ...(thinking === undefined ? {} : { thinking }),
     };
 
     const stream = await this.#client.chat.completions.create(
@@ -125,6 +145,10 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
       if (!choice) continue;
       if (choice.finish_reason) finishReason = choice.finish_reason;
       const delta = choice.delta;
+      const reasoning = kimiReasoningDelta(delta);
+      if (reasoning !== undefined && reasoning.length > 0) {
+        yield parseModelEvent({ type: "reasoning.delta", delta: reasoning });
+      }
       if (typeof delta.content === "string" && delta.content.length > 0) {
         sawContent = true;
         yield parseModelEvent({ type: "text.delta", delta: delta.content });
@@ -223,6 +247,64 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
       throw new TypeError(`Chat Completions adapter does not serve provider ${model.provider}`);
     }
   }
+}
+
+interface KimiThinkingConfig {
+  readonly type: "enabled" | "disabled";
+  readonly effort?: ProviderThinkingEffort;
+}
+
+function kimiThinkingConfig(
+  profile: ProviderProfile,
+  model: string,
+  requestedEffort: string | null | undefined,
+): KimiThinkingConfig | undefined {
+  if (profile.id !== "kimi") return undefined;
+  const modelProfile = getProviderModelProfile(profile, model);
+  const effort = normalizeKimiReasoningEffort(requestedEffort);
+  if (effort === "none") return { type: "disabled" };
+  if (!modelProfile?.thinking) {
+    return effort === undefined ? undefined : { type: "enabled", effort };
+  }
+  if (modelProfile.thinking.mode === "toggle") return { type: "enabled" };
+  return {
+    type: "enabled",
+    effort: effort ?? modelProfile.thinking.defaultEffort ?? "high",
+  };
+}
+
+export function normalizeKimiReasoningEffort(
+  value: string | null | undefined,
+): ProviderThinkingEffort | "none" | undefined {
+  if (value === undefined || value === null) return undefined;
+  switch (value.trim().toLowerCase()) {
+    case "ultra":
+    case "max":
+    case "xhigh":
+      return "max";
+    case "high":
+    case "medium":
+      return "high";
+    case "low":
+    case "minimum":
+    case "light":
+      return "low";
+    case "none":
+      return "none";
+    default:
+      throw new TypeError(
+        `Unsupported Kimi reasoning effort "${value}"; expected ultra|max|xhigh|high|medium|low|minimum|light|none`,
+      );
+  }
+}
+
+function kimiReasoningDelta(delta: ChatCompletionChunk["choices"][number]["delta"]): string | undefined {
+  const candidate = delta as typeof delta & {
+    reasoning_content?: unknown;
+    reasoning?: unknown;
+  };
+  if (typeof candidate.reasoning_content === "string") return candidate.reasoning_content;
+  return typeof candidate.reasoning === "string" ? candidate.reasoning : undefined;
 }
 
 function tryProfile(id: string): ProviderProfile | undefined {

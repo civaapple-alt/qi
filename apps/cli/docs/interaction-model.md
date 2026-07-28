@@ -79,6 +79,10 @@ Provider login details:
 
 - API-key providers: Key + Base URL (prefilled) + Model; successful login persists `provider` / `model` /
   `base_url` / `account_alias` into `~/.qi/config.toml`.
+- Kimi API-key and device forms replace the free-form Model field with a dropdown for `k3`, `k3-256k`,
+  `kimi-for-coding`, and `kimi-for-coding-highspeed`; the final dropdown item exposes a custom model-ID input.
+  The same form displays K3's default `high` effort and the selected model's default context window. Both are
+  editable, persisted as `reasoning_effort` / `context_window_tokens`, and applied to the live runtime.
 - **OpenAI Compatible** (`compatible`): OpenAI Chat Completions gateways. Login requires a display **Name**
   (e.g. `qianwenai` / `zhipu`). Multiple endpoints are stored under `[[compatible]]`. Selecting a saved
   endpoint opens Switch / Reconfigure (API key) / Logout — same pattern as other providers. Slash:
@@ -87,8 +91,8 @@ Provider login details:
   **Switch to this provider**, or `/login use <provider>` (e.g. `/login use deepseek`). Model/base URL are
   restored from credential metadata. **Switch** only activates another sealed account; **Logout** clears only
   the selected provider or compatible name (other sealed accounts and catalog entries remain).
-- **Kimi device/OAuth**: confirm **Model** (prefilled `kimi-for-coding`) before the browser authorize step, or
-  `/login kimi device model <id>`.
+- **Kimi device/OAuth**: confirm Model / effort / context before the browser authorize step, or use
+  `/login kimi device model <id> effort <level> context <tokens>`.
 
 Primary slash commands are intentionally few: overlapping inspect entries live under `/settings`, mount
 operations under `/mounts`, capability grants under `/permissions`, skill/task management under `/skills` and

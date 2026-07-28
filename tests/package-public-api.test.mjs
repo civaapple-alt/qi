@@ -37,9 +37,10 @@ const expectedRuntimeExports = {
     "ModelMessageSchema", "ModelRefSchema", "ModelRequestSchema",
     "OpenAIChatCompletionsModelPort", "OpenAIResponsesModelPort", "PortableToolSchema",
     "ScriptedModelPort", "assertProfileSupportsRequest", "classifyProfileEndpoint",
-    "createModelPortForProfile", "getProviderProfile", "listProviderProfiles",
-    "modelCapabilitiesFromProfile", "normalizeFunctionParameters", "parseModelEvent",
+    "createModelPortForProfile", "getProviderModelProfile", "getProviderProfile", "listProviderProfiles",
+    "modelCapabilitiesFromProfile", "normalizeFunctionParameters", "normalizeKimiReasoningEffort", "parseModelEvent",
     "parseModelRequest", "requireProviderProfile",
+    "providerModelContextTokens",
   ],
   "@civaapple/qi-agent/loop": [
     "ASK_MODE_TOOLS", "EventWriter", "HumanControlService", "PLAN_MODE_EXTRA_TOOLS",

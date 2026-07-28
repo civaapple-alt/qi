@@ -27,8 +27,8 @@ stable intent and idempotency keys.
 - Writes based on stale observations are rejected.
 - Non-read effects are serialized through a durable journal.
 - Completed effects replay their settlement; indeterminate effects block automatic re-entry.
-- Host process helpers scrub credential-like environment names by default and can terminate process trees on
-  timeout or cancel.
+- Host process helpers scrub credential-like environment names by default, remove an inherited `FORCE_COLOR`
+  when a caller explicitly supplies `NO_COLOR`, and can terminate process trees on timeout or cancel.
 - `runHostProcess` truncates inline `stdout`/`stderr` at `outputLimitBytes` by default. A caller that also sets a
   larger `captureLimitBytes` additionally receives `stdoutFull`/`stderrFull` (bounded by that ceiling) for the
   specific stream(s) that were truncated, so a truncated run's full output can still be preserved by the caller

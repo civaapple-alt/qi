@@ -2,7 +2,9 @@ import {
   classifyProfileEndpoint,
   getProviderProfile,
   listProviderProfiles,
+  normalizeKimiReasoningEffort,
   requireProviderProfile,
+  type ProviderThinkingEffort,
   type ProviderProfile,
 } from "@civaapple/qi-ai";
 
@@ -11,6 +13,7 @@ export type QiProvider = string;
 export interface ProviderEnvironment {
   readonly QI_PROVIDER?: string;
   readonly QI_MODEL?: string;
+  readonly QI_REASONING_EFFORT?: string;
   readonly QI_API_KEY?: string;
   readonly OPENAI_API_KEY?: string;
   readonly OPENAI_BASE_URL?: string;
@@ -20,6 +23,7 @@ export interface ProviderEnvironment {
   readonly KIMI_API_KEY?: string;
   readonly KIMI_BASE_URL?: string;
   readonly KIMI_MODEL?: string;
+  readonly KIMI_MODEL_THINKING_EFFORT?: string;
   readonly DEEPSEEK_API_KEY?: string;
   readonly DEEPSEEK_BASE_URL?: string;
   readonly DEEPSEEK_MODEL?: string;
@@ -33,11 +37,13 @@ export interface ResolveProviderConfigInput {
   readonly provider?: string;
   readonly model?: string;
   readonly baseURL?: string;
+  readonly reasoningEffort?: string;
   readonly accountAlias?: string;
   readonly defaults?: {
     readonly provider?: string;
     readonly model?: string;
     readonly baseURL?: string;
+    readonly reasoningEffort?: string;
     readonly accountAlias?: string;
   };
   readonly environment?: ProviderEnvironment | NodeJS.ProcessEnv;
@@ -48,6 +54,7 @@ export interface ResolveProviderConfigInput {
 export interface ProviderConfig {
   readonly provider: QiProvider;
   readonly model: string;
+  readonly reasoningEffort?: ProviderThinkingEffort | "none";
   readonly apiKey?: string;
   readonly baseURL?: string;
   readonly endpointTrust: "official" | "custom";
@@ -99,10 +106,21 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
   if (!model) {
     throw new TypeError(`${profile.displayName} requires ${profile.envModel ?? "QI_MODEL"} or --model`);
   }
+  const requestedReasoningEffort = optionalValue(input.reasoningEffort) ??
+    optionalValue(environment.QI_REASONING_EFFORT) ??
+    (provider === "kimi" ? optionalValue(environment.KIMI_MODEL_THINKING_EFFORT) : undefined) ??
+    optionalValue(matchingDefaults?.reasoningEffort);
+  if (requestedReasoningEffort !== undefined && provider !== "kimi") {
+    throw new TypeError("reasoning effort is currently supported only by the Kimi provider");
+  }
+  const reasoningEffort = provider === "kimi"
+    ? normalizeKimiReasoningEffort(requestedReasoningEffort)
+    : undefined;
 
   return {
     provider,
     model,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     ...(apiKey === undefined ? {} : { apiKey }),
     baseURL,
     endpointTrust,

@@ -22,7 +22,24 @@ import {
   effectIntentHash,
   hostProcessRunner,
   runHostProcess,
+  scrubCredentialEnvironment,
 } from "@civaapple/qi-node/workspace";
+
+test("scrubCredentialEnvironment removes inherited FORCE_COLOR when a child disables color", () => {
+  const environment = scrubCredentialEnvironment(
+    {
+      PATH: "test-path",
+      FORCE_COLOR: "1",
+      OPENAI_API_KEY: "should-not-leak",
+    },
+    { NO_COLOR: "1" },
+  );
+
+  assert.equal(environment.PATH, "test-path");
+  assert.equal(environment.NO_COLOR, "1");
+  assert.equal(environment.FORCE_COLOR, undefined);
+  assert.equal(environment.OPENAI_API_KEY, undefined);
+});
 
 test("runHostProcess captures full output beyond outputLimitBytes only when captureLimitBytes opts in", async () => {
   const node = process.execPath;

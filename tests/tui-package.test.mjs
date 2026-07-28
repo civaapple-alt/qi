@@ -100,4 +100,17 @@ test("@civaapple/qi-tui presenter renders without constructing an application ru
   assert.equal(tui.formatProviderLabel("compatible", "example-gateway"), "example-gateway");
   assert.equal(tui.statusGlyph("denied"), "⊘");
   assert.match(tui.renderMarkdown("## Reusable", 80).join("\n"), /Reusable/u);
+
+  presenter.patchAuthLaunch({
+    provider: "kimi",
+    model: "k3-256k",
+    wireApi: "chat.completions",
+    authStatus: "ready",
+    contextWindowTokens: 262_144,
+    contextBudgetTokens: 246_144,
+    outputReserveTokens: 16_000,
+  });
+  assert.equal(presenter.launch.model, "k3-256k");
+  assert.equal(presenter.launch.contextWindowTokens, 262_144);
+  assert.equal(presenter.launch.contextBudgetTokens, 246_144);
 });

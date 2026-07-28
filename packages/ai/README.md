@@ -10,7 +10,10 @@ npm install @civaapple/qi-ai
 ```
 
 Provider-specific response IDs, transport state, and credentials never enter durable Session truth. A provider
-adapter streams portable text/action boundaries; Agent lifecycle policy remains in `@civaapple/qi-agent`.
+adapter streams portable text/reasoning/action boundaries; Agent lifecycle policy remains in
+`@civaapple/qi-agent`. Profiles may declare model-specific windows and thinking modes when one provider exposes
+materially different models; callers can inspect them with `getProviderModelProfile` and
+`providerModelContextTokens`.
 
 ```ts
 import { createModelPortForProfile } from "@civaapple/qi-ai";

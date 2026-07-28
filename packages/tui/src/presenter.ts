@@ -162,6 +162,9 @@ export class TuiPresenter {
     readonly wireApi: string;
     readonly authStatus: "ready" | "missing" | "expired";
     readonly baseURL?: string;
+    readonly contextWindowTokens?: number;
+    readonly contextBudgetTokens?: number;
+    readonly outputReserveTokens?: number;
   }): void {
     const { baseURL: _previousBaseURL, accountAlias: _previousAlias, ...rest } = this.launch;
     this.launch = {
@@ -172,6 +175,15 @@ export class TuiPresenter {
       authStatus: status.authStatus,
       ...(status.accountAlias === undefined ? {} : { accountAlias: status.accountAlias }),
       ...(status.baseURL === undefined ? {} : { baseURL: status.baseURL }),
+      ...(status.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: status.contextWindowTokens }),
+      ...(status.contextBudgetTokens === undefined
+        ? {}
+        : { contextBudgetTokens: status.contextBudgetTokens }),
+      ...(status.outputReserveTokens === undefined
+        ? {}
+        : { outputReserveTokens: status.outputReserveTokens }),
     };
   }
 

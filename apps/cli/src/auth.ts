@@ -8,7 +8,10 @@ import { EncryptedFileCredentialStore } from "@civaapple/qi-node/storage";
 import {
   classifyProfileEndpoint,
   createModelPortForProfile,
+  getProviderModelProfile,
   listProviderProfiles,
+  normalizeKimiReasoningEffort,
+  providerModelContextTokens,
   requireProviderProfile,
   type ModelPort,
 } from "@civaapple/qi-ai";
@@ -36,7 +39,18 @@ export interface AuthSessionStatus {
   readonly wireApi: string;
   readonly endpointTrust: "official" | "custom";
   readonly model: string;
+  readonly reasoningEffort?: "low" | "high" | "max" | "none";
+  readonly contextWindowTokens: number;
+  readonly contextWindowTokensOverride: boolean;
   readonly baseURL?: string;
+}
+
+export interface LoginRoutingOptions {
+  readonly alias?: string;
+  readonly model?: string;
+  readonly baseURL?: string;
+  readonly reasoningEffort?: string;
+  readonly contextWindowTokens?: number;
 }
 
 export class AuthSession {
@@ -47,15 +61,22 @@ export class AuthSession {
   #modelPort: ModelPort | undefined;
   #credentialId: string | undefined;
   #handle: string | undefined;
+  #contextWindowTokens: number;
+  #contextWindowTokensOverride: boolean;
 
   private constructor(
     store: SecureCredentialStore,
     config: ProviderConfig,
     subject: string,
+    contextWindowTokens?: number,
+    contextWindowTokensOverride = false,
   ) {
     this.#store = store;
     this.#config = config;
     this.#subject = subject;
+    this.#contextWindowTokens = contextWindowTokens
+      ?? providerModelContextTokens(config.profile, config.model);
+    this.#contextWindowTokensOverride = contextWindowTokensOverride;
   }
 
   static async create(options: {
@@ -63,10 +84,18 @@ export class AuthSession {
     qiHome?: string;
     store?: SecureCredentialStore;
     subject?: string;
+    contextWindowTokens?: number;
+    contextWindowTokensOverride?: boolean;
   }): Promise<AuthSession> {
     const qiHome = options.qiHome ?? defaultQiHome();
     const store = options.store ?? new EncryptedFileCredentialStore(qiHome);
-    const session = new AuthSession(store, options.config, options.subject ?? "main-agent");
+    const session = new AuthSession(
+      store,
+      options.config,
+      options.subject ?? "main-agent",
+      options.contextWindowTokens,
+      options.contextWindowTokensOverride,
+    );
     await session.hydrate();
     return session;
   }
@@ -76,6 +105,11 @@ export class AuthSession {
   }
 
   status(): AuthSessionStatus {
+    const modelDefaultEffort = getProviderModelProfile(
+      this.#config.profile,
+      this.#config.model,
+    )?.thinking?.defaultEffort;
+    const effectiveEffort = this.#config.reasoningEffort ?? modelDefaultEffort;
     return {
       provider: this.#config.provider,
       accountAlias: this.#config.accountAlias,
@@ -83,6 +117,11 @@ export class AuthSession {
       wireApi: this.#config.wireApi,
       endpointTrust: this.#config.endpointTrust,
       model: this.#config.model,
+      ...(effectiveEffort === undefined ? {} : { reasoningEffort: effectiveEffort }),
+      contextWindowTokens: this.#contextWindowTokensOverride
+        ? this.#contextWindowTokens
+        : providerModelContextTokens(this.#config.profile, this.#config.model),
+      contextWindowTokensOverride: this.#contextWindowTokensOverride,
       ...(this.#config.baseURL === undefined ? {} : { baseURL: this.#config.baseURL }),
     };
   }
@@ -119,7 +158,7 @@ export class AuthSession {
   async loginApiKey(
     provider: string,
     apiKey: string,
-    aliasOrOptions: string | { alias?: string; model?: string; baseURL?: string } = "default",
+    aliasOrOptions: string | LoginRoutingOptions = "default",
   ): Promise<AuthSessionStatus> {
     const options = typeof aliasOrOptions === "string"
       ? { alias: aliasOrOptions }
@@ -149,6 +188,12 @@ export class AuthSession {
       `${profile.displayName} base URL`,
     );
     const endpointTrust = classifyProfileEndpoint(profile, baseURL);
+    const reasoningEffort = loginReasoningEffort(
+      provider,
+      options.reasoningEffort,
+      this.#config.provider === provider ? this.#config.reasoningEffort : undefined,
+    );
+    const contextWindowTokens = loginContextWindowTokens(options.contextWindowTokens);
     const accountId = accountKey(provider, alias);
     await this.#store.set({
       accountId,
@@ -156,10 +201,18 @@ export class AuthSession {
       alias,
       authKind: "api-key",
       secret: apiKey,
-      metadata: { baseURL, model },
+      metadata: {
+        baseURL,
+        model,
+        ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+        ...(contextWindowTokens === undefined
+          ? {}
+          : { contextWindowTokens: String(contextWindowTokens) }),
+      },
     });
+    const { reasoningEffort: _previousEffort, ...previousConfig } = this.#config;
     this.#config = withoutApiKey({
-      ...this.#config,
+      ...previousConfig,
       provider,
       profile,
       accountAlias: alias,
@@ -168,7 +221,15 @@ export class AuthSession {
       baseURL,
       endpointTrust,
       authStatus: "ready",
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     });
+    if (contextWindowTokens !== undefined) {
+      this.#contextWindowTokens = contextWindowTokens;
+      this.#contextWindowTokensOverride = true;
+    } else if (switching) {
+      this.#contextWindowTokens = providerModelContextTokens(profile, model);
+      this.#contextWindowTokensOverride = false;
+    }
     this.#installSecret(apiKey, "api-key");
     return this.status();
   }
@@ -180,7 +241,7 @@ export class AuthSession {
   async useAccount(
     provider: string,
     alias: string,
-    routing?: { model?: string; baseURL?: string },
+    routing?: Omit<LoginRoutingOptions, "alias">,
   ): Promise<AuthSessionStatus> {
     const normalizedAlias = normalizeAccountAlias(alias);
     const profile = requireProviderProfile(provider);
@@ -213,25 +274,48 @@ export class AuthSession {
         ?? profile.officialBaseURL,
       `${profile.displayName} base URL`,
     );
+    const reasoningEffort = loginReasoningEffort(
+      provider,
+      routing?.reasoningEffort ?? optionalNonEmpty(stored.metadata?.reasoningEffort),
+      provider === this.#config.provider ? this.#config.reasoningEffort : undefined,
+    );
+    const contextWindowTokens = loginContextWindowTokens(
+      routing?.contextWindowTokens ?? optionalStoredInteger(stored.metadata?.contextWindowTokens),
+    );
     let secret = stored.secret;
     if (stored.authKind === "oauth") {
       secret = await this.#maybeRefreshOAuth(stored.provider, secret, accountId);
     }
     const metadataModel = optionalNonEmpty(stored.metadata?.model);
     const metadataBase = optionalNonEmpty(stored.metadata?.baseURL);
-    if (metadataModel !== model || metadataBase !== baseURL) {
+    if (
+      metadataModel !== model ||
+      metadataBase !== baseURL ||
+      optionalNonEmpty(stored.metadata?.reasoningEffort) !== reasoningEffort ||
+      optionalStoredInteger(stored.metadata?.contextWindowTokens) !== contextWindowTokens
+    ) {
+      const {
+        reasoningEffort: _storedEffort,
+        contextWindowTokens: _storedContext,
+        ...storedMetadata
+      } = stored.metadata ?? {};
       await this.#store.set({
         ...stored,
         secret,
         metadata: {
-          ...stored.metadata,
+          ...storedMetadata,
           model,
           baseURL,
+          ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+          ...(contextWindowTokens === undefined
+            ? {}
+            : { contextWindowTokens: String(contextWindowTokens) }),
         },
       });
     }
+    const { reasoningEffort: _previousEffort, ...previousConfig } = this.#config;
     this.#config = withoutApiKey({
-      ...this.#config,
+      ...previousConfig,
       provider,
       profile,
       accountAlias: normalizedAlias,
@@ -240,7 +324,15 @@ export class AuthSession {
       baseURL,
       endpointTrust: classifyProfileEndpoint(profile, baseURL),
       authStatus: "ready",
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     });
+    if (contextWindowTokens !== undefined) {
+      this.#contextWindowTokens = contextWindowTokens;
+      this.#contextWindowTokensOverride = true;
+    } else {
+      this.#contextWindowTokens = providerModelContextTokens(profile, model);
+      this.#contextWindowTokensOverride = false;
+    }
     this.#installSecret(secret, stored.authKind, stored.expiresAt);
     return this.status();
   }
@@ -248,6 +340,8 @@ export class AuthSession {
   async loginKimiDevice(options: {
     alias?: string;
     model?: string;
+    reasoningEffort?: string;
+    contextWindowTokens?: number;
     transport?: KimiOAuthTransport;
     signal?: AbortSignal;
     onAuthorization?: (info: {
@@ -257,6 +351,7 @@ export class AuthSession {
     }) => void;
     sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   } = {}): Promise<AuthSessionStatus> {
+    const switching = this.#config.provider !== "kimi";
     const alias = options.alias ?? "default";
     const transport = options.transport ?? createFetchKimiOAuthTransport();
     const authorization = await requestKimiDeviceAuthorization(transport);
@@ -279,7 +374,13 @@ export class AuthSession {
     const model = requestedModel
       ?? (this.#config.provider === "kimi" ? this.#config.model : undefined)
       ?? profile.defaultModel
-      ?? "kimi-for-coding";
+      ?? "k3";
+    const reasoningEffort = loginReasoningEffort(
+      "kimi",
+      options.reasoningEffort,
+      this.#config.provider === "kimi" ? this.#config.reasoningEffort : undefined,
+    );
+    const contextWindowTokens = loginContextWindowTokens(options.contextWindowTokens);
     await this.#store.set({
       accountId,
       provider: "kimi",
@@ -287,9 +388,19 @@ export class AuthSession {
       authKind: "oauth",
       secret,
       expiresAt: tokens.expiresAt,
-      metadata: { authHost: "auth.kimi.com", model, baseURL: KIMI_CODING_API_BASE },
+      metadata: {
+        authHost: "auth.kimi.com",
+        model,
+        baseURL: KIMI_CODING_API_BASE,
+        ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+        ...(contextWindowTokens === undefined
+          ? {}
+          : { contextWindowTokens: String(contextWindowTokens) }),
+      },
     });
+    const { reasoningEffort: _previousEffort, ...previousConfig } = this.#config;
     this.#config = {
+      ...previousConfig,
       provider: "kimi",
       profile,
       accountAlias: alias,
@@ -298,7 +409,15 @@ export class AuthSession {
       baseURL: KIMI_CODING_API_BASE,
       endpointTrust: "official",
       authStatus: "ready",
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     };
+    if (contextWindowTokens !== undefined) {
+      this.#contextWindowTokens = contextWindowTokens;
+      this.#contextWindowTokensOverride = true;
+    } else if (switching) {
+      this.#contextWindowTokens = providerModelContextTokens(profile, model);
+      this.#contextWindowTokensOverride = false;
+    }
     this.#installSecret(tokens.accessToken, "oauth", tokens.expiresAt);
     return this.status();
   }
@@ -370,7 +489,9 @@ export class AuthSession {
     this.#modelPort = createModelPortForProfile(this.#config.profile, {
       apiKey: accessToken,
       ...(this.#config.baseURL === undefined ? {} : { baseURL: this.#config.baseURL }),
-      contextTokens: this.#config.profile.contextTokens,
+      ...(this.#config.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: this.#config.reasoningEffort }),
     });
     this.#config = withoutApiKey({ ...this.#config, authStatus: "ready" });
   }
@@ -390,6 +511,8 @@ export function parseLoginCommand(argument: string): {
   alias?: string;
   model?: string;
   baseURL?: string;
+  reasoningEffort?: string;
+  contextWindowTokens?: number;
 } {
   const trimmed = argument.trim();
   if (!trimmed || trimmed === "status") return { provider: "", mode: "status" };
@@ -423,13 +546,21 @@ export function parseLoginCommand(argument: string): {
     const optionParts = parts[1] === undefined ? [] : parts.slice(2);
     const extracted = extractLoginKeyOptions(optionParts);
     if (extracted.rest.length > 0) {
-      throw new TypeError(`Usage: /login ${provider} [device] [model <id>]`);
+      throw new TypeError(
+        `Usage: /login ${provider} [device] [model <id>] [effort <level>] [context <tokens>]`,
+      );
     }
     return {
       provider,
       mode: "device",
       ...(extracted.model === undefined ? {} : { model: extracted.model }),
       ...(extracted.alias === undefined ? {} : { alias: extracted.alias }),
+      ...(extracted.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: extracted.reasoningEffort }),
+      ...(extracted.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: extracted.contextWindowTokens }),
     };
   }
   if (parts[1] === "key" || parts[1] === "api-key") {
@@ -437,7 +568,7 @@ export function parseLoginCommand(argument: string): {
     const apiKey = extracted.rest.join(" ").trim();
     if (!apiKey) {
       throw new TypeError(
-        `Usage: /login ${provider} key <api-key> [name <id>] [model <id>] [base_url <url>]`,
+        `Usage: /login ${provider} key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`,
       );
     }
     return {
@@ -447,20 +578,40 @@ export function parseLoginCommand(argument: string): {
       ...(extracted.alias === undefined ? {} : { alias: extracted.alias }),
       ...(extracted.model === undefined ? {} : { model: extracted.model }),
       ...(extracted.baseURL === undefined ? {} : { baseURL: extracted.baseURL }),
+      ...(extracted.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: extracted.reasoningEffort }),
+      ...(extracted.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: extracted.contextWindowTokens }),
     };
   }
   // `/login kimi model <id>` implies device/OAuth login with an explicit model.
   const bareOptions = extractLoginKeyOptions(parts.slice(1));
-  if (bareOptions.rest.length === 0 && (bareOptions.model !== undefined || bareOptions.alias !== undefined)) {
+  if (
+    bareOptions.rest.length === 0 &&
+    (
+      bareOptions.model !== undefined ||
+      bareOptions.alias !== undefined ||
+      bareOptions.reasoningEffort !== undefined ||
+      bareOptions.contextWindowTokens !== undefined
+    )
+  ) {
     return {
       provider,
       mode: "device",
       ...(bareOptions.model === undefined ? {} : { model: bareOptions.model }),
       ...(bareOptions.alias === undefined ? {} : { alias: bareOptions.alias }),
+      ...(bareOptions.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: bareOptions.reasoningEffort }),
+      ...(bareOptions.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: bareOptions.contextWindowTokens }),
     };
   }
   throw new TypeError(
-    `Usage: /login ${provider} [device [model <id>]|key <api-key> [name <id>] [model <id>] [base_url <url>]] or /login use <provider|name>`,
+    `Usage: /login ${provider} [device [model <id>] [effort <level>] [context <tokens>]|key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]] or /login use <provider|name>`,
   );
 }
 
@@ -469,11 +620,15 @@ function extractLoginKeyOptions(parts: readonly string[]): {
   readonly alias?: string;
   readonly model?: string;
   readonly baseURL?: string;
+  readonly reasoningEffort?: string;
+  readonly contextWindowTokens?: number;
 } {
   let rest = [...parts];
   let alias: string | undefined;
   let model: string | undefined;
   let baseURL: string | undefined;
+  let reasoningEffort: string | undefined;
+  let contextWindowTokens: number | undefined;
   while (rest.length >= 2) {
     const flag = rest.at(-2)?.toLowerCase();
     const value = rest.at(-1);
@@ -493,6 +648,16 @@ function extractLoginKeyOptions(parts: readonly string[]): {
       rest = rest.slice(0, -2);
       continue;
     }
+    if (flag === "effort") {
+      reasoningEffort = value;
+      rest = rest.slice(0, -2);
+      continue;
+    }
+    if (flag === "context_window" || flag === "context-window" || flag === "context") {
+      contextWindowTokens = loginContextWindowTokens(Number(value));
+      rest = rest.slice(0, -2);
+      continue;
+    }
     break;
   }
   return {
@@ -500,6 +665,8 @@ function extractLoginKeyOptions(parts: readonly string[]): {
     ...(alias === undefined ? {} : { alias }),
     ...(model === undefined ? {} : { model }),
     ...(baseURL === undefined ? {} : { baseURL }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
   };
 }
 
@@ -549,4 +716,32 @@ function safeAccessToken(secret: string): string {
   } catch {
     return secret;
   }
+}
+
+function loginReasoningEffort(
+  provider: string,
+  requested: string | undefined,
+  current: ProviderConfig["reasoningEffort"],
+): ProviderConfig["reasoningEffort"] {
+  if (provider !== "kimi") {
+    if (requested !== undefined) {
+      throw new TypeError("reasoning effort is currently supported only by the Kimi provider");
+    }
+    return undefined;
+  }
+  return normalizeKimiReasoningEffort(requested) ?? current;
+}
+
+function loginContextWindowTokens(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 8_192 || value > 2_000_000) {
+    throw new RangeError("context window must be an integer from 8192 to 2000000 tokens");
+  }
+  return value;
+}
+
+function optionalStoredInteger(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : undefined;
 }

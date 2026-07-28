@@ -5,7 +5,12 @@ import { join } from "node:path";
 import test from "node:test";
 import { InMemoryCredentialBroker } from "@civaapple/qi-agent/capability";
 import { EncryptedFileCredentialStore } from "@civaapple/qi-node/storage";
-import { getProviderProfile, listProviderProfiles } from "@civaapple/qi-ai";
+import {
+  getProviderModelProfile,
+  getProviderProfile,
+  listProviderProfiles,
+  providerModelContextTokens,
+} from "@civaapple/qi-ai";
 import { AuthSession, parseLoginCommand } from "../apps/cli/dist/auth.js";
 import {
   createFetchKimiOAuthTransport,
@@ -26,7 +31,23 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.equal(getProviderProfile("compatible")?.displayName, "OpenAI Compatible");
   assert.equal(getProviderProfile("openai")?.officialBaseURL, "https://api.openai.com/v1");
   assert.equal(getProviderProfile("kimi")?.capabilities.toolCalls, true);
+  assert.equal(getProviderProfile("kimi")?.capabilities.reasoning, true);
   assert.equal(getProviderProfile("kimi")?.capabilities.responses, false);
+  const kimi = getProviderProfile("kimi");
+  assert.ok(kimi);
+  assert.equal(kimi.defaultModel, "k3");
+  assert.equal(providerModelContextTokens(kimi, "k3"), 1_048_576);
+  assert.equal(providerModelContextTokens(kimi, "k3-256k"), 262_144);
+  assert.equal(providerModelContextTokens(kimi, "kimi-for-coding"), 262_144);
+  assert.equal(providerModelContextTokens(kimi, "kimi-for-coding-highspeed"), 262_144);
+  assert.deepEqual(getProviderModelProfile(kimi, "k3")?.thinking, {
+    mode: "effort",
+    supportedEfforts: ["low", "high", "max"],
+    defaultEffort: "high",
+  });
+  assert.deepEqual(getProviderModelProfile(kimi, "kimi-for-coding")?.thinking, {
+    mode: "toggle",
+  });
 });
 
 test("compatible provider labels use the configured name", () => {
@@ -49,6 +70,44 @@ test("resolveProviderConfig allows missing credentials for unauthenticated start
   assert.equal(config.authStatus, "missing");
   assert.equal(config.wireApi, "chat.completions");
   assert.equal(config.apiKey, undefined);
+});
+
+test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported values", () => {
+  const base = {
+    provider: "kimi",
+    model: "k3",
+    allowMissingCredential: true,
+    environment: {},
+  };
+  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "xhigh" }).reasoningEffort, "max");
+  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "medium" }).reasoningEffort, "high");
+  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "minimum" }).reasoningEffort, "low");
+  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "none" }).reasoningEffort, "none");
+  assert.equal(resolveProviderConfig({
+    ...base,
+    environment: { KIMI_MODEL_THINKING_EFFORT: "light" },
+  }).reasoningEffort, "low");
+  assert.equal(resolveProviderConfig({
+    ...base,
+    environment: {
+      QI_REASONING_EFFORT: "medium",
+      KIMI_MODEL_THINKING_EFFORT: "max",
+    },
+  }).reasoningEffort, "high");
+  assert.throws(
+    () => resolveProviderConfig({ ...base, reasoningEffort: "extreme" }),
+    /Unsupported Kimi reasoning effort/,
+  );
+  assert.throws(
+    () => resolveProviderConfig({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      reasoningEffort: "high",
+      allowMissingCredential: true,
+      environment: {},
+    }),
+    /only by the Kimi provider/,
+  );
 });
 
 test("EncryptedFileCredentialStore seals and restores secrets", async () => {
@@ -179,13 +238,21 @@ test("API-key login switches provider model and base URL for the next Turn", asy
       store: new EncryptedFileCredentialStore(root),
     });
     assert.equal(auth.status().authStatus, "missing");
-    const status = await auth.loginApiKey("kimi", "sk-kimi-test");
+    const status = await auth.loginApiKey("kimi", "sk-kimi-test", {
+      model: "k3-256k",
+      reasoningEffort: "max",
+      contextWindowTokens: 300_000,
+    });
     assert.equal(status.authStatus, "ready");
     assert.equal(status.provider, "kimi");
-    assert.equal(status.model, "kimi-for-coding");
+    assert.equal(status.model, "k3-256k");
+    assert.equal(status.reasoningEffort, "max");
+    assert.equal(status.contextWindowTokens, 300_000);
+    assert.equal(status.contextWindowTokensOverride, true);
     assert.equal(status.wireApi, "chat.completions");
     assert.equal(auth.config.baseURL, "https://api.kimi.com/coding/v1");
-    assert.equal(auth.config.model, "kimi-for-coding");
+    assert.equal(auth.config.model, "k3-256k");
+    assert.equal(auth.config.reasoningEffort, "max");
     assert.equal(auth.requireModelPort().constructor.name, "OpenAIChatCompletionsModelPort");
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -393,6 +460,27 @@ test("parseLoginCommand distinguishes status, logout, device, and API key modes"
     mode: "api-key",
     apiKey: "sk-test",
   });
+  assert.deepEqual(
+    parseLoginCommand("kimi key sk-test model k3 effort max context 524288"),
+    {
+      provider: "kimi",
+      mode: "api-key",
+      apiKey: "sk-test",
+      model: "k3",
+      reasoningEffort: "max",
+      contextWindowTokens: 524_288,
+    },
+  );
+  assert.deepEqual(
+    parseLoginCommand("kimi device model k3-256k effort high context_window 262144"),
+    {
+      provider: "kimi",
+      mode: "device",
+      model: "k3-256k",
+      reasoningEffort: "high",
+      contextWindowTokens: 262_144,
+    },
+  );
   assert.deepEqual(parseLoginCommand("deepseek key sk-test model deepseek-reasoner"), {
     provider: "deepseek",
     mode: "api-key",
@@ -411,6 +499,14 @@ test("parseLoginCommand distinguishes status, logout, device, and API key modes"
       model: "local-model",
       baseURL: "http://127.0.0.1:11434/v1",
     },
+  );
+  assert.throws(
+    () => parseLoginCommand("kimi key sk-test context not-a-number"),
+    /context window must be an integer/,
+  );
+  assert.throws(
+    () => parseLoginCommand("kimi device context 4096"),
+    /context window must be an integer/,
   );
 });
 

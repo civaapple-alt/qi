@@ -11,6 +11,20 @@ export interface FormField {
   readonly initialValue?: string;
   readonly secret?: boolean;
   readonly required?: boolean;
+  /**
+   * Render this field as a terminal dropdown. Up/down or left/right changes
+   * the selected option while Tab continues to move between fields.
+   */
+  readonly options?: readonly FormFieldOption[];
+}
+
+export interface FormFieldOption {
+  readonly value: string;
+  readonly label: string;
+  readonly description?: string;
+  /** The option's value is entered through an inline text box. Keep this last. */
+  readonly customInput?: boolean;
+  readonly placeholder?: string;
 }
 
 export interface FormPanelOptions {
@@ -19,6 +33,15 @@ export interface FormPanelOptions {
   readonly fields: readonly FormField[];
   readonly submitLabel?: string;
   readonly onSubmit: (values: Readonly<Record<string, string>>) => void;
+  /**
+   * Return dependent-field patches after a value changes. Patches only replace
+   * fields the operator has not edited, so a manual override remains stable.
+   */
+  readonly onChange?: (
+    fieldId: string,
+    value: string,
+    values: Readonly<Record<string, string>>,
+  ) => Readonly<Record<string, string>> | void;
   readonly onClose: () => void;
 }
 
@@ -30,8 +53,11 @@ export class FormPanel implements PanelComponent, Focusable {
   readonly #fields: readonly FormField[];
   readonly #submitLabel: string;
   readonly #onSubmit: (values: Readonly<Record<string, string>>) => void;
+  readonly #onChange: FormPanelOptions["onChange"];
   readonly #onClose: () => void;
   readonly #inputs: Input[];
+  readonly #selectedOptions: number[];
+  readonly #dirty: boolean[];
   #index = 0;
   #error: string | undefined;
 
@@ -41,11 +67,19 @@ export class FormPanel implements PanelComponent, Focusable {
     this.#fields = options.fields;
     this.#submitLabel = options.submitLabel ?? "Submit";
     this.#onSubmit = options.onSubmit;
+    this.#onChange = options.onChange;
     this.#onClose = options.onClose;
-    this.#inputs = options.fields.map((field) => {
+    this.#selectedOptions = [];
+    this.#dirty = options.fields.map(() => false);
+    this.#inputs = options.fields.map((field, index) => {
       const input = new Input();
       input.focused = false;
-      if (field.initialValue) setInputValueAtEnd(input, field.initialValue);
+      const selected = initialOptionIndex(field);
+      this.#selectedOptions[index] = selected;
+      const selectedOption = field.options?.[selected];
+      if (field.initialValue && (!field.options || selectedOption?.customInput)) {
+        setInputValueAtEnd(input, field.initialValue);
+      }
       return input;
     });
     this.#syncFocus();
@@ -58,12 +92,36 @@ export class FormPanel implements PanelComponent, Focusable {
       this.#onClose();
       return;
     }
-    if (matchesKey(data, Key.tab) || matchesKey(data, Key.down)) {
+    const field = this.#fields[this.#index];
+    if (matchesKey(data, Key.tab)) {
       this.#index = Math.min(this.#fields.length - 1, this.#index + 1);
       this.#syncFocus();
       return;
     }
-    if (matchesKey(data, "shift+tab") || matchesKey(data, Key.up)) {
+    if (matchesKey(data, "shift+tab")) {
+      this.#index = Math.max(0, this.#index - 1);
+      this.#syncFocus();
+      return;
+    }
+    if (
+      field?.options &&
+      (
+        matchesKey(data, Key.down) ||
+        matchesKey(data, Key.right) ||
+        matchesKey(data, Key.up) ||
+        matchesKey(data, Key.left)
+      )
+    ) {
+      const direction = matchesKey(data, Key.down) || matchesKey(data, Key.right) ? 1 : -1;
+      this.#selectOption(this.#index, direction);
+      return;
+    }
+    if (matchesKey(data, Key.down)) {
+      this.#index = Math.min(this.#fields.length - 1, this.#index + 1);
+      this.#syncFocus();
+      return;
+    }
+    if (matchesKey(data, Key.up)) {
       this.#index = Math.max(0, this.#index - 1);
       this.#syncFocus();
       return;
@@ -77,7 +135,10 @@ export class FormPanel implements PanelComponent, Focusable {
       this.#submit();
       return;
     }
+    if (field?.options && !this.#selectedOption(this.#index)?.customInput) return;
     this.#inputs[this.#index]?.handleInput(data);
+    this.#dirty[this.#index] = true;
+    this.#notifyChange(this.#index);
     this.#error = undefined;
   }
 
@@ -86,7 +147,7 @@ export class FormPanel implements PanelComponent, Focusable {
     const lines = [
       ...panelHeader(
         this.title,
-        "Tab/↑↓ fields · type to edit · Enter next/submit · Esc cancel",
+        "Tab fields · ↑↓ choices · type to edit · Enter next/submit · Esc cancel",
         safe,
       ),
       "",
@@ -100,7 +161,40 @@ export class FormPanel implements PanelComponent, Focusable {
       const raw = input.getValue();
       const marker = selected ? theme.fg("primary", "❯ ") : "  ";
       lines.push(truncateToWidth(`${marker}${theme.bold(field.label)}`, safe, "…"));
-      if (selected && !field.secret) {
+      if (field.options) {
+        const selectedOption = this.#selectedOption(index);
+        if (selected) {
+          for (const option of field.options) {
+            const current = option === selectedOption;
+            const optionMarker = current ? theme.fg("primary", "●") : theme.fg("textMuted", "○");
+            const label = current ? theme.bold(option.label) : option.label;
+            const description = option.description
+              ? theme.fg("textDim", ` · ${option.description}`)
+              : "";
+            lines.push(truncateToWidth(`    ${optionMarker} ${label}${description}`, safe, "…"));
+          }
+        } else {
+          lines.push(truncateToWidth(
+            `    ${selectedOption?.label ?? theme.fg("textMuted", field.placeholder ?? "")}`,
+            safe,
+            "…",
+          ));
+        }
+        if (selectedOption?.customInput) {
+          if (selected) {
+            const [rendered = "> "] = input.render(Math.max(12, safe - 4));
+            const body = rendered.replace(/^\s*>\s?/, "");
+            const fallback = body || theme.fg("textMuted", selectedOption.placeholder ?? field.placeholder ?? "");
+            lines.push(truncateToWidth(`    ${theme.fg("primary", "> ")}${fallback}`, safe, "…"));
+          } else {
+            const value = raw || theme.fg(
+              "textMuted",
+              selectedOption.placeholder ?? field.placeholder ?? "",
+            );
+            lines.push(truncateToWidth(`      ${value}`, safe, "…"));
+          }
+        }
+      } else if (selected && !field.secret) {
         // Use Input.render so the caret is visible while editing (incl. prefilled model).
         const [rendered = "> "] = input.render(Math.max(12, safe - 4));
         const body = rendered.replace(/^\s*>\s?/, "");
@@ -127,24 +221,99 @@ export class FormPanel implements PanelComponent, Focusable {
 
   #syncFocus(): void {
     for (const [index, input] of this.#inputs.entries()) {
-      input.focused = index === this.#index;
+      input.focused = index === this.#index &&
+        (!this.#fields[index]?.options || this.#selectedOption(index)?.customInput === true);
     }
   }
 
   #submit(): void {
-    const values: Record<string, string> = {};
+    const values = this.#values();
     for (const [index, field] of this.#fields.entries()) {
-      const value = (this.#inputs[index]?.getValue() ?? "").trim();
+      const value = values[field.id] ?? "";
       if (field.required !== false && !value) {
         this.#error = `${field.label} is required.`;
         this.#index = index;
         this.#syncFocus();
         return;
       }
-      values[field.id] = value;
     }
     this.#onSubmit(values);
   }
+
+  #selectedOption(index: number): FormFieldOption | undefined {
+    return this.#fields[index]?.options?.[this.#selectedOptions[index] ?? 0];
+  }
+
+  #selectOption(index: number, direction: number): void {
+    const options = this.#fields[index]?.options;
+    if (!options || options.length === 0) return;
+    const current = this.#selectedOptions[index] ?? 0;
+    this.#selectedOptions[index] = (current + direction + options.length) % options.length;
+    this.#dirty[index] = true;
+    this.#syncFocus();
+    this.#notifyChange(index);
+    this.#error = undefined;
+  }
+
+  #notifyChange(index: number): void {
+    if (!this.#onChange) return;
+    const field = this.#fields[index];
+    if (!field) return;
+    const values = this.#values();
+    const patches = this.#onChange(field.id, values[field.id] ?? "", values);
+    if (!patches) return;
+    for (const [id, value] of Object.entries(patches)) {
+      const target = this.#fields.findIndex((candidate) => candidate.id === id);
+      if (target < 0 || this.#dirty[target]) continue;
+      this.#setValue(target, value);
+    }
+  }
+
+  #setValue(index: number, value: string): void {
+    const field = this.#fields[index];
+    if (!field) return;
+    if (!field.options) {
+      setInputValueAtEnd(this.#inputs[index]!, value);
+      return;
+    }
+    const matched = field.options.findIndex((option) => !option.customInput && option.value === value);
+    if (matched >= 0) {
+      this.#selectedOptions[index] = matched;
+      return;
+    }
+    const custom = field.options.findIndex((option) => option.customInput);
+    if (custom >= 0) {
+      this.#selectedOptions[index] = custom;
+      setInputValueAtEnd(this.#inputs[index]!, value);
+    }
+  }
+
+  #values(): Record<string, string> {
+    const values: Record<string, string> = {};
+    for (const [index, field] of this.#fields.entries()) {
+      const option = this.#selectedOption(index);
+      values[field.id] = (
+        field.options
+          ? option?.customInput
+            ? this.#inputs[index]?.getValue() ?? ""
+            : option?.value ?? ""
+          : this.#inputs[index]?.getValue() ?? ""
+      ).trim();
+    }
+    return values;
+  }
+}
+
+function initialOptionIndex(field: FormField): number {
+  if (!field.options || field.options.length === 0) return 0;
+  const initial = field.initialValue?.trim();
+  if (initial) {
+    const exact = field.options.findIndex((option) => !option.customInput && option.value === initial);
+    if (exact >= 0) return exact;
+    const custom = field.options.findIndex((option) => option.customInput);
+    if (custom >= 0) return custom;
+  }
+  return 0;
 }
 
 /**

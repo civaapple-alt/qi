@@ -82,6 +82,13 @@ background = false
 delegate = false
 ```
 
+For Kimi Code, `model = "k3"` automatically selects a 1,048,576-token window; `k3-256k`,
+`kimi-for-coding`, and `kimi-for-coding-highspeed` select 262,144 unless `context_window_tokens` overrides it.
+Optional `reasoning_effort` accepts K3's `low`, `high`, `max`, or `none` modes (plus documented aliases);
+the default is `high`.
+The Kimi `/login` form exposes the four known models as a dropdown with a final custom-ID input, shows the
+effective effort/context defaults, and persists edits without placing the API key in TOML.
+
 Project policy lives under `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`. Resolution order is:
 
 ```text

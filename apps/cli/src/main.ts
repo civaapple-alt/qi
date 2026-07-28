@@ -20,6 +20,7 @@ import { t } from "./i18n.js";
 import { formatProviderLabel } from "./provider.js";
 import {
   contextBudgetFromWindow,
+  TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
   TUI_HISTORY_BUDGET_TOKENS,
   TUI_MAX_ACTIONS_PER_STEP,
   TuiRuntime,
@@ -49,13 +50,22 @@ async function main(): Promise<void> {
     if (line) process.stdout.write(`${line}\n`);
   };
   let activityConsumer: (activity: RuntimeActivity) => void = () => undefined;
-  const auth = await AuthSession.create({ config: options.provider });
+  const auth = await AuthSession.create({
+    config: options.provider,
+    contextWindowTokens: options.contextWindowTokens,
+    contextWindowTokensOverride: options.contextWindowTokensOverride,
+  });
 
   if (rich) {
     let sessionId = options.sessionId;
     let pendingNotice: string | undefined;
     for (;;) {
       const authStatus = auth.status();
+      const contextWindowTokens = authStatus.contextWindowTokens;
+      const outputReserveTokens = Math.min(
+        TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
+        Math.floor(contextWindowTokens / 8),
+      );
       // In-process New Session / resume is a launch: re-read project/user capability policy.
       const policy = await refreshLaunchCapabilities(options);
       options.allowWrite = policy.allowWrite;
@@ -77,8 +87,9 @@ async function main(): Promise<void> {
           provider: auth.config.provider,
           model: auth.config.model,
         }),
-        contextWindowTokens: options.contextWindowTokens,
-        outputReserveTokens: options.outputReserveTokens,
+        contextWindowTokens,
+        contextWindowTokensOverride: authStatus.contextWindowTokensOverride,
+        outputReserveTokens,
         maxSteps: options.maxSteps,
         allowWrite: options.allowWrite,
         allowVerify: options.allowVerify,
@@ -93,14 +104,21 @@ async function main(): Promise<void> {
         onEvent: (event) => eventConsumer(event),
         onActivity: (activity) => activityConsumer(activity),
       });
+      const { reasoningEffort: _previousEffort, ...providerOptions } = options.provider;
       const launchOptions: TuiCliOptions = {
         ...options,
+        contextWindowTokens,
+        contextWindowTokensOverride: authStatus.contextWindowTokensOverride,
+        outputReserveTokens,
         provider: {
-          ...options.provider,
+          ...providerOptions,
           provider: auth.config.provider,
           model: auth.config.model,
           wireApi: auth.config.wireApi,
           accountAlias: auth.config.accountAlias,
+          ...(auth.config.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: auth.config.reasoningEffort }),
           ...(auth.config.baseURL === undefined ? {} : { baseURL: auth.config.baseURL }),
         },
       };
@@ -142,6 +160,7 @@ async function main(): Promise<void> {
       model: auth.config.model,
     }),
     contextWindowTokens: options.contextWindowTokens,
+    contextWindowTokensOverride: options.contextWindowTokensOverride,
     outputReserveTokens: options.outputReserveTokens,
     maxSteps: options.maxSteps,
     allowWrite: options.allowWrite,
@@ -591,7 +610,18 @@ async function handleLoginCommand(
         const entry = findCompatibleEndpoint(loaded.config, alias);
         return entry ? { model: entry.model, baseURL: entry.baseURL } : undefined;
       })()
-      : undefined;
+      : (loaded.config.provider === provider
+        ? {
+            ...(loaded.config.model === undefined ? {} : { model: loaded.config.model }),
+            ...(loaded.config.baseURL === undefined ? {} : { baseURL: loaded.config.baseURL }),
+            ...(loaded.config.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: loaded.config.reasoningEffort }),
+            ...(loaded.config.contextWindowTokens === undefined
+              ? {}
+              : { contextWindowTokens: loaded.config.contextWindowTokens }),
+          }
+        : undefined);
     const status = await auth.useAccount(provider, alias, routing);
     const savedPath = await persistLoginProviderDefaults(status, configPath);
     return `Switched to ${formatProviderLabel(status.provider, status.accountAlias)}/${status.model}` +
@@ -603,11 +633,17 @@ async function handleLoginCommand(
       ...(request.alias === undefined ? {} : { alias: request.alias }),
       ...(request.model === undefined ? {} : { model: request.model }),
       ...(request.baseURL === undefined ? {} : { baseURL: request.baseURL }),
+      ...(request.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: request.reasoningEffort }),
+      ...(request.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: request.contextWindowTokens }),
     });
     const configPath = await persistLoginProviderDefaults(status, defaultUserConfigPath());
     return `Authenticated ${formatProviderLabel(status.provider, status.accountAlias)}/${status.model} (${status.authStatus}) via API key` +
       (status.baseURL ? ` · ${status.baseURL}` : "") +
-      `. Saved provider/model/base_url to ${configPath}. Secrets stay in the sealed store.`;
+      `. Saved provider/model/base_url${status.reasoningEffort ? "/reasoning_effort" : ""}${status.contextWindowTokensOverride ? "/context_window_tokens" : ""} to ${configPath}. Secrets stay in the sealed store.`;
   }
   if (request.provider !== "kimi") {
     throw new TypeError(`Device login is currently implemented for kimi; use /login ${request.provider} key <api-key>`);
@@ -615,6 +651,12 @@ async function handleLoginCommand(
   const status = await auth.loginKimiDevice({
     ...(request.model === undefined ? {} : { model: request.model }),
     ...(request.alias === undefined ? {} : { alias: request.alias }),
+    ...(request.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: request.reasoningEffort }),
+    ...(request.contextWindowTokens === undefined
+      ? {}
+      : { contextWindowTokens: request.contextWindowTokens }),
     onAuthorization: (info) => {
       write(`Open ${info.verificationUriComplete || info.verificationUri}`);
       write(`User code: ${info.userCode}`);
@@ -623,7 +665,7 @@ async function handleLoginCommand(
   });
   const configPath = await persistLoginProviderDefaults(status, defaultUserConfigPath());
   return `Authenticated ${formatProviderLabel(status.provider, status.accountAlias)}/${status.model} via device login (${status.authStatus}). ` +
-    `Saved provider/model to ${configPath}.`;
+    `Saved provider/model${status.reasoningEffort ? "/reasoning_effort" : ""}${status.contextWindowTokensOverride ? "/context_window_tokens" : ""} to ${configPath}.`;
 }
 
 async function launchInfo(

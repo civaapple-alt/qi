@@ -43,7 +43,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/settings` | Settings hub: mode, **permissions**, providers, config, context, theme, **language**, status |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
-| `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek`). For **OpenAI Compatible**, also set a **Name** (e.g. `qianwenai` / `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi device/OAuth** asks for Model first (prefilled), or `/login kimi device model <id>`. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>]`. |
+| `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek`). For **OpenAI Compatible**, also set a **Name** (e.g. `qianwenai` / `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
 | `/skills` | Skills hub: list discovered Skills, or Install → scope → name/path form |
@@ -159,6 +159,15 @@ Run or in-flight Subagent. Unsettled delegations cancel on Session recovery befo
 User TOML may set `context_window_tokens`. The TUI reserves up to 16K tokens for model output and shows window,
 prompt budget, reserve, current use, and compacted-exchange savings. `/context` projects committed
 `context.compacted` events; increasing the window does not turn off compaction or remove its Artifact trail.
+Without an explicit override, Kimi model windows resolve from the selected model: `k3` uses 1,048,576 and
+`k3-256k`, `kimi-for-coding`, and `kimi-for-coding-highspeed` use 262,144. Kimi defaults to `k3`.
+Set `reasoning_effort = "low" | "high" | "max" | "none"` (aliases documented by `@civaapple/qi-ai` are also
+accepted), pass `--effort`, or set `KIMI_MODEL_THINKING_EFFORT` / `QI_REASONING_EFFORT`; K3 defaults to `high`.
+Disabling thinking may route K3/K2.7 requests to an older model according to the Kimi Code service contract.
+An in-process model switch refreshes the model-derived window before the next Run; an explicit
+`context_window_tokens` remains authoritative.
+Kimi `/login` shows these defaults before authentication and saves the selected model, normalized effort, and
+editable window to `~/.qi/config.toml`; the API key remains sealed under `QI_HOME`.
 
 Main Runs default to 32 Steps. `max_steps` accepts 8–100 in user or project TOML, with
 `--max-steps` > project > user > default precedence. Step 31 warns that only one executable Step remains; Step

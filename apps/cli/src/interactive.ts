@@ -1063,13 +1063,28 @@ export class InteractiveTui {
       },
       startLoginDevice: (provider, options) => {
         const modelSuffix = options?.model?.trim() ? ` model ${options.model.trim()}` : "";
-        this.#handleCommand("login", `${provider} device${modelSuffix}`);
+        const effortSuffix = options?.reasoningEffort?.trim()
+          ? ` effort ${options.reasoningEffort.trim()}`
+          : "";
+        const contextSuffix = options?.contextWindowTokens === undefined
+          ? ""
+          : ` context ${options.contextWindowTokens}`;
+        this.#handleCommand("login", `${provider} device${modelSuffix}${effortSuffix}${contextSuffix}`);
       },
       startLoginApiKey: (provider, apiKey, options) => {
         const nameSuffix = options?.alias?.trim() ? ` name ${options.alias.trim()}` : "";
         const modelSuffix = options?.model?.trim() ? ` model ${options.model.trim()}` : "";
         const baseSuffix = options?.baseURL?.trim() ? ` base_url ${options.baseURL.trim()}` : "";
-        this.#handleCommand("login", `${provider} key ${apiKey}${nameSuffix}${modelSuffix}${baseSuffix}`);
+        const effortSuffix = options?.reasoningEffort?.trim()
+          ? ` effort ${options.reasoningEffort.trim()}`
+          : "";
+        const contextSuffix = options?.contextWindowTokens === undefined
+          ? ""
+          : ` context ${options.contextWindowTokens}`;
+        this.#handleCommand(
+          "login",
+          `${provider} key ${apiKey}${nameSuffix}${modelSuffix}${baseSuffix}${effortSuffix}${contextSuffix}`,
+        );
       },
       startLogout: (provider, alias) => {
         this.#handleCommand("login", alias ? `logout ${provider} ${alias}` : `logout ${provider}`);
@@ -1125,7 +1140,10 @@ export class InteractiveTui {
   }
 
   #syncAuthLaunch(status: AuthSessionStatus): void {
-    this.#presenter.patchAuthLaunch(status);
+    const context = status.contextWindowTokensOverride
+      ? this.#runtime.configureContextWindow(status.contextWindowTokens)
+      : this.#runtime.syncModelContextWindow(status.contextWindowTokens);
+    this.#presenter.patchAuthLaunch({ ...status, ...context });
   }
 
   async #persistLoginDefaults(status: AuthSessionStatus): Promise<string> {
@@ -1136,7 +1154,12 @@ export class InteractiveTui {
   #switchSealedAccount(
     provider: string,
     alias: string,
-    routing?: { model?: string; baseURL?: string },
+    routing?: {
+      model?: string;
+      baseURL?: string;
+      reasoningEffort?: string;
+      contextWindowTokens?: number;
+    },
   ): void {
     if (!this.#auth) {
       this.#presenter.setNotice("Auth session is unavailable in this TUI mode.");
@@ -1286,6 +1309,12 @@ export class InteractiveTui {
               ? {
                 ...(loaded.config.model === undefined ? {} : { model: loaded.config.model }),
                 ...(loaded.config.baseURL === undefined ? {} : { baseURL: loaded.config.baseURL }),
+                ...(loaded.config.reasoningEffort === undefined
+                  ? {}
+                  : { reasoningEffort: loaded.config.reasoningEffort }),
+                ...(loaded.config.contextWindowTokens === undefined
+                  ? {}
+                  : { contextWindowTokens: loaded.config.contextWindowTokens }),
               }
               : undefined);
           const status = await auth.useAccount(provider, alias, routing);
@@ -1302,6 +1331,12 @@ export class InteractiveTui {
             ...(request.alias === undefined ? {} : { alias: request.alias }),
             ...(request.model === undefined ? {} : { model: request.model }),
             ...(request.baseURL === undefined ? {} : { baseURL: request.baseURL }),
+            ...(request.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: request.reasoningEffort }),
+            ...(request.contextWindowTokens === undefined
+              ? {}
+              : { contextWindowTokens: request.contextWindowTokens }),
           });
           this.#syncAuthLaunch(status);
           const configPath = await this.#persistLoginDefaults(status);
@@ -1318,6 +1353,12 @@ export class InteractiveTui {
         const status = await auth.loginKimiDevice({
           ...(request.model === undefined ? {} : { model: request.model }),
           ...(request.alias === undefined ? {} : { alias: request.alias }),
+          ...(request.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: request.reasoningEffort }),
+          ...(request.contextWindowTokens === undefined
+            ? {}
+            : { contextWindowTokens: request.contextWindowTokens }),
           onAuthorization: (info) => {
             this.#presenter.setNotice(
               `Open ${info.verificationUriComplete || info.verificationUri} · code ${info.userCode}`,

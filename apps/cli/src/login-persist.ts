@@ -12,6 +12,12 @@ export async function persistLoginProviderDefaults(
       model: status.model,
       accountAlias: status.accountAlias,
       ...(status.baseURL === undefined ? {} : { baseURL: status.baseURL }),
+      ...(status.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: status.reasoningEffort }),
+      ...(status.contextWindowTokensOverride
+        ? { contextWindowTokens: status.contextWindowTokens }
+        : {}),
     },
     configPath,
   );

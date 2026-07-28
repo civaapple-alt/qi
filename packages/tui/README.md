@@ -61,7 +61,8 @@ implement the `pi-tui` `Component`/`Focusable` contracts can be mounted in an ex
 
 - `TuiPresenter` and projection/render helpers;
 - `ComposerComponent`, `FollowUpQueue`, and `FollowUpsComponent`;
-- `ListPanel`, `MultiSelectPanel`, `FormPanel`, `ScrollPanel`, `SessionsPanel`, and `PanelHost`;
+- `ListPanel`, `MultiSelectPanel`, `FormPanel` (text, secret, and terminal-dropdown fields with optional custom
+  input), `ScrollPanel`, `SessionsPanel`, and `PanelHost`;
 - command parsing/autocomplete and localization helpers;
 - Markdown, layout, theme, Action-card, Session-list, and repaint helpers.
 

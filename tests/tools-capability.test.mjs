@@ -745,26 +745,33 @@ test("git inspection exposes fixed read-only status and diff operations", async 
 
 test("shell executes an argument vector without shell interpolation", async () => {
   await withWorkspace(async ({ root, artifactStore }) => {
+    const previousForceColor = process.env.FORCE_COLOR;
+    process.env.FORCE_COLOR = "1";
     const broker = new InMemoryCapabilityBroker();
     grant(broker);
     const registry = new ToolRegistry(broker);
     registry.register("shell", shellTool);
     const literal = "hello & echo injected";
 
-    const settlement = await registry.execute(
-      "shell",
-      identity(registry, "shell"),
-      {
-        command: process.execPath,
-        args: ["-e", "process.stdout.write(process.argv[1])", literal],
-        workdir: ".",
-        timeoutMs: 5_000,
-      },
-      context(root, artifactStore),
-    );
-    assert.equal(settlement.output.exitCode, 0);
-    assert.equal(settlement.output.stdout, literal);
-    assert.equal(settlement.output.stderr, "");
+    try {
+      const settlement = await registry.execute(
+        "shell",
+        identity(registry, "shell"),
+        {
+          command: process.execPath,
+          args: ["-e", "process.stdout.write(process.argv[1])", literal],
+          workdir: ".",
+          timeoutMs: 5_000,
+        },
+        context(root, artifactStore),
+      );
+      assert.equal(settlement.output.exitCode, 0);
+      assert.equal(settlement.output.stdout, literal);
+      assert.equal(settlement.output.stderr, "");
+    } finally {
+      if (previousForceColor === undefined) delete process.env.FORCE_COLOR;
+      else process.env.FORCE_COLOR = previousForceColor;
+    }
   });
 });
 

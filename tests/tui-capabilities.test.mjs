@@ -93,6 +93,57 @@ test("TUI applyCapabilities rejects changes while a Run is active", async () => 
   }
 });
 
+test("TUI model context follows model switches unless the user set an explicit window", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-model-window-"));
+  let automatic;
+  let explicit;
+  try {
+    automatic = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, "automatic"),
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "kimi", model: "k3" },
+      contextWindowTokens: 1_048_576,
+      contextWindowTokensOverride: false,
+      outputReserveTokens: 16_000,
+    });
+    assert.deepEqual(automatic.syncModelContextWindow(262_144), {
+      contextWindowTokens: 262_144,
+      contextBudgetTokens: 246_144,
+      outputReserveTokens: 16_000,
+    });
+    assert.deepEqual(automatic.configureContextWindow(300_000), {
+      contextWindowTokens: 300_000,
+      contextBudgetTokens: 284_000,
+      outputReserveTokens: 16_000,
+    });
+    assert.deepEqual(automatic.syncModelContextWindow(1_048_576), {
+      contextWindowTokens: 300_000,
+      contextBudgetTokens: 284_000,
+      outputReserveTokens: 16_000,
+    });
+
+    explicit = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, "explicit"),
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "kimi", model: "k3" },
+      contextWindowTokens: 524_288,
+      contextWindowTokensOverride: true,
+      outputReserveTokens: 16_000,
+    });
+    assert.deepEqual(explicit.syncModelContextWindow(262_144), {
+      contextWindowTokens: 524_288,
+      contextBudgetTokens: 508_288,
+      outputReserveTokens: 16_000,
+    });
+  } finally {
+    if (automatic) await automatic.close();
+    if (explicit) await explicit.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 function responseModel() {
   return new ScriptedModelPort([[
     { type: "text.delta", delta: "Done." },

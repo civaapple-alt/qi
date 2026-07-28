@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { providerModelContextTokens } from "@civaapple/qi-ai";
 import { SessionIdSchema, assertSchema, type SessionId } from "@civaapple/qi-protocol";
 import { defaultUserConfigPath, loadUserConfig, resolveLanguage, resolveTheme, type CapabilityOverrides } from "./config.js";
 import { defaultSessionDataRoot } from "./paths.js";
@@ -13,7 +14,6 @@ import {
 } from "./project-config.js";
 import { resolveProviderConfig, type ProviderConfig } from "./provider.js";
 import {
-  TUI_DEFAULT_CONTEXT_WINDOW_TOKENS,
   TUI_DEFAULT_MAX_STEPS,
   TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
 } from "./runtime.js";
@@ -43,6 +43,8 @@ export interface TuiCliOptions {
   language: import("./i18n.js").Locale;
   theme: import("./theme/colors.js").ThemeName;
   contextWindowTokens: number;
+  /** True only for an explicit user `context_window_tokens`; model switches must otherwise refresh the window. */
+  contextWindowTokensOverride: boolean;
   outputReserveTokens: number;
   maxSteps: number;
   /** Explicit CLI override retained across in-process Session relaunches. */
@@ -64,7 +66,7 @@ const HELP_TEXT =
   "qi remove PACKAGE_ID [--scope user|project] [--workspace PATH]\n" +
   "qi list [--scope user|project] [--workspace PATH]\n" +
   "  WORKSPACE defaults to the current directory (same as `qi --workspace .`).\n" +
-  "  Options: [--workspace PATH] [--data PATH] [--provider openai|xai] [--model ID] [--base-url URL]\n" +
+  "  Options: [--workspace PATH] [--data PATH] [--provider ID] [--model ID] [--effort LEVEL] [--base-url URL]\n" +
   "           [--session ID] [--max-steps 8..100] [--config PATH|--no-config] [--add-dir PATH]…\n" +
   "           [--allow-write|--no-write] [--allow-verify|--no-verify] [--allow-network|--no-network]\n" +
   "           [--allow-execute|--no-execute] [--allow-background|--no-background]\n" +
@@ -76,7 +78,7 @@ const BOOLEAN_FLAGS = [
 ] as const;
 
 const VALUE_FLAGS = [
-  "--workspace", "--data", "--provider", "--model", "--base-url", "--session", "--config", "--add-dir", "--max-steps",
+  "--workspace", "--data", "--provider", "--model", "--effort", "--base-url", "--session", "--config", "--add-dir", "--max-steps",
 ] as const;
 
 export function qiCliVersion(packageVersion = process.env.npm_package_version ?? "0.6.0"): string {
@@ -167,7 +169,25 @@ export async function parseTuiCliArguments(
   const dataRoot = values.has("--data")
     ? resolve(cwd, values.get("--data")!)
     : defaultSessionDataRoot(workspaceRoot, environment);
-  const contextWindowTokens = loaded.config.contextWindowTokens ?? TUI_DEFAULT_CONTEXT_WINDOW_TOKENS;
+  const provider = resolveProviderConfig({
+    ...(values.has("--provider") ? { provider: values.get("--provider")! } : {}),
+    ...(values.has("--model") ? { model: values.get("--model")! } : {}),
+    ...(values.has("--effort") ? { reasoningEffort: values.get("--effort")! } : {}),
+    ...(values.has("--base-url") ? { baseURL: values.get("--base-url")! } : {}),
+    defaults: {
+      ...(loaded.config.provider === undefined ? {} : { provider: loaded.config.provider }),
+      ...(loaded.config.model === undefined ? {} : { model: loaded.config.model }),
+      ...(loaded.config.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: loaded.config.reasoningEffort }),
+      ...(loaded.config.baseURL === undefined ? {} : { baseURL: loaded.config.baseURL }),
+      ...(loaded.config.accountAlias === undefined ? {} : { accountAlias: loaded.config.accountAlias }),
+    },
+    allowMissingCredential: true,
+    environment,
+  });
+  const contextWindowTokens = loaded.config.contextWindowTokens
+    ?? providerModelContextTokens(provider.profile, provider.model);
   const outputReserveTokens = Math.min(TUI_DEFAULT_OUTPUT_RESERVE_TOKENS, Math.floor(contextWindowTokens / 8));
   const maxSteps = values.has("--max-steps")
     ? parseMaxSteps(values.get("--max-steps")!, "--max-steps")
@@ -179,20 +199,9 @@ export async function parseTuiCliArguments(
     options: {
       workspaceRoot,
       dataRoot,
-      provider: resolveProviderConfig({
-        ...(values.has("--provider") ? { provider: values.get("--provider")! } : {}),
-        ...(values.has("--model") ? { model: values.get("--model")! } : {}),
-        ...(values.has("--base-url") ? { baseURL: values.get("--base-url")! } : {}),
-        defaults: {
-          ...(loaded.config.provider === undefined ? {} : { provider: loaded.config.provider }),
-          ...(loaded.config.model === undefined ? {} : { model: loaded.config.model }),
-          ...(loaded.config.baseURL === undefined ? {} : { baseURL: loaded.config.baseURL }),
-          ...(loaded.config.accountAlias === undefined ? {} : { accountAlias: loaded.config.accountAlias }),
-        },
-        allowMissingCredential: true,
-        environment,
-      }),
+      provider,
       contextWindowTokens,
+      contextWindowTokensOverride: loaded.config.contextWindowTokens !== undefined,
       outputReserveTokens,
       maxSteps,
       ...(values.has("--max-steps") ? { maxStepsOverride: maxSteps } : {}),
