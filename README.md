@@ -48,7 +48,7 @@ authorized, create and test a local tarball:
 
 ```sh
 npm run pack:cli
-npm install -g ./.cli-package/civaapple-qi-0.6.0.tgz
+npm install -g ./.cli-package/civaapple-qi-0.7.0.tgz
 qi --help
 ```
 

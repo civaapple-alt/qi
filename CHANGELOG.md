@@ -7,6 +7,22 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Documentation
+
+## [0.7.0] - 2026-07-28
+
+### Added
+
 - Added Formal Markdown Plan revisions, immutable SHA-addressed Plan documents, Agent-only `update_plan` Work
   Plans, and Plan-only in-Run AskQuestion with single/multiple/text/custom/skip interaction.
 - Added declaration-only plugin contracts and `qi install/update/remove/list` for exact npm, pinned Git, and

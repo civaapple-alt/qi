@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-web",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -15,9 +15,9 @@
     }
   },
   "dependencies": {
-    "@civaapple/qi-agent": "0.6.0",
-    "@civaapple/qi-node": "0.6.0",
-    "@civaapple/qi-protocol": "0.6.0"
+    "@civaapple/qi-agent": "0.7.0",
+    "@civaapple/qi-node": "0.7.0",
+    "@civaapple/qi-protocol": "0.7.0"
   },
   "repository": {
     "type": "git",

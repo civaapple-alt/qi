@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-ai",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Portable Qi model protocol, provider adapters, and context compiler",
   "type": "module",
   "main": "./dist/index.js",

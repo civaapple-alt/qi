@@ -1,6 +1,6 @@
 # `@civaapple/qi`
 
-Version **0.6.0** (moves with the Qi monorepo release).
+Version **0.7.0** (moves with the Qi monorepo release).
 
 Qi's CLI application composes authentication, project policy, persistence, Tools, the local single-writer
 Runtime, and the interactive terminal lifecycle. Reusable Session presenters, controls, panels, themes, and

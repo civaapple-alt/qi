@@ -10,7 +10,7 @@ const packablePreviewPackages = new Set([
 
 export const qiSelfModel: QiSelfModel = parseQiSelfModel({
   schemaVersion: 1,
-  release: "0.6.0",
+  release: "0.7.0",
   generatedAt: "2026-07-28T00:00:00.000Z",
   identity: {
     name: "Qi",

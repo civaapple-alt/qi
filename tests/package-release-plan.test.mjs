@@ -15,7 +15,7 @@ const execFileAsync = promisify(execFile);
 test("package release plan derives a coordinated, acyclic, core-first graph from manifests", async () => {
   const plan = await createPackageReleasePlan(root);
   assert.equal(plan.graphReady, true);
-  assert.equal(plan.release, "0.6.0");
+  assert.equal(plan.release, "0.7.0");
   assert.equal(plan.packages.length, 5);
   assert.equal(plan.waves.core.length, 5);
   assert.equal(plan.waves.extension.length, 0);
