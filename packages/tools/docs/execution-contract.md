@@ -115,6 +115,11 @@ While shell, script, or verification is running, an optional activity sink recei
 snapshot after the Registry's redaction boundary. It may drive a fixed-height UI tail, but cannot affect the
 Tool result, Effect Journal, Session stream, or retry decision. Terminal structured output remains authoritative.
 
+When a run's stdout or stderr exceeds the inline output limit, the complete stream (bounded independently, up to a
+much larger ceiling) is stored as a content-addressed Artifact and referenced from the Tool output as `outputRef`,
+so truncation for model-context reasons never discards the underlying evidence. An untruncated run carries no
+`outputRef`. The `action.completed` Session event surfaces the same reference as its durable `outputRef`.
+
 ## Declared verification
 
 The private `.qi/qi.verify.json` manifest is regular, non-symlink, at most 64 KiB, versioned, and strict

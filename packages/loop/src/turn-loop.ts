@@ -722,206 +722,18 @@ export class TurnLoop {
 
       const successfulWrites = new Map<string, SuccessfulStepWrite>();
       const lastMutationAttempts = new Map<string, StepMutationAttempt>();
-      for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
+      const candidateExecutionArgs = { writer, runId, stepId, request, successfulWrites, lastMutationAttempts, toolResults };
+      let candidateIndex = 0;
+      while (candidateIndex < candidates.length) {
         const candidate = candidates[candidateIndex];
         if (!candidate) throw new Error(`Missing candidate at index ${candidateIndex}`);
-        let inspected = candidate.inspected;
-        let context = candidate.context;
-        let chainedEdit = false;
-        let rebaseFailure: ToolFailure | undefined;
-        const priorWrites = inspected.effect === "read"
-          ? []
-          : inspected.resources
-              .map((resource) => ({ resource, write: successfulWrites.get(resource) }))
-              .filter((entry): entry is { resource: string; write: SuccessfulStepWrite } => entry.write !== undefined);
-        if (
-          priorWrites.length === 1
-          && inspected.name === "edit"
-          && inspected.resources.length === 1
-          && priorWrites[0]?.write.toolName === "edit"
-          && priorWrites[0].write.editChain
-          && lastMutationAttempts.get(priorWrites[0].resource)?.actionId === priorWrites[0].write.actionId
-        ) {
-          const prior = priorWrites[0];
-          const input = objectRecord(inspected.input);
-          const expectedSha256 = typeof input?.expectedSha256 === "string" ? input.expectedSha256 : undefined;
-          const chain = prior.write.editChain!;
-          if (expectedSha256 === chain.latestSha256) {
-            chainedEdit = true;
-          } else if (expectedSha256 === chain.originalSha256) {
-            const effectiveInput = { ...input, expectedSha256: chain.latestSha256 };
-            context = {
-              ...context,
-              freshnessRebase: {
-                priorActionId: prior.write.actionId,
-                originalExpectedSha256: expectedSha256,
-              },
-            };
-            try {
-              const rebased = this.#toolRegistry.inspect(
-                inspected.name,
-                inspected.identity,
-                effectiveInput,
-                context,
-              );
-              if (
-                rebased.effect !== inspected.effect
-                || !sameResources(rebased.resources, inspected.resources)
-                || rebased.name !== "edit"
-              ) {
-                throw new Error("re-inspection changed the tool effect or resources");
-              }
-              writer.append(
-                "action.freshness.rebased",
-                {
-                  runId,
-                  stepId,
-                  actionId: candidate.actionId,
-                  priorActionId: prior.write.actionId,
-                  resource: prior.resource,
-                  originalExpectedSha256: expectedSha256,
-                  effectiveExpectedSha256: chain.latestSha256,
-                },
-                { kind: "runtime", id: "tool_registry" },
-              );
-              inspected = rebased;
-              chainedEdit = true;
-            } catch (error) {
-              rebaseFailure = new ToolFailure(
-                "EDIT_REBASE_INVALID",
-                `Could not safely re-inspect edit ${candidate.actionId}: ${error instanceof Error ? error.message : String(error)}`,
-              );
-            }
-          }
-        }
-        writer.append(
-          "authority.requested",
-          { runId, stepId, actionId: candidate.actionId },
-          { kind: "runtime", id: "capability_broker" },
-        );
-        let authorized;
-        try {
-          authorized = await inspected.authorize();
-        } catch (error) {
-          const reason =
-            error instanceof AuthorityDeniedError
-              ? error.reason
-              : `Authorization unavailable: ${error instanceof Error ? error.message : String(error)}`;
-          const policyTrace = error instanceof AuthorityDeniedError ? error.policyTrace : [];
-          writer.append(
-            "authority.denied",
-            {
-              runId,
-              stepId,
-              actionId: candidate.actionId,
-              reason,
-              ...(policyTrace.length === 0 ? {} : { policyTrace: [...policyTrace] }),
-            },
-            { kind: "runtime", id: "capability_broker" },
-          );
-          toolResults.set(candidate.callId, {
-            type: "tool-result",
-            callId: candidate.callId,
-            output: { code: "AUTHORITY_DENIED", reason },
-            isError: true,
-          });
-          if (inspected.effect !== "read") {
-            for (const resource of inspected.resources) {
-              lastMutationAttempts.set(resource, {
-                actionId: candidate.actionId,
-                toolName: inspected.name,
-                status: "denied",
-              });
-            }
-          }
-          continue;
-        }
-
-        writer.append(
-          "authority.granted",
-          {
-            runId,
-            stepId,
-            actionId: candidate.actionId,
-            leaseId: authorized.leaseId,
-            policyTrace: [...authorized.policyTrace],
-          },
-          { kind: "runtime", id: "capability_broker" },
-        );
-        writer.append(
-          "action.started",
-          { runId, stepId, actionId: candidate.actionId },
-          { kind: "runtime", id: "tool_runner" },
-        );
-
-        try {
-          if (rebaseFailure) throw rebaseFailure;
-          if (inspected.effect !== "read") {
-            const overlap = inspected.resources.filter((resource) => successfulWrites.has(resource));
-            if (overlap.length > 0 && !chainedEdit) {
-              throw new ToolFailure(
-                "BATCH_WRITE_CONFLICT",
-                `A prior write in this step already changed ${overlap.join(", ")}; re-read that path, then edit with the new expectedSha256`,
-              );
-            }
-          }
-          const settlement = await authorized.execute();
-          this.#recordRedactions(writer, "tool-output", settlement.redactions ?? [], {
-            runId,
-            stepId,
-            actionId: candidate.actionId,
-          });
-          const outputRef = extractOutputRef(settlement.output);
-          writer.append(
-            "action.completed",
-            {
-              runId,
-              stepId,
-              actionId: candidate.actionId,
-              ...(outputRef ? { outputRef } : {}),
-              modelOutput: settlement.modelOutput,
-            },
-            { kind: "runtime", id: "tool_runner" },
-          );
-          if (inspected.effect !== "read") {
-            const input = objectRecord(inspected.input);
-            const output = objectRecord(settlement.output);
-            for (const resource of inspected.resources) {
-              const prior = successfulWrites.get(resource);
-              const expectedSha256 = typeof input?.expectedSha256 === "string" ? input.expectedSha256 : undefined;
-              const latestSha256 = typeof output?.sha256 === "string" ? output.sha256 : undefined;
-              successfulWrites.set(resource, {
-                actionId: candidate.actionId,
-                toolName: inspected.name,
-                ...(inspected.name === "edit" && expectedSha256 && latestSha256
-                  ? {
-                      editChain: {
-                        originalSha256: prior?.editChain?.originalSha256 ?? expectedSha256,
-                        latestSha256,
-                      },
-                    }
-                  : {}),
-              });
-              lastMutationAttempts.set(resource, {
-                actionId: candidate.actionId,
-                toolName: inspected.name,
-                status: "completed",
-              });
-            }
-          }
-          toolResults.set(candidate.callId, {
-            type: "tool-result",
-            callId: candidate.callId,
-            output: settlement.modelOutput,
-            isError: false,
-          });
-        } catch (error) {
-          if (request.signal?.aborted) {
-            writer.append(
-              "action.cancelled",
-              { runId, stepId, actionId: candidate.actionId, reason: "Tool call cancelled" },
-              { kind: "runtime", id: "tool_runner" },
-            );
+        // Non-read (write/execute/publish/spend) Actions stay strictly one-at-a-time: BATCH_WRITE_CONFLICT
+        // detection, edit freshness-chain rebasing, and "stop the batch on an indeterminate settlement" all
+        // depend on `successfulWrites`/`lastMutationAttempts` reflecting every earlier write in this Step
+        // before the next one is inspected.
+        if (candidate.inspected.effect !== "read") {
+          const outcome = await this.#executeCandidate(candidate, candidateExecutionArgs);
+          if (outcome === "cancelled") {
             this.#denyUnstartedCandidates(
               writer,
               runId,
@@ -936,57 +748,61 @@ export class TurnLoop {
             );
             return this.#result(writer, request.sessionId, runId, "cancelled", finalText);
           }
-          if (error instanceof ToolFailure) {
-            const failure = redactSensitiveValue({
-              code: error.code,
-              message: error.message,
-              ...(error.details === undefined ? {} : { details: error.details }),
-            });
-            this.#recordRedactions(writer, "tool-output", failure.redactions, {
+          if (outcome === "indeterminate") {
+            this.#denyUnstartedCandidates(
+              writer,
               runId,
               stepId,
-              actionId: candidate.actionId,
-            });
-            const modelOutput = [{ type: "text" as const, text: JSON.stringify(failure.value) }];
-            writer.append(
-              "action.failed",
-              { runId, stepId, actionId: candidate.actionId, errorCode: error.code, modelOutput },
-              { kind: "runtime", id: "tool_runner" },
+              candidates.slice(candidateIndex + 1),
+              "Batch stopped because a prior action has an indeterminate effect",
             );
-            toolResults.set(candidate.callId, {
-              type: "tool-result",
-              callId: candidate.callId,
-              output: modelOutput,
-              isError: true,
-            });
-            if (inspected.effect !== "read") {
-              for (const resource of inspected.resources) {
-                lastMutationAttempts.set(resource, {
-                  actionId: candidate.actionId,
-                  toolName: inspected.name,
-                  status: "failed",
-                });
-              }
-            }
-            continue;
+            writer.append(
+              "run.parked",
+              { runId, reason: "indeterminate-effect", detail: "Tool settlement could not be confirmed" },
+              { kind: "runtime", id: "qi" },
+            );
+            return this.#result(writer, request.sessionId, runId, "parked", finalText);
           }
-
-          writer.append(
-            "action.indeterminate",
-            {
-              runId,
-              stepId,
-              actionId: candidate.actionId,
-              reason: error instanceof Error ? error.message : "Unknown executor failure",
-              reconciliationHint: "Inspect the Effect Journal before retrying this action",
-            },
-            { kind: "runtime", id: "tool_runner" },
-          );
+          candidateIndex += 1;
+          continue;
+        }
+        // Read effects never consult or mutate `successfulWrites`/`lastMutationAttempts`, so a maximal
+        // consecutive run of read candidates can authorize+execute concurrently: per-actionId Kernel
+        // transitions don't require one Action to settle before another starts, and the model-facing
+        // tool-result order is reconstructed from `modelResult.actions` afterward, independent of
+        // completion order (see the `exchangeMessages` build below).
+        let readRunEnd = candidateIndex + 1;
+        while (readRunEnd < candidates.length && candidates[readRunEnd]?.inspected.effect === "read") {
+          readRunEnd += 1;
+        }
+        const readRun = candidates.slice(candidateIndex, readRunEnd);
+        const outcomes = await Promise.all(
+          readRun.map((readCandidate) => this.#executeCandidate(readCandidate, candidateExecutionArgs)),
+        );
+        // Every member of this run already started concurrently by the time Promise.all resolves, so a
+        // cancellation or indeterminate settlement inside the run cannot retroactively "un-start" its
+        // siblings — only candidates strictly after the whole run are still eligible for denial.
+        if (outcomes.includes("cancelled")) {
           this.#denyUnstartedCandidates(
             writer,
             runId,
             stepId,
-            candidates.slice(candidateIndex + 1),
+            candidates.slice(readRunEnd),
+            "Batch cancelled before this action started",
+          );
+          writer.append(
+            "run.cancelled",
+            { runId, reason: "User interrupted the active tool" },
+            { kind: "runtime", id: "qi" },
+          );
+          return this.#result(writer, request.sessionId, runId, "cancelled", finalText);
+        }
+        if (outcomes.includes("indeterminate")) {
+          this.#denyUnstartedCandidates(
+            writer,
+            runId,
+            stepId,
+            candidates.slice(readRunEnd),
             "Batch stopped because a prior action has an indeterminate effect",
           );
           writer.append(
@@ -996,6 +812,7 @@ export class TurnLoop {
           );
           return this.#result(writer, request.sessionId, runId, "parked", finalText);
         }
+        candidateIndex = readRunEnd;
       }
       const exchangeMessages: ModelMessage[] = [assistantMessage];
       for (const action of modelResult.actions) {
@@ -1028,6 +845,275 @@ export class TurnLoop {
     const view = writer.view;
     if (!view) throw new Error("TurnLoop ended without a Session view");
     return { sessionId, runId, status, text, view };
+  }
+
+  /**
+   * Run one candidate's freshness-rebase, authorize, and execute sequence, recording every event this
+   * candidate needs on its own. Returns an outcome discriminant instead of denying later candidates or
+   * ending the Run itself, so the caller can batch calls (concurrently for read effects) and still decide
+   * once — after every outcome in a batch is known — whether to stop remaining candidates.
+   */
+  async #executeCandidate(
+    candidate: CandidateCall,
+    args: {
+      writer: EventWriter;
+      runId: RunId;
+      stepId: StepId;
+      request: TurnRequest;
+      successfulWrites: Map<string, SuccessfulStepWrite>;
+      lastMutationAttempts: Map<string, StepMutationAttempt>;
+      toolResults: Map<string, ToolResultPart>;
+    },
+  ): Promise<"settled" | "denied" | "failed" | "cancelled" | "indeterminate"> {
+    const { writer, runId, stepId, request, successfulWrites, lastMutationAttempts, toolResults } = args;
+    let inspected = candidate.inspected;
+    let context = candidate.context;
+    let chainedEdit = false;
+    let rebaseFailure: ToolFailure | undefined;
+    const priorWrites = inspected.effect === "read"
+      ? []
+      : inspected.resources
+          .map((resource) => ({ resource, write: successfulWrites.get(resource) }))
+          .filter((entry): entry is { resource: string; write: SuccessfulStepWrite } => entry.write !== undefined);
+    if (
+      priorWrites.length === 1
+      && inspected.name === "edit"
+      && inspected.resources.length === 1
+      && priorWrites[0]?.write.toolName === "edit"
+      && priorWrites[0].write.editChain
+      && lastMutationAttempts.get(priorWrites[0].resource)?.actionId === priorWrites[0].write.actionId
+    ) {
+      const prior = priorWrites[0];
+      const input = objectRecord(inspected.input);
+      const expectedSha256 = typeof input?.expectedSha256 === "string" ? input.expectedSha256 : undefined;
+      const chain = prior.write.editChain!;
+      if (expectedSha256 === chain.latestSha256) {
+        chainedEdit = true;
+      } else if (expectedSha256 === chain.originalSha256) {
+        const effectiveInput = { ...input, expectedSha256: chain.latestSha256 };
+        context = {
+          ...context,
+          freshnessRebase: {
+            priorActionId: prior.write.actionId,
+            originalExpectedSha256: expectedSha256,
+          },
+        };
+        try {
+          const rebased = this.#toolRegistry.inspect(
+            inspected.name,
+            inspected.identity,
+            effectiveInput,
+            context,
+          );
+          if (
+            rebased.effect !== inspected.effect
+            || !sameResources(rebased.resources, inspected.resources)
+            || rebased.name !== "edit"
+          ) {
+            throw new Error("re-inspection changed the tool effect or resources");
+          }
+          writer.append(
+            "action.freshness.rebased",
+            {
+              runId,
+              stepId,
+              actionId: candidate.actionId,
+              priorActionId: prior.write.actionId,
+              resource: prior.resource,
+              originalExpectedSha256: expectedSha256,
+              effectiveExpectedSha256: chain.latestSha256,
+            },
+            { kind: "runtime", id: "tool_registry" },
+          );
+          inspected = rebased;
+          chainedEdit = true;
+        } catch (error) {
+          rebaseFailure = new ToolFailure(
+            "EDIT_REBASE_INVALID",
+            `Could not safely re-inspect edit ${candidate.actionId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
+    writer.append(
+      "authority.requested",
+      { runId, stepId, actionId: candidate.actionId },
+      { kind: "runtime", id: "capability_broker" },
+    );
+    let authorized;
+    try {
+      authorized = await inspected.authorize();
+    } catch (error) {
+      const reason =
+        error instanceof AuthorityDeniedError
+          ? error.reason
+          : `Authorization unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      const policyTrace = error instanceof AuthorityDeniedError ? error.policyTrace : [];
+      writer.append(
+        "authority.denied",
+        {
+          runId,
+          stepId,
+          actionId: candidate.actionId,
+          reason,
+          ...(policyTrace.length === 0 ? {} : { policyTrace: [...policyTrace] }),
+        },
+        { kind: "runtime", id: "capability_broker" },
+      );
+      toolResults.set(candidate.callId, {
+        type: "tool-result",
+        callId: candidate.callId,
+        output: { code: "AUTHORITY_DENIED", reason },
+        isError: true,
+      });
+      if (inspected.effect !== "read") {
+        for (const resource of inspected.resources) {
+          lastMutationAttempts.set(resource, {
+            actionId: candidate.actionId,
+            toolName: inspected.name,
+            status: "denied",
+          });
+        }
+      }
+      return "denied";
+    }
+
+    writer.append(
+      "authority.granted",
+      {
+        runId,
+        stepId,
+        actionId: candidate.actionId,
+        leaseId: authorized.leaseId,
+        policyTrace: [...authorized.policyTrace],
+      },
+      { kind: "runtime", id: "capability_broker" },
+    );
+    writer.append(
+      "action.started",
+      { runId, stepId, actionId: candidate.actionId },
+      { kind: "runtime", id: "tool_runner" },
+    );
+
+    try {
+      if (rebaseFailure) throw rebaseFailure;
+      if (inspected.effect !== "read") {
+        const overlap = inspected.resources.filter((resource) => successfulWrites.has(resource));
+        if (overlap.length > 0 && !chainedEdit) {
+          throw new ToolFailure(
+            "BATCH_WRITE_CONFLICT",
+            `A prior write in this step already changed ${overlap.join(", ")}; re-read that path, then edit with the new expectedSha256`,
+          );
+        }
+      }
+      const settlement = await authorized.execute();
+      this.#recordRedactions(writer, "tool-output", settlement.redactions ?? [], {
+        runId,
+        stepId,
+        actionId: candidate.actionId,
+      });
+      const outputRef = extractOutputRef(settlement.output);
+      writer.append(
+        "action.completed",
+        {
+          runId,
+          stepId,
+          actionId: candidate.actionId,
+          ...(outputRef ? { outputRef } : {}),
+          modelOutput: settlement.modelOutput,
+        },
+        { kind: "runtime", id: "tool_runner" },
+      );
+      if (inspected.effect !== "read") {
+        const input = objectRecord(inspected.input);
+        const output = objectRecord(settlement.output);
+        for (const resource of inspected.resources) {
+          const prior = successfulWrites.get(resource);
+          const expectedSha256 = typeof input?.expectedSha256 === "string" ? input.expectedSha256 : undefined;
+          const latestSha256 = typeof output?.sha256 === "string" ? output.sha256 : undefined;
+          successfulWrites.set(resource, {
+            actionId: candidate.actionId,
+            toolName: inspected.name,
+            ...(inspected.name === "edit" && expectedSha256 && latestSha256
+              ? {
+                  editChain: {
+                    originalSha256: prior?.editChain?.originalSha256 ?? expectedSha256,
+                    latestSha256,
+                  },
+                }
+              : {}),
+          });
+          lastMutationAttempts.set(resource, {
+            actionId: candidate.actionId,
+            toolName: inspected.name,
+            status: "completed",
+          });
+        }
+      }
+      toolResults.set(candidate.callId, {
+        type: "tool-result",
+        callId: candidate.callId,
+        output: settlement.modelOutput,
+        isError: false,
+      });
+      return "settled";
+    } catch (error) {
+      if (request.signal?.aborted) {
+        writer.append(
+          "action.cancelled",
+          { runId, stepId, actionId: candidate.actionId, reason: "Tool call cancelled" },
+          { kind: "runtime", id: "tool_runner" },
+        );
+        return "cancelled";
+      }
+      if (error instanceof ToolFailure) {
+        const failure = redactSensitiveValue({
+          code: error.code,
+          message: error.message,
+          ...(error.details === undefined ? {} : { details: error.details }),
+        });
+        this.#recordRedactions(writer, "tool-output", failure.redactions, {
+          runId,
+          stepId,
+          actionId: candidate.actionId,
+        });
+        const modelOutput = [{ type: "text" as const, text: JSON.stringify(failure.value) }];
+        writer.append(
+          "action.failed",
+          { runId, stepId, actionId: candidate.actionId, errorCode: error.code, modelOutput },
+          { kind: "runtime", id: "tool_runner" },
+        );
+        toolResults.set(candidate.callId, {
+          type: "tool-result",
+          callId: candidate.callId,
+          output: modelOutput,
+          isError: true,
+        });
+        if (inspected.effect !== "read") {
+          for (const resource of inspected.resources) {
+            lastMutationAttempts.set(resource, {
+              actionId: candidate.actionId,
+              toolName: inspected.name,
+              status: "failed",
+            });
+          }
+        }
+        return "failed";
+      }
+
+      writer.append(
+        "action.indeterminate",
+        {
+          runId,
+          stepId,
+          actionId: candidate.actionId,
+          reason: error instanceof Error ? error.message : "Unknown executor failure",
+          reconciliationHint: "Inspect the Effect Journal before retrying this action",
+        },
+        { kind: "runtime", id: "tool_runner" },
+      );
+      return "indeterminate";
+    }
   }
 
   #denyUnstartedCandidates(
@@ -1214,8 +1300,8 @@ async function aggregateModelEvents(
 
 function extractOutputRef(output: unknown): string | undefined {
   if (typeof output !== "object" || output === null) return undefined;
-  const candidate = output as { ref?: unknown; diffRef?: unknown };
-  const ref = candidate.ref ?? candidate.diffRef;
+  const candidate = output as { ref?: unknown; diffRef?: unknown; outputRef?: unknown };
+  const ref = candidate.ref ?? candidate.diffRef ?? candidate.outputRef;
   return typeof ref === "string" ? ref : undefined;
 }
 

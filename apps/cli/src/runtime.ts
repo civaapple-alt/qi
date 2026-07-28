@@ -1,6 +1,7 @@
 import { lstat, mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { InMemoryCapabilityBroker, type CapabilityLease } from "@civaapple/qi-capability";
+import { probeContainerRuntime } from "@civaapple/qi-codeact";
 import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-introspection";
 import type { EventStore, SessionSummary, SessionView } from "@civaapple/qi-kernel";
 import type { ModelPort, ModelRef } from "@civaapple/qi-llm";
@@ -22,19 +23,26 @@ import {
   builtinTools,
   createScriptTool,
   createVerifyTool,
+  defaultVerificationManifestPath,
   fetchTool,
+  loadVerificationProfiles,
   prepareVerificationProfiles,
+  prewarmTrustedExecutables,
   probeShellProfiles,
   resolveShellConfig,
+  scanVerificationCandidates,
   shellProfileResource,
   verificationResource,
+  writeVerificationManifest,
   type PreparedVerificationProfiles,
   type RegistrationHandle,
   type ShellProfileSnapshot,
+  type VerificationCandidate,
   type VerificationProfile,
   type WorkspaceMount,
 } from "@civaapple/qi-tools";
 import { SqliteEffectJournal } from "@civaapple/qi-workspace";
+import { createCodeActTool } from "./codeact-tool.js";
 import type { QiCapabilityConfig, QiShellConfig } from "./config.js";
 import { createDelegateTool } from "./delegate-tool.js";
 import { defaultProjectConfigPath } from "./paths.js";
@@ -54,6 +62,7 @@ const OPTIONAL_LEASE_IDS = [
   "lea_tui_verify",
   "lea_tui_execute_direct",
   "lea_tui_execute_script",
+  "lea_tui_execute_codeact",
   "lea_tui_network",
   "lea_tui_background",
   "lea_tui_delegate",
@@ -141,6 +150,7 @@ export class TuiRuntime {
   readonly #shellConfig: QiShellConfig | undefined;
   #verificationManifest: TuiVerificationManifest | undefined;
   #shellProfiles: ShellProfileSnapshot;
+  #codeactRuntime: "docker" | "podman" | undefined;
   #verificationProfiles: readonly VerificationProfile[];
   #mounts: RuntimeMount[];
   #skillSnapshot: readonly CatalogSkill[];
@@ -172,6 +182,7 @@ export class TuiRuntime {
     this.sessionId = options.sessionId ?? (createId("ses") as SessionId);
     this.#verificationManifest = undefined;
     this.#shellProfiles = shellProfiles;
+    this.#codeactRuntime = undefined;
     this.#workspaceRoot = resolve(options.workspaceRoot);
     this.#dataRoot = resolve(options.dataRoot);
     this.#model = options.model;
@@ -228,6 +239,10 @@ export class TuiRuntime {
     const effectJournal = new SqliteEffectJournal(resolve(dataRoot, "effects.sqlite"));
     const broker = new InMemoryCapabilityBroker();
     const subject = options.subject ?? "main-agent";
+    // Fire-and-forget: warms the trusted-executable cache for this Workspace's language stack so the
+    // first real search/find/shell/script/verify call does not pay PATH-walk latency. Never awaited and
+    // never throws (each candidate probe swallows its own failure).
+    void prewarmTrustedExecutables(options.workspaceRoot);
     grantBaseRuntimeLeases(broker, subject);
     const registry = new ToolRegistry(broker);
     const skills = new SkillCatalog({
@@ -344,6 +359,7 @@ export class TuiRuntime {
       normalized.write,
       this.#verificationProfiles,
       this.#shellProfiles,
+      this.#codeactRuntime,
       normalized.network,
       normalized.background,
       normalized.delegate,
@@ -355,6 +371,47 @@ export class TuiRuntime {
     this.#allowBackground = normalized.background;
     this.#allowDelegate = normalized.delegate;
     return { labels: this.capabilityLabels(), capabilities: normalized };
+  }
+
+  /** Scan package manifests plus AGENTS.md/README.md for candidate verification commands; writes nothing. */
+  async scanVerificationSetup(): Promise<{
+    candidates: readonly VerificationCandidate[];
+    currentNames: readonly string[];
+  }> {
+    const candidates = await scanVerificationCandidates(this.#workspaceRoot);
+    let currentNames: readonly string[] = [];
+    try {
+      currentNames = (await loadVerificationProfiles(this.#workspaceRoot)).map((profile) => profile.name);
+    } catch {
+      currentNames = [];
+    }
+    return { candidates, currentNames };
+  }
+
+  /** Human-confirmed write of `.qi/qi.verify.json`; refreshes the live `verify` tool when already authorized. */
+  async applyVerificationSetup(selected: readonly VerificationCandidate[]): Promise<TuiVerificationManifest> {
+    if (this.active) throw new Error("Cannot change verification profiles while a Run is active");
+    const profiles = await writeVerificationManifest(this.#workspaceRoot, selected);
+    const manifest: TuiVerificationManifest = Object.freeze({
+      path: defaultVerificationManifestPath,
+      origin: "existing" as const,
+      profiles: Object.freeze(profiles.map((profile) => profile.name)),
+    });
+    // Only seed the live-effective state when verify is currently authorized; otherwise applyCapabilities'
+    // verify-off branch would legitimately clear it right back out, matching the toggle-off invariant elsewhere.
+    if (this.#allowVerify) {
+      this.#verificationProfiles = profiles;
+      this.#verificationManifest = manifest;
+      await this.applyCapabilities({
+        write: this.#allowWrite,
+        verify: this.#allowVerify,
+        network: this.#allowNetwork,
+        execute: this.#allowExecute,
+        background: this.#allowBackground,
+        delegate: this.#allowDelegate,
+      }, { persist: false });
+    }
+    return manifest;
   }
 
   async #syncOptionalTools(capabilities: Required<QiCapabilityConfig>): Promise<void> {
@@ -401,9 +458,23 @@ export class TuiRuntime {
       } else {
         this.#closeOptionalTool("script");
       }
+      this.#codeactRuntime = await probeContainerRuntime();
+      if (this.#codeactRuntime) {
+        this.#setOptionalTool("codeact", createCodeActTool({
+          eventStore: this.#eventStore,
+          toolRegistry: this.#registry,
+          artifactStore: this.#artifactStore,
+          workspaceRoot: this.#workspaceRoot,
+          runtime: this.#codeactRuntime,
+        }));
+      } else {
+        this.#closeOptionalTool("codeact");
+      }
     } else {
       this.#closeOptionalTool("shell");
       this.#closeOptionalTool("script");
+      this.#closeOptionalTool("codeact");
+      this.#codeactRuntime = undefined;
       this.#shellProfiles = await probeShellProfiles(
         this.#workspaceRoot,
         resolveShellConfig(this.#shellConfig, false),
@@ -658,6 +729,7 @@ export class TuiRuntime {
         this.#workspaceRoot,
         this.#verificationProfiles,
         this.shellProfiles,
+        this.#codeactRuntime,
         skills,
         this.#allowDelegate,
         mode,
@@ -805,6 +877,7 @@ function grantOptionalRuntimeLeases(
   allowWrite: boolean,
   verificationProfiles: readonly VerificationProfile[],
   shellProfiles: ShellProfileSnapshot,
+  codeactRuntime: "docker" | "podman" | undefined,
   allowNetwork: boolean,
   allowBackground: boolean,
   allowDelegate: boolean,
@@ -854,6 +927,16 @@ function grantOptionalRuntimeLeases(
       expiresAt,
     });
   }
+  if (codeactRuntime) {
+    leases.push({
+      leaseId: "lea_tui_execute_codeact",
+      subject,
+      tools: ["codeact"],
+      effects: ["execute"],
+      resources: [`container-runtime:${codeactRuntime}`],
+      expiresAt,
+    });
+  }
   if (allowNetwork) {
     leases.push({
       leaseId: "lea_tui_network",
@@ -893,6 +976,7 @@ async function buildTuiContextBlocks(
   workspaceRoot: string,
   verificationProfiles: readonly VerificationProfile[],
   shellProfiles: ShellProfileSnapshot,
+  codeactRuntime: "docker" | "podman" | undefined,
   skills: readonly CatalogSkill[],
   allowDelegate: boolean,
   mode: SessionMode,
@@ -905,6 +989,9 @@ async function buildTuiContextBlocks(
       : []),
     ...(scriptNames.length > 0
       ? [`script for explicit ${scriptNames.join("/")} profile scripts when those profiles were authorized and probed`]
+      : []),
+    ...(codeactRuntime
+      ? [`codeact only for compact multi-step coordination logic (async function main(api)) that runs isolated in a network-off ${codeactRuntime} container, whose nested api.call tool calls still require normal authorization`]
       : []),
   ].join(", and ");
   const delegateGuidance = allowDelegate

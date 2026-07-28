@@ -195,6 +195,28 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 - Event schema generation remains unchanged. Previously written actor/source strings are historical data and are
   never rewritten during replay; all new facts use the Qi identity.
 
+## ADR-0021: bind a codeact tool and a guided verify setup without widening authority
+
+- The `codeact` tool shares the existing `execute` capability toggle rather than introducing a new grant; it gives
+  the model only a network-off, read-only-root container isolate whose nested calls still route through
+  `ControlledToolClient`. It is registered only when a container runtime (`docker` or `podman`) actually responds
+  to a probe; an unavailable runtime never silently degrades to a fake success.
+- `ContainerProgramSandbox` accepts inline program source as an alternative to a program file path. The sandbox
+  creates and removes its own staging directory in both cases, so a caller never manages an ad hoc temp-file
+  location itself.
+- Nested `codeact` tool calls are capped to the Tool Registry's currently registered catalog minus `codeact` and
+  `delegate`, independent of what the outer subject's capability leases would otherwise authorize. This blocks
+  sandbox self-recursion and delegation chaining regardless of how broad the outer grants are.
+- Verification profiles remain declared, frozen, single-argv commands; nothing about guided setup allows
+  shell-interpreted or multi-command input, in or out of the wizard.
+- Guided verify setup (`/verify`) is an explicit, human-confirmed action, not a hook automatically triggered by
+  enabling the `verify` capability. Scanning `package.json`, `pom.xml`, `AGENTS.md`, and `README.md` only proposes
+  candidates; nothing is written to `.qi/qi.verify.json` without an explicit Apply, and unresolvable executables
+  stay unselectable.
+- The wizard writes through the same manifest schema, atomic write, and `loadVerificationProfiles` validation as
+  the pre-existing automatic inference path, so a hand-picked manifest is exactly as trustworthy as an inferred
+  one and the live `verify` tool is re-registered from the same code path either way.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

@@ -1,4 +1,5 @@
 import { listProviderProfiles } from "@civaapple/qi-llm";
+import type { VerificationCandidate } from "@civaapple/qi-tools";
 import type { AuthSession } from "../auth.js";
 import {
   defaultUserConfigPath,
@@ -64,6 +65,7 @@ export interface PanelFlowContext {
   readonly removeMount: (mountId: string) => void;
   readonly effectiveCapabilities: () => readonly CapabilityId[];
   readonly saveCapabilities: (capabilities: QiCapabilityConfig) => void;
+  readonly applyVerificationSetup: (selected: readonly VerificationCandidate[]) => void;
   readonly installSkill: (source: string, scope: "user" | "workspace") => void;
   readonly promptTaskStop: () => void;
   readonly listSessions: () => SessionEntry[];
@@ -585,6 +587,40 @@ export function openPermissionsPanel(ctx: PanelFlowContext): void {
       };
       ctx.panels.closeAll();
       ctx.saveCapabilities(capabilities);
+    },
+  }));
+}
+
+export function openVerifySetupPanel(
+  ctx: PanelFlowContext,
+  candidates: readonly VerificationCandidate[],
+  currentNames: readonly string[],
+): void {
+  const locale = ctx.locale();
+  if (candidates.length === 0) {
+    ctx.presenter.setNotice(t(locale, "verify.setup.empty"));
+    ctx.render();
+    return;
+  }
+  const items = candidates.map((candidate) => ({
+    id: candidate.name,
+    label: candidate.name,
+    description: `${candidate.command} ${candidate.args.join(" ")} — ${candidate.source}` +
+      (candidate.available ? "" : ` (${t(locale, "verify.setup.notfound")})`),
+    disabled: !candidate.available,
+  }));
+  ctx.panels.push(new MultiSelectPanel({
+    title: t(locale, "verify.setup.title"),
+    hints: t(locale, "verify.setup.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items,
+    selectedIds: candidates.filter((candidate) => candidate.recommended && candidate.available).map((candidate) => candidate.name),
+    currentIds: currentNames,
+    onClose: ctx.panels.dismiss,
+    onApply: (selectedIds) => {
+      const chosen = candidates.filter((candidate) => selectedIds.includes(candidate.name));
+      ctx.panels.closeAll();
+      ctx.applyVerificationSetup(chosen);
     },
   }));
 }

@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
@@ -18,11 +18,13 @@ import {
   createVerifyTool,
   editTool,
   findTool,
+  findTrustedExecutable,
   gitTool,
   listTool,
   loadVerificationProfiles,
   moveTool,
   prepareVerificationProfiles,
+  prewarmTrustedExecutables,
   readTool,
   removeTool,
   searchTool,
@@ -73,6 +75,64 @@ function identity(registry, name) {
   assert.ok(tool, `Expected ${name} in tool catalog`);
   return tool.identity;
 }
+
+test("findTrustedExecutable caches PATH resolution and serves repeats without re-probing", async () => {
+  const originalPath = process.env.PATH ?? process.env.Path ?? "";
+  const scratchRoot = await mkdtemp(join(tmpdir(), "qi-tools-exec-cache-scratch-"));
+  const cachedRoot = await mkdtemp(join(tmpdir(), "qi-tools-exec-cache-"));
+  try {
+    // Locate the real trusted git directory once under the unmodified PATH, then build a synthetic PATH
+    // with many nonexistent directories ahead of it. A cold lookup must walk every missing directory
+    // (measurable filesystem work); a cache hit must not, regardless of how slow the underlying probe is.
+    const realGit = await findTrustedExecutable("git", scratchRoot);
+    assert.equal(typeof realGit, "string", "test environment must have a trusted git executable on PATH");
+    const missingDirs = Array.from({ length: 1_000 }, (_, index) => join(scratchRoot, `missing-${index}`));
+    process.env.PATH = [...missingDirs, dirname(realGit)].join(delimiter);
+
+    const firstStart = process.hrtime.bigint();
+    const first = await findTrustedExecutable("git", cachedRoot);
+    const firstMs = Number(process.hrtime.bigint() - firstStart) / 1_000_000;
+    assert.equal(first, realGit);
+
+    const secondStart = process.hrtime.bigint();
+    const second = await findTrustedExecutable("git", cachedRoot);
+    const secondMs = Number(process.hrtime.bigint() - secondStart) / 1_000_000;
+    assert.equal(second, first);
+    assert.ok(
+      secondMs < firstMs / 4,
+      `expected the cached lookup (${secondMs}ms) to be far faster than the cold probe (${firstMs}ms)`,
+    );
+
+    const [concurrentA, concurrentB] = await Promise.all([
+      findTrustedExecutable("git", cachedRoot),
+      findTrustedExecutable("git", cachedRoot),
+    ]);
+    assert.deepEqual([concurrentA, concurrentB], [first, first]);
+  } finally {
+    process.env.PATH = originalPath;
+    await rm(scratchRoot, { recursive: true, force: true });
+    await rm(cachedRoot, { recursive: true, force: true });
+  }
+});
+
+test("prewarmTrustedExecutables warms the cache so a later lookup for the same key is instant", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tools-prewarm-"));
+  try {
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "prewarm-fixture" }), "utf8");
+    await prewarmTrustedExecutables(root);
+
+    const start = process.hrtime.bigint();
+    const git = await findTrustedExecutable("git", root);
+    const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+    assert.equal(typeof git, "string");
+    assert.ok(elapsedMs < 5, `expected a prewarmed lookup to be served from cache, took ${elapsedMs}ms`);
+
+    // Never throws even when a candidate (e.g. mvn, absent here) cannot be resolved.
+    await assert.doesNotReject(prewarmTrustedExecutables(join(root, "missing-nested-root")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("Capability Broker denies by default and Registry never enters the executor", async () => {
   await withWorkspace(async ({ root, artifactStore }) => {
@@ -708,6 +768,49 @@ test("shell executes an argument vector without shell interpolation", async () =
   });
 });
 
+test("shell stores full truncated stdout as a retrievable Artifact and leaves untruncated runs unref'd", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("shell", shellTool);
+    const payloadLength = 200_000;
+
+    const truncatedRun = await registry.execute(
+      "shell",
+      identity(registry, "shell"),
+      {
+        command: process.execPath,
+        args: ["-e", `process.stdout.write("A".repeat(${payloadLength}))`],
+        workdir: ".",
+        timeoutMs: 5_000,
+      },
+      context(root, artifactStore, "act_shell_large_output"),
+    );
+    const payload = "A".repeat(payloadLength);
+    assert.equal(truncatedRun.output.truncated, true);
+    assert.ok(truncatedRun.output.stdout.length < payload.length);
+    assert.match(truncatedRun.output.outputRef, /^artifact:\/\/[a-f0-9]{64}$/);
+    const stored = await artifactStore.get(truncatedRun.output.outputRef);
+    const storedText = Buffer.from(stored.content).toString("utf8");
+    assert.equal(storedText, `=== stdout (${payload.length} bytes) ===\n${payload}`);
+
+    const smallRun = await registry.execute(
+      "shell",
+      identity(registry, "shell"),
+      {
+        command: process.execPath,
+        args: ["-e", "process.stdout.write('short')"],
+        workdir: ".",
+        timeoutMs: 5_000,
+      },
+      context(root, artifactStore, "act_shell_small_output"),
+    );
+    assert.equal(smallRun.output.truncated, false);
+    assert.equal("outputRef" in smallRun.output, false);
+  });
+});
+
 test("shell does not inherit provider credential environment variables", async () => {
   await withWorkspace(async ({ root, artifactStore }) => {
     const previousOpenAI = process.env.OPENAI_API_KEY;
@@ -892,6 +995,39 @@ test("verify runs only a frozen repository profile with a credential-minimized e
       verify: "1",
       openai: null,
     });
+  });
+});
+
+test("verify stores full truncated stdout as a retrievable Artifact", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    await mkdir(join(root, ".qi"));
+    await writeFile(join(root, ".qi", "qi.verify.json"), JSON.stringify({
+      version: 1,
+      profiles: {
+        loud: {
+          command: process.execPath,
+          args: ["-e", "process.stdout.write('B'.repeat(200000))"],
+          workdir: ".",
+          timeoutMs: 5_000,
+        },
+      },
+    }));
+    const profiles = await loadVerificationProfiles(root);
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("verify", createVerifyTool(profiles));
+    const settlement = await registry.execute(
+      "verify",
+      identity(registry, "verify"),
+      { profile: "loud" },
+      context(root, artifactStore, "act_verify_large_output"),
+    );
+    assert.equal(settlement.output.truncated, true);
+    assert.match(settlement.output.outputRef, /^artifact:\/\/[a-f0-9]{64}$/);
+    const stored = await artifactStore.get(settlement.output.outputRef);
+    const storedText = Buffer.from(stored.content).toString("utf8");
+    assert.equal(storedText, `=== stdout (200000 bytes) ===\n${"B".repeat(200000)}`);
   });
 });
 

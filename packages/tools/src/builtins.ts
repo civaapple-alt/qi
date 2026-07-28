@@ -9,6 +9,7 @@ import {
   scrubCredentialEnvironment,
 } from "@civaapple/qi-workspace";
 import { ToolFailure } from "./errors.js";
+import { storeTruncatedOutputArtifact, truncatedOutputCaptureLimitBytes } from "./output-artifact.js";
 import { defineTool, type AnyToolDefinition, type ToolExecutionContext } from "./registry.js";
 import {
   formatAccessiblePath,
@@ -647,6 +648,7 @@ export const shellTool = defineTool({
       stderr: Type.String(),
       timedOut: Type.Boolean(),
       truncated: Type.Boolean(),
+      outputRef: Type.Optional(Type.String({ pattern: "^artifact://[a-f0-9]{64}$" })),
       workspaceChange: Type.Optional(Type.Object(
         {
           changed: Type.Boolean(),
@@ -681,12 +683,13 @@ export const shellTool = defineTool({
       "UNSAFE_SHELL_ARGUMENT",
     );
     const before = await observeGitWorkspace(context.workspaceRoot, context.signal);
-    const result = await runHostProcess(invocation.command, invocation.args, {
+    const { stdoutFull, stderrFull, ...result } = await runHostProcess(invocation.command, invocation.args, {
       cwd,
       timeoutMs: request.timeoutMs ?? 30_000,
       ...(context.signal === undefined ? {} : { signal: context.signal }),
       env: scrubCredentialEnvironment(process.env, { QI_SHELL: "1", NO_COLOR: "1" }),
       outputLimitBytes: 64 * 1024,
+      captureLimitBytes: truncatedOutputCaptureLimitBytes,
       ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
     });
@@ -704,7 +707,8 @@ export const shellTool = defineTool({
           };
         })()
       : undefined;
-    const output = { ...result, ...(workspaceChange === undefined ? {} : { workspaceChange }) };
+    const artifactRef = await storeTruncatedOutputArtifact(context, { truncated: result.truncated, stdoutFull, stderrFull });
+    const output = { ...result, ...artifactRef, ...(workspaceChange === undefined ? {} : { workspaceChange }) };
     if (result.timedOut) {
       throw new ToolFailure("SHELL_TIMEOUT", `Process exceeded ${request.timeoutMs ?? 30_000} ms`, output);
     }
@@ -866,6 +870,7 @@ export function createVerifyTool(profiles: readonly VerificationProfile[]): AnyT
         stderr: Type.String(),
         timedOut: Type.Boolean(),
         truncated: Type.Boolean(),
+        outputRef: Type.Optional(Type.String({ pattern: "^artifact://[a-f0-9]{64}$" })),
         durationMs: Type.Integer({ minimum: 0 }),
       },
       { additionalProperties: false },
@@ -888,7 +893,7 @@ export function createVerifyTool(profiles: readonly VerificationProfile[]): AnyT
         "UNSAFE_VERIFY_ARGUMENT",
       );
       const startedAt = Date.now();
-      const result = await runProcess(
+      const { stdoutFull, stderrFull, ...result } = await runProcess(
         invocation.command,
         invocation.args,
         cwd,
@@ -898,11 +903,14 @@ export function createVerifyTool(profiles: readonly VerificationProfile[]): AnyT
         64 * 1024,
         invocation.windowsVerbatimArguments,
         context.reportActivity,
+        truncatedOutputCaptureLimitBytes,
       );
+      const artifactRef = await storeTruncatedOutputArtifact(context, { truncated: result.truncated, stdoutFull, stderrFull });
       const output = {
         profile: profile.name,
         definitionSha256: profile.definitionSha256,
         ...result,
+        ...artifactRef,
         durationMs: Date.now() - startedAt,
       };
       if (result.timedOut) {
@@ -1595,7 +1603,16 @@ function runProcess(
   outputLimitBytes = 64 * 1024,
   windowsVerbatimArguments = false,
   reportActivity?: (activity: { type: "output"; stream: "stdout" | "stderr"; text: string; truncated: boolean }) => void,
-): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; truncated: boolean }> {
+  captureLimitBytes?: number,
+): Promise<{
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  truncated: boolean;
+  stdoutFull?: string;
+  stderrFull?: string;
+}> {
   return runHostProcess(command, args, {
     cwd,
     timeoutMs,
@@ -1604,6 +1621,7 @@ function runProcess(
     outputLimitBytes,
     ...(windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     ...(reportActivity === undefined ? {} : { reportActivity }),
+    ...(captureLimitBytes === undefined ? {} : { captureLimitBytes }),
   });
 }
 
@@ -1760,8 +1778,35 @@ async function resolveTrustedExecutable(command: string, workspaceRoot: string):
   );
 }
 
+// PATH-resolved trusted-executable lookups are pure for the lifetime of a stable PATH: the same
+// command/workspaceRoot/PATH triple always resolves to the same outside-Workspace binary (or absence).
+// Every search/find/shell/script/verify call — and both Git snapshots around every shell call — resolved
+// this independently before, which is pure repeated filesystem overhead. Cache by value, including the
+// current PATH string in the key so a real PATH change (rare mid-process) transparently misses instead of
+// requiring manual invalidation. Cache the in-flight Promise (not just the settled value) so concurrent
+// callers for the same key share one probe instead of racing duplicate filesystem walks.
+const trustedExecutableCache = new Map<string, Promise<string | undefined>>();
+
 export async function findTrustedExecutable(command: string, workspaceRoot: string): Promise<string | undefined> {
   const pathValue = process.env.PATH ?? process.env.Path ?? "";
+  const cacheKey = `${command}::${resolve(workspaceRoot)}::${pathValue}`;
+  const cached = trustedExecutableCache.get(cacheKey);
+  if (cached) return cached;
+  const probe = probeTrustedExecutable(command, workspaceRoot, pathValue);
+  trustedExecutableCache.set(cacheKey, probe);
+  try {
+    return await probe;
+  } catch (error) {
+    trustedExecutableCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+async function probeTrustedExecutable(
+  command: string,
+  workspaceRoot: string,
+  pathValue: string,
+): Promise<string | undefined> {
   const extensions = process.platform === "win32"
     ? (/\.[A-Za-z0-9]+$/.test(command)
         ? [""]
@@ -1785,4 +1830,24 @@ export async function findTrustedExecutable(command: string, workspaceRoot: stri
 function isInsideWorkspace(workspaceRoot: string, candidate: string): boolean {
   const relation = relative(resolve(workspaceRoot), candidate);
   return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
+}
+
+/**
+ * Warm the trusted-executable cache for the language stack detected in this Workspace, so the first real
+ * `search`/`find`/`shell`/`script`/`verify` call does not pay PATH-walk latency. This only populates
+ * `findTrustedExecutable`'s cache in parallel at startup; it never changes resolution logic, never registers a
+ * Tool, and silently leaves a command unresolved (same fallback behavior `search`/`find` already have when
+ * `rg`/`fd` are absent). Extend the candidate table here as more ecosystems (Python, Go, Rust, ...) are recognized.
+ */
+export async function prewarmTrustedExecutables(workspaceRoot: string): Promise<void> {
+  const candidates = new Set<string>(["git", ...(process.platform === "win32" ? ["pwsh", "cmd"] : ["bash"])]);
+  const [packageManifest, hasMavenProject] = await Promise.all([
+    readPackageManifest(workspaceRoot).catch(() => undefined),
+    workspaceEntryExists(workspaceRoot, "pom.xml", false).catch(() => false),
+  ]);
+  if (packageManifest) for (const command of ["node", "npm", "npx"]) candidates.add(command);
+  if (hasMavenProject) for (const command of ["mvn", "jar", "javap"]) candidates.add(command);
+  await Promise.all(
+    [...candidates].map((command) => findTrustedExecutable(command, workspaceRoot).catch(() => undefined)),
+  );
 }

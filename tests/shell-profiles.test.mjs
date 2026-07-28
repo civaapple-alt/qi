@@ -139,5 +139,23 @@ test("script tool runs an available profile and refuses unauthorized profiles", 
       ),
       (error) => error instanceof AuthorityDeniedError,
     );
+
+    if (profile.id !== "cmd") {
+      const largeOutputScript = profile.id === "bash"
+        ? "printf 'A%.0s' $(seq 1 200000)"
+        : "Write-Output (\"A\" * 200000)";
+      const largeRun = await registry.execute(
+        "script",
+        identity,
+        { profile: profile.id, script: largeOutputScript, workdir: ".", timeoutMs: 20_000 },
+        context(root, artifactStore, "act_script_large_output"),
+      );
+      if (largeRun.output.truncated) {
+        assert.match(largeRun.output.outputRef, /^artifact:\/\/[a-f0-9]{64}$/);
+        const stored = await artifactStore.get(largeRun.output.outputRef);
+        const storedText = Buffer.from(stored.content).toString("utf8");
+        assert.match(storedText, /A{200000}/);
+      }
+    }
   });
 });

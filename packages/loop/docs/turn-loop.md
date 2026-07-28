@@ -26,6 +26,14 @@ model proposes Actions
 Batch ordering may optimize safe execution, but each Action retains its own identity, authority, and settlement.
 If one action becomes indeterminate, all siblings not yet started are explicitly settled before the Run parks.
 
+Within a Step's Action batch, `TurnLoop` finds maximal consecutive runs of `read`-effect calls and authorizes and
+executes each such run concurrently (`Promise.all`); `write`/`execute`/`publish`/`spend` calls, and any `read` call
+that is not part of an all-read run, execute one at a time in the original order. Concurrent reads never consult
+or mutate write-conflict or edit-freshness state, so this optimization is safe: the loop still returns model-facing
+tool-result feedback in the model's original request order, independent of which read settled first. If any read
+inside a concurrent batch is cancelled or becomes indeterminate, the whole batch is left to finish (it already
+started), and only candidates strictly after that batch are denied and the Run stops with the matching status.
+
 After a successful edit, a later same-Step edit of the same single resource may be re-inspected against the
 latest digest when its proposed digest belongs to that edit chain. The Loop appends
 `action.freshness.rebased` before requesting authority, and the Effect Journal sees the re-inspected input.

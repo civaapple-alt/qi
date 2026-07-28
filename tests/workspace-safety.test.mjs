@@ -21,7 +21,40 @@ import {
   effectIdempotencyKey,
   effectIntentHash,
   hostProcessRunner,
+  runHostProcess,
 } from "@civaapple/qi-workspace";
+
+test("runHostProcess captures full output beyond outputLimitBytes only when captureLimitBytes opts in", async () => {
+  const node = process.execPath;
+  const payload = "x".repeat(200);
+  const script = `process.stdout.write(${JSON.stringify(payload)})`;
+
+  const withoutCapture = await runHostProcess(node, ["-e", script], { outputLimitBytes: 32 });
+  assert.equal(withoutCapture.truncated, true);
+  assert.equal(withoutCapture.stdout.length, 32);
+  assert.equal(withoutCapture.stdoutFull, undefined, "default captureLimitBytes must not retain overflow");
+
+  const withCapture = await runHostProcess(node, ["-e", script], { outputLimitBytes: 32, captureLimitBytes: 1_024 });
+  assert.equal(withCapture.truncated, true);
+  assert.equal(withCapture.stdout.length, 32);
+  assert.equal(withCapture.stdoutFull, payload, "opting into captureLimitBytes must return the full stream");
+
+  const capturePayload = "y".repeat(2_000);
+  const captureScript = `process.stdout.write(${JSON.stringify(capturePayload)})`;
+  const boundedCapture = await runHostProcess(node, ["-e", captureScript], {
+    outputLimitBytes: 32,
+    captureLimitBytes: 64,
+  });
+  assert.equal(boundedCapture.truncated, true);
+  assert.equal(boundedCapture.stdoutFull?.length, 64, "the full capture is itself bounded by captureLimitBytes");
+
+  const untruncated = await runHostProcess(node, ["-e", "process.stdout.write('short')"], {
+    outputLimitBytes: 64,
+    captureLimitBytes: 1_024,
+  });
+  assert.equal(untruncated.truncated, false);
+  assert.equal(untruncated.stdoutFull, undefined, "an untruncated run has nothing extra to capture");
+});
 
 test("Effect Journal serializes reservations, replays completion and blocks indeterminate retry", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-effects-"));

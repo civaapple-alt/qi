@@ -9,6 +9,14 @@ export interface ProcessResult {
 export interface HostProcessResult extends ProcessResult {
   timedOut: boolean;
   truncated: boolean;
+  /**
+   * Present only when the run was truncated (stdout/stderr exceeded outputLimitBytes) and the caller opted
+   * into a larger captureLimitBytes: the complete stdout/stderr up to that ceiling, for callers that want to
+   * store the full output as a retrievable Artifact instead of discarding it. Omitted whenever
+   * captureLimitBytes was left at its default (equal to outputLimitBytes), so existing callers see no change.
+   */
+  stdoutFull?: string;
+  stderrFull?: string;
 }
 
 export interface ProcessRunner {
@@ -21,6 +29,12 @@ export interface HostProcessOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   outputLimitBytes?: number;
+  /**
+   * Independent ceiling for capturing complete stdout/stderr beyond outputLimitBytes. Defaults to
+   * outputLimitBytes (i.e. no extra capture, matching prior behavior). Only the overflow above
+   * outputLimitBytes is buffered up to this ceiling, so well-behaved processes pay no extra memory cost.
+   */
+  captureLimitBytes?: number;
   windowsVerbatimArguments?: boolean;
   stdin?: string | Buffer;
   detachedProcessGroup?: boolean;
@@ -98,6 +112,7 @@ export function runHostProcess(
 ): Promise<HostProcessResult> {
   const timeoutMs = options.timeoutMs;
   const outputLimitBytes = options.outputLimitBytes ?? 64 * 1024;
+  const captureLimitBytes = Math.max(outputLimitBytes, options.captureLimitBytes ?? outputLimitBytes);
   const detached = options.detachedProcessGroup ?? process.platform !== "win32";
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
@@ -110,22 +125,37 @@ export function runHostProcess(
     });
     let stdout = "";
     let stderr = "";
-    let truncated = false;
+    let stdoutOverflow = "";
+    let stderrOverflow = "";
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let timedOut = false;
     let settled = false;
 
     const append = (target: "stdout" | "stderr", chunk: Buffer) => {
-      const current = target === "stdout" ? stdout : stderr;
+      const isStdout = target === "stdout";
+      const current = isStdout ? stdout : stderr;
       const room = Math.max(0, outputLimitBytes - Buffer.byteLength(current));
       const addition = chunk.subarray(0, room).toString("utf8");
-      if (target === "stdout") stdout += addition;
+      if (isStdout) stdout += addition;
       else stderr += addition;
-      if (chunk.byteLength > room) truncated = true;
+      const remainder = chunk.subarray(room);
+      if (remainder.byteLength > 0) {
+        if (isStdout) stdoutTruncated = true;
+        else stderrTruncated = true;
+        if (captureLimitBytes > outputLimitBytes) {
+          const overflow = isStdout ? stdoutOverflow : stderrOverflow;
+          const overflowRoom = Math.max(0, captureLimitBytes - outputLimitBytes - Buffer.byteLength(overflow));
+          const overflowAddition = remainder.subarray(0, overflowRoom).toString("utf8");
+          if (isStdout) stdoutOverflow += overflowAddition;
+          else stderrOverflow += overflowAddition;
+        }
+      }
       options.reportActivity?.({
         type: "output",
         stream: target,
-        text: target === "stdout" ? stdout : stderr,
-        truncated,
+        text: isStdout ? stdout : stderr,
+        truncated: stdoutTruncated || stderrTruncated,
       });
     };
 
@@ -164,7 +194,15 @@ export function runHostProcess(
         reject(options.signal.reason ?? new DOMException("Process aborted", "AbortError"));
         return;
       }
-      resolve({ exitCode, stdout, stderr, timedOut, truncated });
+      resolve({
+        exitCode,
+        stdout,
+        stderr,
+        timedOut,
+        truncated: stdoutTruncated || stderrTruncated,
+        ...(stdoutTruncated && captureLimitBytes > outputLimitBytes ? { stdoutFull: stdout + stdoutOverflow } : {}),
+        ...(stderrTruncated && captureLimitBytes > outputLimitBytes ? { stderrFull: stderr + stderrOverflow } : {}),
+      });
     });
   });
 }

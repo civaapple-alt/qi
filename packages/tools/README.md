@@ -39,6 +39,14 @@ complete previous bytes as an Artifact first.
 the declared profile-name enum; commands, arguments, working directories, and timeouts never come from model
 input. Each capability resource includes the profile name and definition hash.
 
+`scanVerificationCandidates()` separately *proposes* verification profiles for a human to review: it reads
+`package.json` scripts, a `pom.xml` presence, and fenced code blocks under headings in `AGENTS.md`/`README.md`,
+filters out shell-metacharacter and known long-running (`start`/`dev`/`serve`/`watch`) commands, and marks each
+candidate `recommended` (manifest/package-inferred) or not (doc-scanned) and `available` based on
+`findTrustedExecutable()`. It writes nothing. `writeVerificationManifest()` takes the human-selected subset and
+writes `.qi/qi.verify.json` through the same atomic write and `loadVerificationProfiles()` validation as the
+automatic inference path, so a hand-picked manifest is exactly as trustworthy as an inferred one.
+
 ## Behavioral invariants
 
 - Input validation precedes authorization and execution.
@@ -53,6 +61,9 @@ input. Each capability resource includes the profile name and definition hash.
   patterns that look like globs (`*`, `?`, `[]`, `{}`) use glob mode; regex is explicit. Tree renders a bounded
   architecture view.
 - Trusted `rg` and `fd` executables must resolve outside the Workspace; portable fallbacks retain core behavior.
+  Trusted-executable PATH resolution is cached per command/Workspace root/PATH triple for the process lifetime,
+  and `prewarmTrustedExecutables()` primes common candidates for the detected language stack at startup so the
+  first `search`/`find`/`shell`/`script`/`verify` call does not pay PATH-walk latency.
 - Edit requires a fresh file hash, treats replacement text literally, reconciles only line-ending representation,
   and rejects missing, ambiguous, stale, or no-op replacements before mutation.
 - Atomic replacement of an existing file preserves its Unix permission bits, including executability.
@@ -75,7 +86,13 @@ input. Each capability resource includes the profile name and definition hash.
 - Tool output is redacted before Effect Journal completion, model feedback, and Session settlement.
 - Optional process activity callbacks receive only redacted bounded snapshots; they are provisional observation,
   not Tool settlement or durable evidence.
-- Oversized or complete outputs can be stored as Artifacts instead of flooding context.
+- Oversized or complete outputs can be stored as Artifacts instead of flooding context. `shell`, `verify`, and
+  `script` store the complete stdout/stderr (bounded independently of the inline output limit) as an Artifact
+  and return an `outputRef` whenever a run's inline output was truncated, so nothing is silently discarded.
+- `scanVerificationCandidates()` only proposes; it never writes a manifest, and an unresolvable executable is
+  marked unavailable rather than silently omitted, so a caller can present it as visibly disabled.
+- `writeVerificationManifest()` rejects an empty selection, an invalid or duplicate profile name, before writing;
+  it validates the written manifest through the same `loadVerificationProfiles()` path used everywhere else.
 
 ## Failure semantics
 
@@ -99,7 +116,8 @@ const registry = new ToolRegistry(new InMemoryCapabilityBroker());
 ## Public API
 
 `defineTool()`, `ToolRegistry`, tool phase types, built-in tools, verification profile preparation/loading,
-artifact storage, controlled network fetch, and structured tool errors.
+verification candidate scanning (`scanVerificationCandidates()`, `writeVerificationManifest()`), artifact
+storage, controlled network fetch, and structured tool errors.
 
 ## Change guide
 
@@ -108,8 +126,8 @@ invalid, and effect-recovery tests where relevant.
 
 ## Verification
 
-Use `tests/tools-capability.test.mjs`, `tests/network-fetch.test.mjs`, `tests/workspace-safety.test.mjs`, and
-`tests/turn-loop.test.mjs`.
+Use `tests/tools-capability.test.mjs`, `tests/network-fetch.test.mjs`, `tests/workspace-safety.test.mjs`,
+`tests/turn-loop.test.mjs`, and `tests/verify-scan.test.mjs`.
 
 ## Further reading
 

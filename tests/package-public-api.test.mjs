@@ -11,7 +11,7 @@ const expectedRuntimeExports = {
   ],
   "@civaapple/qi-codeact": [
     "CodeActRunner", "ContainerProgramSandbox", "ControlledToolClient",
-    "FixtureProgramSandbox", "buildContainerInvocation",
+    "FixtureProgramSandbox", "buildContainerInvocation", "probeContainerRuntime",
   ],
   "@civaapple/qi-context": ["ContextBudgetError", "approximateTokenEstimator", "compileContext"],
   "@civaapple/qi-coordinator": [
@@ -73,11 +73,11 @@ const expectedRuntimeExports = {
     "createScriptTool", "createVerifyTool", "defaultVerificationManifestPath", "defineTool",
     "editTool", "fetchTool", "findTool", "findTrustedExecutable", "formatAccessiblePath",
     "gitTool", "isRegularFile", "listTool", "loadVerificationProfiles", "mountsFromContext",
-    "moveTool", "networkResource", "prepareVerificationProfiles", "probeShellProfiles",
+    "moveTool", "networkResource", "prepareVerificationProfiles", "prewarmTrustedExecutables", "probeShellProfiles",
     "readTool", "removeTool", "resolveAccessiblePath", "resolveShellConfig",
-    "resolveShellExecutable", "resolveWorkspaceEntry", "resolveWorkspacePath", "searchTool",
-    "shellProfileResource", "shellTool", "treeTool", "verificationResource",
-    "windowsCommandInvocation", "writeTool",
+    "resolveShellExecutable", "resolveWorkspaceEntry", "resolveWorkspacePath", "scanVerificationCandidates",
+    "searchTool", "shellProfileResource", "shellTool", "treeTool", "verificationResource",
+    "windowsCommandInvocation", "writeTool", "writeVerificationManifest",
   ],
   "@civaapple/qi-tui": [
     "ComposerComponent", "FollowUpQueue", "FollowUpsComponent", "FormPanel",

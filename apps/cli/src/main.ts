@@ -167,7 +167,7 @@ async function main(): Promise<void> {
         ? []
         : [`verify ${runtime.verificationManifest.origin} ${runtime.verificationManifest.path} · ${runtime.verificationManifest.profiles.join(", ")}`]),
       ...(presenter.discoveryTip() === undefined ? [] : [presenter.discoveryTip()!]),
-      "commands /help · /settings · /login · /ask · /mode · /plan · /next · /tasks · /skills · /mounts · /permissions · /runs · /sessions · /steer <text> · /cancel · /quit",
+      "commands /help · /settings · /login · /ask · /mode · /plan · /next · /tasks · /skills · /mounts · /permissions · /verify · /runs · /sessions · /steer <text> · /cancel · /quit",
       "",
     ].join("\n"),
   );

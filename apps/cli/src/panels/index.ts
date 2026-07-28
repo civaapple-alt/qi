@@ -14,6 +14,7 @@ export {
   openSkillsHubPanel,
   openTasksHubPanel,
   openThemePanel,
+  openVerifySetupPanel,
   CAPABILITY_IDS,
   capabilityIdsFromLaunchLabels,
   type CapabilityId,

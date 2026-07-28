@@ -29,6 +29,10 @@ stable intent and idempotency keys.
 - Completed effects replay their settlement; indeterminate effects block automatic re-entry.
 - Host process helpers scrub credential-like environment names by default and can terminate process trees on
   timeout or cancel.
+- `runHostProcess` truncates inline `stdout`/`stderr` at `outputLimitBytes` by default. A caller that also sets a
+  larger `captureLimitBytes` additionally receives `stdoutFull`/`stderrFull` (bounded by that ceiling) for the
+  specific stream(s) that were truncated, so a truncated run's full output can still be preserved by the caller
+  instead of being discarded; omitting `captureLimitBytes` keeps prior behavior unchanged.
 
 ## Failure semantics
 

@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@civaapple/qi-capability": "0.5.1",
+    "@civaapple/qi-codeact": "0.5.1",
     "@civaapple/qi-coordinator": "0.5.1",
     "@civaapple/qi-eval": "0.5.1",
     "@civaapple/qi-introspection": "0.5.1",

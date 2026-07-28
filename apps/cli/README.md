@@ -50,6 +50,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/tasks [stop …]` | Background tasks hub (list / stop) |
 | `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path form) / unmount (picker); slash args still work |
 | `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `config.toml`) |
+| `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
 | `/runs` | Session history hub → interactive Runs / Steps / Actions / Agents lists (Enter selects observation) |
 | `/sessions` | List Workspace Sessions; type-to-search; Enter resumes in-process |
 | `/next [continue\|stop\|plan]` | Next Run panel |
@@ -127,7 +128,16 @@ Run, the runtime reconciles additions, removals, and changed mount identities in
 When host execute is enabled, `[shell]` in user or project TOML selects profiles. `direct` keeps the argv `shell`
 tool; `pwsh`, `cmd`, and `bash` are probed at startup and, when available, expose a separate `script` tool.
 `/config` shows default/allowed profiles, resolved executables, versions, and unavailable reasons. Profiles are
-never chosen from command text.
+never chosen from command text. The same `execute` grant also probes for a responding `docker` or `podman`
+runtime at startup and, only when one responds, exposes a `codeact` tool that runs a short generated program in a
+network-off, read-only-root container; its nested tool calls still pass through normal authorization and Session
+events, and it can never call `codeact` or `delegate` itself.
+
+`/verify` proposes verification commands rather than requiring hand-written TOML from the start: it scans
+`package.json` scripts, a `pom.xml` presence, and fenced commands under headings in `AGENTS.md`/`README.md`,
+marks unresolvable executables as unavailable, and opens a checklist for you to confirm before anything is
+written. Applying the selection writes `.qi/qi.verify.json` through the same validation path as automatic
+inference and, when Verify authority is already granted, immediately refreshes the live `verify` tool.
 
 Long-lived commands do not use an implicit detached shell mode. With a separate `background` capability, the
 model receives a `task` tool for bounded servers and watchers. Each ProcessTask links to its originating
@@ -181,4 +191,5 @@ See [the interaction contract](docs/interaction-model.md) for projection and ren
   rebuilding every historical tool card on each event.
 
 Executable evidence lives in `tests/tui-presentation.test.mjs`, `tests/session-mode.test.mjs`,
-`tests/tui-e2e.test.mjs`, and `tests/tui-input.test.mjs`.
+`tests/tui-e2e.test.mjs`, `tests/tui-input.test.mjs`, `tests/tui-codeact.test.mjs`, and
+`tests/tui-verify-setup.test.mjs`.

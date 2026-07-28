@@ -3,12 +3,43 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { Type } from "@sinclair/typebox";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
 import { InMemoryEventStore } from "@civaapple/qi-kernel";
 import { ScriptedModelPort } from "@civaapple/qi-llm";
 import { TurnLoop } from "@civaapple/qi-loop";
-import { FileArtifactStore, ToolRegistry, artifactTool, editTool, readTool, searchTool, writeTool } from "@civaapple/qi-tools";
+import {
+  FileArtifactStore,
+  ToolRegistry,
+  artifactTool,
+  defineTool,
+  editTool,
+  readTool,
+  searchTool,
+  writeTool,
+} from "@civaapple/qi-tools";
 import { effectIdempotencyKey } from "@civaapple/qi-workspace";
+
+function delayedReadTool(activity) {
+  return defineTool({
+    description: "test-only read tool that reports concurrency and honors cooperative cancellation",
+    input: Type.Object({ delayMs: Type.Number(), id: Type.String() }, { additionalProperties: false }),
+    output: Type.Object({ id: Type.String() }, { additionalProperties: false }),
+    effect: () => "read",
+    resources: (input) => [`test:${input.id}`],
+    execute: async (input, context) => {
+      activity.active += 1;
+      activity.maxActive = Math.max(activity.maxActive, activity.active);
+      try {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, input.delayMs));
+        if (context.signal?.aborted) throw context.signal.reason ?? new DOMException("Cancelled", "AbortError");
+        return { id: input.id };
+      } finally {
+        activity.active -= 1;
+      }
+    },
+  });
+}
 
 async function withRuntime(run) {
   const root = await mkdtemp(join(tmpdir(), "qi-loop-test-"));
@@ -605,6 +636,111 @@ test("TurnLoop settles unstarted batch actions before parking an indeterminate e
       reason: "indeterminate-effect",
       detail: "Tool settlement could not be confirmed",
     });
+  });
+});
+
+test("TurnLoop executes a Step's consecutive read Actions concurrently", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_slow_read",
+      subject: "agent_main",
+      tools: ["slow_read"],
+      effects: ["read"],
+      resources: ["test:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    const activity = { active: 0, maxActive: 0 };
+    registry.register("slow_read", delayedReadTool(activity));
+    const model = new ScriptedModelPort([
+      [
+        { type: "action.requested", callId: "call-slow-1", name: "slow_read", input: { id: "a", delayMs: 80 } },
+        { type: "action.requested", callId: "call-slow-2", name: "slow_read", input: { id: "b", delayMs: 20 } },
+        { type: "action.requested", callId: "call-slow-3", name: "slow_read", input: { id: "c", delayMs: 50 } },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [
+        { type: "text.delta", delta: "All three reads settled." },
+        { type: "completed", finishReason: "stop" },
+      ],
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+
+    const startedAt = Date.now();
+    const result = await loop.run(turnRequest(root, artifactStore));
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.equal(result.status, "completed");
+    // Three read Actions each pay an 80/20/50ms delay; run serially that is >=150ms, run concurrently it is
+    // dominated by the slowest single delay (~80ms). The threshold stays well clear of either bound to avoid
+    // flakes from scheduler jitter while still failing if reads regress to serial execution.
+    assert.equal(activity.maxActive, 3);
+    assert.equal(elapsedMs < 150, true, `expected concurrent execution, took ${elapsedMs}ms`);
+
+    const actions = Object.values(result.view.runs[result.runId].actions);
+    assert.deepEqual(actions.map((action) => action.status), ["completed", "completed", "completed"]);
+    // Even though call-slow-2 (10ms) and call-slow-3 (20ms) settle before call-slow-1 (30ms), the tool-result
+    // feedback fed back to the model preserves the model's original request order.
+    const feedbackCallIds = model.requests[1].messages
+      .filter((message) => message.role === "tool")
+      .map((message) => message.content[0].callId);
+    assert.deepEqual(feedbackCallIds, ["call-slow-1", "call-slow-2", "call-slow-3"]);
+  });
+});
+
+test("TurnLoop stops a concurrent read batch and denies the rest of the Step on cancellation", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_cancel_write",
+      subject: "agent_main",
+      tools: ["artifact"],
+      effects: ["write"],
+      resources: ["artifact-store:local"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    broker.grant({
+      leaseId: "lea_cancel_read",
+      subject: "agent_main",
+      tools: ["slow_read"],
+      effects: ["read"],
+      resources: ["test:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    const activity = { active: 0, maxActive: 0 };
+    registry.register("slow_read", delayedReadTool(activity));
+    registry.register("artifact", artifactTool);
+    const controller = new AbortController();
+    const model = new ScriptedModelPort([
+      [
+        { type: "action.requested", callId: "call-cancel-1", name: "slow_read", input: { id: "a", delayMs: 20 } },
+        { type: "action.requested", callId: "call-cancel-2", name: "slow_read", input: { id: "b", delayMs: 20 } },
+        {
+          type: "action.requested",
+          callId: "call-cancel-3",
+          name: "artifact",
+          input: { content: "unreachable", mediaType: "text/plain" },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+    setTimeout(() => controller.abort(new Error("User interrupted")), 5);
+
+    const result = await loop.run(turnRequest(root, artifactStore, { signal: controller.signal }));
+
+    assert.equal(result.status, "cancelled");
+    const actions = Object.values(result.view.runs[result.runId].actions);
+    assert.deepEqual(actions.map((action) => action.status), ["cancelled", "cancelled", "denied"]);
+    const denied = store
+      .read("ses_turn_test")
+      .events.filter((event) => event.type === "authority.denied")
+      .map((event) => event.data.reason);
+    assert.deepEqual(denied, ["Batch cancelled before this action started"]);
   });
 });
 

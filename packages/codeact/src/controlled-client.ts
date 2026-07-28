@@ -29,6 +29,13 @@ export interface ControlledToolClientOptions {
   idempotencyScope?: string;
   signal?: AbortSignal;
   clock?: () => Date;
+  /**
+   * When provided, only these Tool names may be called from this controlled client; every other name fails
+   * closed as TOOL_NOT_ALLOWED before any inspection or Session event, independent of what the subject's
+   * capability leases would otherwise authorize. Callers use this to block self-recursion or delegation
+   * chaining regardless of granted leases.
+   */
+  allowedTools?: readonly string[];
 }
 
 export class ControlledToolClient {
@@ -41,6 +48,14 @@ export class ControlledToolClient {
   }
 
   async call(name: string, input: unknown): Promise<CodeActCallResult> {
+    if (this.#options.allowedTools && !this.#options.allowedTools.includes(name)) {
+      return {
+        ok: false,
+        code: "TOOL_NOT_ALLOWED",
+        message: `Tool ${name} is not in this CodeAct program's allowed tool list`,
+        retryable: false,
+      };
+    }
     const advertised = this.#options.registry.catalog().find((entry) => entry.name === name);
     if (!advertised) return { ok: false, code: "TOOL_NOT_FOUND", message: `Tool ${name} is not registered`, retryable: false };
     const actionId = createId("act");

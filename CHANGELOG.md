@@ -7,7 +7,32 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+- Added `prewarmTrustedExecutables()` to `@civaapple/qi-tools`, priming common PATH-resolved executables for the
+  detected language stack (Node.js, Maven) at CLI startup so the first `search`/`find`/`shell`/`script`/`verify`
+  call does not pay PATH-walk latency.
+- Added `outputRef` to `shell`, `verify`, and `script` Tool output: when a run's stdout/stderr is truncated for
+  model-context reasons, the complete stream is stored as a content-addressed Artifact and referenced instead of
+  being discarded.
+- Added a `codeact` Tool (under the existing `execute` capability) that runs a short generated program inside a
+  network-off, read-only-root container; every nested `api.call` still passes through the normal Tool Registry,
+  capability authorization, and Session event lifecycle. It registers only when `probeContainerRuntime()` from
+  `@civaapple/qi-codeact` finds a responding `docker` or `podman` on the host.
+- Added `ContainerProgramSandbox` support for inline `programSource` (in addition to `programFile`); the sandbox
+  owns staging and cleanup for both, so callers never manage an ad hoc temp-file location themselves.
+- Added `allowedTools` to `ControlledToolClient`: nested CodeAct tool calls outside the allowlist fail closed as
+  `TOOL_NOT_ALLOWED` before any inspection or Session event.
+- Added a guided `/verify` setup wizard: `scanVerificationCandidates()` (new in `@civaapple/qi-tools`) proposes
+  verification commands from `package.json`, `pom.xml`, `AGENTS.md`, and `README.md`; a human confirms the
+  selection in a `MultiSelectPanel`, and `writeVerificationManifest()` writes `.qi/qi.verify.json` through the
+  same atomic-write and `loadVerificationProfiles()` validation path used by automatic inference.
+
 ### Changed
+
+- `findTrustedExecutable()` now caches PATH resolution per command/Workspace root/PATH triple for the process
+  lifetime, including in-flight de-duplication for concurrent lookups of the same executable.
+- `TurnLoop` now authorizes and executes a Step's maximal consecutive runs of `read`-effect Actions concurrently
+  instead of one at a time; write/execute/publish/spend effects remain strictly sequential, and model-facing
+  tool-result feedback still preserves the model's original request order.
 
 ### Deprecated
 

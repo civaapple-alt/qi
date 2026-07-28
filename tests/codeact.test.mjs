@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import test from "node:test";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
-import { CodeActRunner, ContainerProgramSandbox, ControlledToolClient, FixtureProgramSandbox, buildContainerInvocation } from "@civaapple/qi-codeact";
+import {
+  CodeActRunner,
+  ContainerProgramSandbox,
+  ControlledToolClient,
+  FixtureProgramSandbox,
+  buildContainerInvocation,
+  probeContainerRuntime,
+} from "@civaapple/qi-codeact";
 import { InMemoryEventStore } from "@civaapple/qi-kernel";
 import { EventWriter } from "@civaapple/qi-loop";
 import { FileArtifactStore, ToolRegistry, artifactTool, readTool, searchTool } from "@civaapple/qi-tools";
@@ -66,6 +73,51 @@ test("CodeAct denial is structured, durable, and never enters a tool executor", 
   }, false);
 });
 
+test("ControlledToolClient allowlist rejects a disallowed tool before any inspection or Session event", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-codeact-allowlist-"));
+  const artifacts = join(root, ".artifacts");
+  await mkdir(artifacts);
+  try {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_codeact_allowlist",
+      subject: "agent_script",
+      tools: ["read", "artifact"],
+      effects: ["read", "write"],
+      resources: ["file:**", "artifact-store:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      maxUses: 20,
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("read", readTool);
+    registry.register("artifact", artifactTool);
+    const sessionId = "ses_codeact_allow", runId = "run_codeact_allow", stepId = "stp_codeact_allow";
+    const writer = new EventWriter(store, sessionId);
+    writer.append("session.created", {}, { kind: "user", id: "user" });
+    writer.append("run.triggered", { runId, trigger: "user" }, { kind: "user", id: "user" });
+    writer.append("run.started", { runId }, { kind: "runtime", id: "qi" });
+    writer.append("step.started", { runId, stepId }, { kind: "runtime", id: "qi" });
+    const client = new ControlledToolClient({
+      store,
+      registry,
+      sessionId,
+      runId,
+      stepId,
+      subject: "agent_script",
+      workspaceRoot: root,
+      artifactStore: new FileArtifactStore(artifacts),
+      allowedTools: ["read"],
+    });
+    const result = await client.call("artifact", { content: "x", mediaType: "text/plain" });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "TOOL_NOT_ALLOWED");
+    assert.equal(store.read(sessionId).events.length, 4);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("CodeAct container plan mounts only staged code with network and root filesystem disabled", async () => {
   const invocation = buildContainerInvocation({}, "C:\\isolated-stage");
   assert.deepEqual(invocation.args.slice(0, 6), ["run", "--rm", "--network", "none", "--read-only", "--pids-limit"]);
@@ -81,3 +133,70 @@ test("CodeAct container plan mounts only staged code with network and root files
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("ContainerProgramSandbox requires exactly one of programFile or programSource", async () => {
+  const noneProvided = new ContainerProgramSandbox({});
+  await assert.rejects(noneProvided.run({ call: async () => ({ ok: false, code: "NO", message: "no", retryable: false }) }), /exactly one of programFile or programSource/);
+  const root = await mkdtemp(join(tmpdir(), "qi-codeact-both-"));
+  try {
+    const program = join(root, "program.mjs");
+    await writeFile(program, "export async function main() { return 1; }\n");
+    const bothProvided = new ContainerProgramSandbox({ programFile: program, programSource: "export async function main() { return 1; }" });
+    await assert.rejects(bothProvided.run({ call: async () => ({ ok: false, code: "NO", message: "no", retryable: false }) }), /exactly one of programFile or programSource/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("ContainerProgramSandbox stages inline programSource the same way it stages a programFile", async () => {
+  // Using a real "node" binary in place of a container runtime proves staging succeeded (the process actually
+  // spawned) without requiring Docker/Podman in the test environment; it fails later for unrelated reasons
+  // (node cannot parse "run"/"--rm" as container flags), which both variants must fail with identically.
+  const bySource = new ContainerProgramSandbox({
+    programSource: "export async function main() { return 1; }\n",
+    runtime: "node",
+    timeoutMs: 5_000,
+  });
+  await assert.rejects(
+    bySource.run({ call: async () => ({ ok: false, code: "NO", message: "no", retryable: false }) }),
+    /Container exited without a result/,
+  );
+  const root = await mkdtemp(join(tmpdir(), "qi-codeact-source-parity-"));
+  try {
+    const program = join(root, "program.mjs");
+    await writeFile(program, "export async function main() { return 1; }\n");
+    const byFile = new ContainerProgramSandbox({ programFile: program, runtime: "node", timeoutMs: 5_000 });
+    await assert.rejects(
+      byFile.run({ call: async () => ({ ok: false, code: "NO", message: "no", retryable: false }) }),
+      /Container exited without a result/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("probeContainerRuntime resolves undefined when no candidate runtime responds", async () => {
+  const result = await probeContainerRuntime(["qi-fake-runtime-one", "qi-fake-runtime-two"], 500);
+  assert.equal(result, undefined);
+});
+
+test(
+  "probeContainerRuntime resolves the first candidate whose version probe exits 0",
+  { skip: process.platform === "win32" && "spawn without shell:true only resolves .exe/.com on Windows, not a scripted stub" },
+  async () => {
+    const stubName = "qi-fake-runtime-stub";
+    const dir = await mkdtemp(join(tmpdir(), "qi-codeact-probe-"));
+    const originalPath = process.env.PATH;
+    try {
+      const script = join(dir, stubName);
+      await writeFile(script, "#!/bin/sh\nexit 0\n");
+      await chmod(script, 0o755);
+      process.env.PATH = `${dir}${delimiter}${originalPath ?? ""}`;
+      const result = await probeContainerRuntime([stubName], 2_000);
+      assert.equal(result, stubName);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);

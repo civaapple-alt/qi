@@ -16,15 +16,21 @@ nested action through durable authority, lifecycle, registry, and effect boundar
 ## Core model
 
 `CodeActRunner` runs a program through a `ProgramSandbox`. `ContainerProgramSandbox` stages only the selected
-program and builds a network-off, read-only-root invocation. `ControlledToolClient` converts nested calls into
-normal durable Actions.
+program — from either a `programFile` path or inline `programSource`, staged and cleaned up identically either
+way — and builds a network-off, read-only-root invocation. `ControlledToolClient` converts nested calls into
+normal durable Actions, optionally narrowed by an `allowedTools` allowlist. `probeContainerRuntime()` detects
+whether a `docker` or `podman` runtime actually responds before a caller registers container-backed capability.
 
 ## Behavioral invariants
 
 - Every nested tool call has its own authority and result events.
 - Denial never enters the nested executor.
-- Only staged code is mounted into the program sandbox.
+- Only staged code is mounted into the program sandbox, regardless of whether it came from a file or inline source.
 - Network and writable root access are disabled by default.
+- When `allowedTools` is set, a name outside it fails closed as `TOOL_NOT_ALLOWED` before any inspection or Session
+  event, independent of what the subject's capability leases would otherwise authorize.
+- A container-backed capability is registered only after `probeContainerRuntime()` observes a real response; an
+  unavailable runtime never silently degrades to a fake success.
 
 ## Failure semantics
 
@@ -49,7 +55,8 @@ console.log(plan.args.includes("--network"), plan.args.includes("--read-only"));
 
 ## Public API
 
-`CodeActRunner`, `ControlledToolClient`, program sandbox ports, fixture sandbox, and container sandbox helpers.
+`CodeActRunner`, `ControlledToolClient`, program sandbox ports, fixture sandbox, container sandbox helpers, and
+`probeContainerRuntime`.
 
 ## Change guide
 

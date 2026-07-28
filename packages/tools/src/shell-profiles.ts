@@ -7,6 +7,7 @@ import {
   scrubCredentialEnvironment,
 } from "@civaapple/qi-workspace";
 import { ToolFailure } from "./errors.js";
+import { storeTruncatedOutputArtifact, truncatedOutputCaptureLimitBytes } from "./output-artifact.js";
 import { defineTool, type AnyToolDefinition } from "./registry.js";
 import { resolveWorkspacePath } from "./workspace.js";
 import {
@@ -126,6 +127,7 @@ export function createScriptTool(profiles: readonly AvailableScriptProfile[]): A
         stderr: Type.String(),
         timedOut: Type.Boolean(),
         truncated: Type.Boolean(),
+        outputRef: Type.Optional(Type.String({ pattern: "^artifact://[a-f0-9]{64}$" })),
       },
       { additionalProperties: false },
     ),
@@ -157,7 +159,7 @@ export function createScriptTool(profiles: readonly AvailableScriptProfile[]): A
       const cwd = await resolveWorkspacePath(context.workspaceRoot, request.workdir ?? ".");
       const invocation = await buildScriptInvocation(profile, request.script, context.workspaceRoot);
       try {
-        const result = await runHostProcess(invocation.command, invocation.args, {
+        const { stdoutFull, stderrFull, ...result } = await runHostProcess(invocation.command, invocation.args, {
           cwd,
           timeoutMs: request.timeoutMs ?? 30_000,
           ...(context.signal === undefined ? {} : { signal: context.signal }),
@@ -166,14 +168,17 @@ export function createScriptTool(profiles: readonly AvailableScriptProfile[]): A
             NO_COLOR: "1",
           }),
           outputLimitBytes: 64 * 1024,
+          captureLimitBytes: truncatedOutputCaptureLimitBytes,
           ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
           ...(invocation.stdin === undefined ? {} : { stdin: invocation.stdin }),
           ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
         });
+        const artifactRef = await storeTruncatedOutputArtifact(context, { truncated: result.truncated, stdoutFull, stderrFull });
         const output = {
           profile: profile.id,
           executable: profile.executable,
           ...result,
+          ...artifactRef,
         };
         if (result.timedOut) {
           throw new ToolFailure(

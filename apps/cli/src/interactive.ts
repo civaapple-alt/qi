@@ -14,6 +14,7 @@ import {
 import { dirname, resolve } from "node:path";
 import type { SessionEvent, SessionId } from "@civaapple/qi-protocol";
 import { nextSessionMode, type RuntimeActivity, type SessionMode } from "@civaapple/qi-loop";
+import type { VerificationCandidate } from "@civaapple/qi-tools";
 import type { AuthSession, AuthSessionStatus } from "./auth.js";
 import { parseLoginCommand } from "./auth.js";
 import {
@@ -49,6 +50,7 @@ import {
   openSettingsPanel,
   openSkillsHubPanel,
   openTasksHubPanel,
+  openVerifySetupPanel,
   PanelHost,
   ScrollPanel,
   type PanelFlowContext,
@@ -1001,6 +1003,35 @@ export class InteractiveTui {
     }, "Mount");
   }
 
+  #openVerifySetupPanel(): void {
+    this.#startManagementTask(async () => {
+      const { candidates, currentNames } = await this.#runtime.scanVerificationSetup();
+      openVerifySetupPanel(this.#panelFlow(), candidates, currentNames);
+    }, "Verify");
+  }
+
+  #applyVerificationSetup(selected: readonly VerificationCandidate[]): void {
+    if (this.#runtime.active) {
+      this.#presenter.setNotice("Cannot change verification profiles while a Run is active.");
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      try {
+        const manifest = await this.#runtime.applyVerificationSetup(selected);
+        const { verification: _previousVerification, ...launchRest } = this.#presenter.launch;
+        this.#presenter.launch = { ...launchRest, verification: manifest };
+        this.#presenter.setNotice(
+          t(this.#presenter.locale(), "verify.setup.applied", { count: String(manifest.profiles.length) }),
+        );
+      } catch (error) {
+        this.#presenter.setNotice(
+          t(this.#presenter.locale(), "verify.setup.failed", { reason: message(error) }),
+        );
+      }
+    }, "Verify");
+  }
+
   #removeMountById(mountId: string): void {
     this.#startManagementTask(async () => {
       await this.#runtime.removeMount(mountId);
@@ -1071,6 +1102,7 @@ export class InteractiveTui {
       removeMount: (mountId) => this.#removeMountById(mountId),
       effectiveCapabilities: () => capabilityIdsFromLaunchLabels(this.#runtime.capabilityLabels()),
       saveCapabilities: (capabilities) => this.#saveCapabilities(capabilities),
+      applyVerificationSetup: (selected) => this.#applyVerificationSetup(selected),
       installSkill: (source, scope) => this.#installSkill(source, scope),
       promptTaskStop: () => {
         this.#presenter.setNotice(t(this.#presenter.locale(), "tasks.stop.usage"));
@@ -1433,6 +1465,10 @@ export class InteractiveTui {
       }
       case "permissions": {
         openPermissionsPanel(this.#panelFlow());
+        return;
+      }
+      case "verify": {
+        this.#openVerifySetupPanel();
         return;
       }
       case "quit":

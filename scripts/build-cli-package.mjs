@@ -22,6 +22,7 @@ const bundledPackages = [
   "llm",
   "context",
   "capability",
+  "codeact",
   "tools",
   "workspace",
   "loop",

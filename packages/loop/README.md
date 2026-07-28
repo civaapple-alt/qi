@@ -38,6 +38,11 @@ runtime lifecycles such as ProcessTasks can interleave facts without stale seque
 - Each Step has a deterministic Action batch limit; excess advertised calls are rejected for reassessment.
 - Unadvertised or denied actions fail closed and become durable feedback.
 - Unstarted actions in a batch are settled before parking an indeterminate sibling.
+- A maximal consecutive run of `read`-effect Actions in one Step authorizes and executes concurrently; write,
+  execute, publish, and spend effects remain strictly sequential so write-conflict detection and edit freshness
+  rebasing keep seeing every earlier write in the Step before the next one is inspected. Model-facing tool-result
+  feedback always preserves the model's original request order regardless of settlement order. A cancellation or
+  indeterminate settlement inside a concurrent read batch still denies only candidates strictly after that batch.
 - Steering applies only after the current safe Step boundary.
 - Completed user turns are reconstructed from durable Session events under a separate bounded history budget.
 - Settled tool exchanges remain complete for their first consumer, then compact deterministically under pressure
