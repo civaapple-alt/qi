@@ -5,6 +5,7 @@ import { join, posix, resolve, sep } from "node:path";
 
 const acceptedDependencyLicenses = new Set([
   "Apache-2.0",
+  "BlueOak-1.0.0",
   "BSD-2-Clause",
   "BSD-3-Clause",
   "ISC",

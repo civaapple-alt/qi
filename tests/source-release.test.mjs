@@ -51,6 +51,7 @@ test("dependency license inventory rejects missing and unreviewed SPDX identifie
   const inventory = dependencyLicenseInventory({
     packages: {
       "node_modules/allowed": { version: "1.0.0", license: "Apache-2.0" },
+      "node_modules/blue-oak": { version: "1.0.0", license: "BlueOak-1.0.0" },
       "node_modules/missing": { version: "2.0.0" },
       "node_modules/review": { version: "3.0.0", license: "GPL-3.0-only" },
       "node_modules/workspace": { version: "0.4.0", link: true },
@@ -58,7 +59,7 @@ test("dependency license inventory rejects missing and unreviewed SPDX identifie
   });
   assert.deepEqual(
     inventory.map(({ name, accepted }) => [name, accepted]),
-    [["allowed", true], ["missing", false], ["review", false]],
+    [["allowed", true], ["blue-oak", true], ["missing", false], ["review", false]],
   );
 });
 
