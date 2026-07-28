@@ -1,10 +1,16 @@
-import type { ActionView, RunView, SessionView, StepView } from "@civaapple/qi-agent/kernel";
+import type {
+  ActionView,
+  PlanRevisionView,
+  RunView,
+  SessionView,
+  StepView,
+} from "@civaapple/qi-agent/kernel";
 import type { SessionEvent } from "@civaapple/qi-protocol";
 import type { RuntimeActivity } from "@civaapple/qi-agent/loop";
 import { renderQiMark } from "./brand.js";
 import { commandHelp, type TuiPanel } from "./commands.js";
 import { defaultLocale, t, type Locale } from "./i18n.js";
-import { shortenPath, splitKeepRight, truncateToWidth } from "./layout.js";
+import { shortenPath, splitKeepRight, truncateToWidth, visibleWidth } from "./layout.js";
 import { renderMarkdown } from "./markdown.js";
 import { formatProviderLabel } from "./provider.js";
 import { renderToolCard, shouldExpandByDefault, statusGlyph, type ToolCardModel } from "./tool-renderers.js";
@@ -114,6 +120,7 @@ const DISCOVERY_TOOLS = new Set(["read", "list", "tree", "find", "search", "git"
 
 /** Keep this many recent Steps expanded in an active Run; older Steps fold into one summary. */
 const ACTIVE_RUN_KEEP_STEPS = 8;
+const FORMAL_PLAN_MAX_RENDERED_LINES = 200;
 
 export class TuiPresenter {
   launch: TuiLaunchInfo;
@@ -132,7 +139,10 @@ export class TuiPresenter {
   #noticeExpiresAt: number | undefined;
   #skills: readonly PresentedSkill[] = [];
   #actionActivity = new Map<string, Extract<RuntimeActivity, { type: "action.output" }>>();
-  #modelActivity = new Map<string, Extract<RuntimeActivity, { type: "model.text" }>>();
+  #modelActivity = new Map<
+    string,
+    Extract<RuntimeActivity, { type: "model.text" | "model.reasoning" }>
+  >();
   #taskActivity = new Map<string, Extract<RuntimeActivity, { type: "task.output" }>>();
   #inspections: InspectionEntry[] = [];
   #expanded = new Set<string>();
@@ -211,7 +221,9 @@ export class TuiPresenter {
 
   applyActivity(activity: RuntimeActivity): void {
     if (activity.type === "action.output") this.#actionActivity.set(activity.actionId, activity);
-    else if (activity.type === "model.text") this.#modelActivity.set(activity.stepId, activity);
+    else if (activity.type === "model.text" || activity.type === "model.reasoning") {
+      this.#modelActivity.set(activity.stepId, activity);
+    }
     else this.#taskActivity.set(activity.taskId, activity);
   }
 
@@ -599,15 +611,14 @@ export class TuiPresenter {
     const actionActivity = action ? this.#actionActivity.get(action.actionId) : undefined;
     const modelActivity = stepId ? this.#modelActivity.get(stepId) : undefined;
     const activityText = actionActivity?.text || modelActivity?.text;
-    const liveTail = activityText
-      ?.replace(/\r/g, "")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .slice(-3);
-    if (!liveTail || liveTail.length === 0) return [parts.join("  ")];
     const stream = actionActivity?.stream;
-    const prefix = stream === "stderr" ? "stderr · " : "";
+    const prefix = stream === "stderr"
+      ? "stderr · "
+      : modelActivity?.type === "model.reasoning" ? "thinking · " : "";
+    const liveTail = activityText
+      ? boundedDisplayTailLines(activityText, Math.max(1, width - 4 - visibleWidth(prefix)), 3)
+      : undefined;
+    if (!liveTail || liveTail.length === 0) return [parts.join("  ")];
     return [
       parts.join("  "),
       ...liveTail.map((line) =>
@@ -808,7 +819,13 @@ export class TuiPresenter {
       .join(",");
     const stepSig = run.stepOrder.map((stepId) => {
       const step = run.steps[stepId];
-      return `${stepId}:${step?.status ?? ""}:${step?.model?.text?.length ?? 0}:${step?.model?.finishReason ?? ""}`;
+      return [
+        stepId,
+        step?.status ?? "",
+        step?.model?.text?.length ?? 0,
+        step?.model?.reasoning?.length ?? 0,
+        step?.model?.finishReason ?? "",
+      ].join(":");
     }).join(",");
     const selection = `${this.#runId === run.runId ? this.#actionId ?? "" : ""}`;
     return [
@@ -1154,6 +1171,27 @@ export class TuiPresenter {
   }
 
   private renderUserMessage(run: RunView): string[] {
+    const formalPlan = this.formalPlanRevision(run);
+    if (formalPlan?.markdown) {
+      const rendered = renderMarkdown(formalPlan.markdown, {
+        width: Math.max(40, this.#width - 2),
+        expandCodeBlocks: true,
+      });
+      const collapsed = rendered.length > FORMAL_PLAN_MAX_RENDERED_LINES;
+      return [
+        `${USER_MESSAGE_PREFIX}Accepted Plan · ${formalPlan.title} · rev ${formalPlan.revision}`,
+        "",
+        ...rendered.slice(0, FORMAL_PLAN_MAX_RENDERED_LINES),
+        ...(collapsed
+          ? [
+              "",
+              `… Collapsed · ${rendered.length - FORMAL_PLAN_MAX_RENDERED_LINES} rendered lines hidden`,
+            ]
+          : []),
+        "",
+        `Formal Plan file · ${formalPlan.path}`,
+      ];
+    }
     const input = run.input?.trim() ?? "";
     if (!input) return [`${USER_MESSAGE_PREFIX}(no input recorded)`];
     const key = `paste:${run.runId}`;
@@ -1168,6 +1206,13 @@ export class TuiPresenter {
       ];
     }
     return rawLines.map((line) => `${USER_MESSAGE_PREFIX}${line}`);
+  }
+
+  private formalPlanRevision(run: RunView): PlanRevisionView | undefined {
+    const binding = run.planBinding;
+    if (!binding) return undefined;
+    const revision = this.#view?.plans[binding.planId]?.revisions[binding.revision];
+    return revision?.format === "formal_markdown" ? revision : undefined;
   }
 
   /**
@@ -1186,6 +1231,7 @@ export class TuiPresenter {
     }
     const stepActions = this.actionOrder(run).filter((id) => run.actions[id]?.stepId === step.stepId);
     const actionLines = this.renderStepActions(run, stepActions, options);
+    const reasoningLines = this.renderReasoning(step);
     const agentLines = this.renderAgentText(step, run, options);
     const narrationFirst = step.model?.finishReason === "actions"
       || (step.status === "running" && Boolean(this.#modelActivity.get(step.stepId)?.text))
@@ -1196,6 +1242,7 @@ export class TuiPresenter {
       if (lines.length > 0) lines.push("");
       lines.push(...block);
     };
+    pushBlock(reasoningLines);
     if (narrationFirst) {
       pushBlock(agentLines);
       pushBlock(actionLines);
@@ -1254,6 +1301,7 @@ export class TuiPresenter {
       options.collapse ? 1 : 0,
       step.status,
       step.model?.text?.length ?? 0,
+      step.model?.reasoning?.length ?? 0,
       step.model?.finishReason ?? "",
       actionSig,
       expanded,
@@ -1315,6 +1363,19 @@ export class TuiPresenter {
     if (options.collapse) return [`· ${oneLine(liveModel.text, 100)}`];
     if (isPlainShortText(liveModel.text)) return [liveModel.text.trim()];
     return boundedTailLines(liveModel.text, 8);
+  }
+
+  private renderReasoning(step: StepView): string[] {
+    const committed = step.model?.reasoning;
+    const live = this.#modelActivity.get(step.stepId);
+    const reasoning = committed || (live?.type === "model.reasoning" ? live.text : undefined);
+    if (!reasoning?.trim()) return [];
+    const lines = boundedDisplayTailLines(reasoning, Math.max(20, this.#width - 6), 3);
+    if (lines.length === 0) return [];
+    return [
+      `Thinking · ${reasoning.length} chars`,
+      ...lines.map((line) => `  ${line}`),
+    ];
   }
 
   private renderDelegations(run: RunView): string[] {
@@ -1557,6 +1618,7 @@ export class TuiPresenter {
   private latestPasteKey(): string | undefined {
     const run = this.selectedRun();
     if (!run?.input) return undefined;
+    if (this.formalPlanRevision(run)) return undefined;
     const lines = run.input.split(/\r?\n/);
     if (lines.length > 4 || run.input.length > 400) return `paste:${run.runId}`;
     return undefined;
@@ -1950,6 +2012,26 @@ function progressBar(ratio: number, width: number): string {
 function boundedTailLines(value: string, limit: number): string[] {
   const lines = value.replace(/\r/g, "").split("\n");
   return lines.slice(-limit);
+}
+
+function boundedDisplayTailLines(value: string, width: number, limit: number): string[] {
+  const wrapped: string[] = [];
+  for (const sourceLine of value.replace(/\r/g, "").split("\n")) {
+    let line = "";
+    let lineWidth = 0;
+    for (const character of sourceLine) {
+      const characterWidth = Math.max(0, visibleWidth(character));
+      if (line && lineWidth + characterWidth > width) {
+        if (line.trim()) wrapped.push(line.trim());
+        line = "";
+        lineWidth = 0;
+      }
+      line += character;
+      lineWidth += characterWidth;
+    }
+    if (line.trim()) wrapped.push(line.trim());
+  }
+  return wrapped.slice(-limit);
 }
 
 function normalizedLineCount(value: string): number {

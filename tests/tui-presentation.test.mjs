@@ -31,7 +31,7 @@ import {
   TuiPresenter,
   TuiRuntime,
 } from "../apps/cli/dist/index.js";
-import { validateFormalPlan } from "../apps/cli/dist/plan-tool.js";
+import { createPlanDocumentTool, validateFormalPlan } from "../apps/cli/dist/plan-tool.js";
 
 test("TUI command catalog separates inspection, navigation, and control", () => {
   assert.deepEqual(parseTuiCommand("/actions"), { name: "actions", argument: "" });
@@ -227,6 +227,33 @@ test("Formal Plan validation requires document structure and rejects Todo or sec
   );
 });
 
+test("plan_document advertises Moonshot-compatible parameters and keeps operation fields strict", async () => {
+  const tool = createPlanDocumentTool({
+    dataRoot: "unused",
+    artifactStore: {},
+    humanControl: {},
+  });
+  assert.equal(tool.input.type, "object");
+  assert.equal(Object.hasOwn(tool.input, "anyOf"), false);
+  assert.equal(JSON.stringify(tool.input).includes('"anyOf"'), false);
+  assert.deepEqual(tool.input.properties.operation.enum, ["create", "read", "edit"]);
+  assert.match(tool.input.description, /create=\{operation,markdown\}/);
+  assert.match(tool.input.properties.planId.description, /omit for create/);
+
+  await assert.rejects(
+    tool.execute({ operation: "create" }, {}),
+    /create requires markdown/,
+  );
+  await assert.rejects(
+    tool.execute({ operation: "read", expectedSha256: "a".repeat(64) }, {}),
+    /read does not accept: expectedSha256/,
+  );
+  await assert.rejects(
+    tool.execute({ operation: "edit", planId: "pln_test" }, {}),
+    /edit requires: expectedSha256, edits/,
+  );
+});
+
 test("wide Markdown tables wrap every column instead of truncating the right side", () => {
   const rendered = renderMarkdown([
     "| Action | Status | Evidence | Next step |",
@@ -276,6 +303,10 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
   const root = await mkdtemp(join(tmpdir(), "qi-tui-presentation-"));
   const model = new ScriptedModelPort([
     [
+      {
+        type: "reasoning.delta",
+        delta: "I am turning the requested feature into a self-contained implementation and verification plan.",
+      },
       {
         type: "action.requested",
         callId: "call_plan",
@@ -340,6 +371,27 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
     assert.equal(runtime.view()?.pendingReview?.status, "pending");
 
     const accepted = runtime.acceptPlan();
+    const acceptedPresenter = new TuiPresenter({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi"),
+      provider: "fake",
+      model: "presentation-v1",
+      capabilities: ["write", "host execute"],
+      contextWindowTokens: 80_000,
+      contextBudgetTokens: 64_000,
+      outputReserveTokens: 16_000,
+      historyBudgetTokens: 16_000,
+      maxSteps: 20,
+      maxActionsPerStep: 6,
+    });
+    acceptedPresenter.update(runtime.events(), runtime.view());
+    const acceptedTranscript = acceptedPresenter.render().join("\n");
+    assert.match(acceptedTranscript, /Accepted Plan · Feature plan · rev 1/);
+    assert.match(acceptedTranscript, /Inspect the workspace before editing/);
+    assert.match(acceptedTranscript, /Run the focused script/);
+    assert.match(acceptedTranscript, /Formal Plan file · .*plans.*\.md/);
+    assert.doesNotMatch(acceptedTranscript, /\[Pasted text|<accepted-plan|Ctrl\+O to expand/);
+
     const result = await runtime.runTriggered(accepted.runId, accepted.input);
     assert.equal(result.status, "completed");
     const executorPrompt = model.requests[2].messages
@@ -371,6 +423,12 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
     const overview = presenter.render().join("\n");
     assert.match(overview, /^Qi  v/m);
     assert.match(overview, /Draft a plan for the feature|Execute Plan item/);
+    assert.match(overview, /Thinking · \d+ chars/);
+    assert.match(overview, /self-contained implementation and verification plan/);
+    assert.match(overview, /Accepted Plan · Feature plan · rev 1/);
+    assert.match(overview, /Inspect the workspace before editing/);
+    assert.match(overview, /Run the focused script/);
+    assert.doesNotMatch(overview, /<accepted-plan|\[Pasted text ·|Implement the accepted plan/);
     assert.match(overview, /Implemented and verified the feature/);
     assert.match(overview, /\$ /);
     assert.match(overview, /Ctrl\+O to expand|verified|exit /);
@@ -1122,6 +1180,18 @@ test("active Run folds older Steps but keeps bounded edit diffs in the retained 
   assert.match(modelWorking[2], /latest model tail/);
 
   presenter.applyActivity({
+    type: "model.reasoning",
+    sessionId: "ses_fold",
+    runId,
+    stepId: "stp_12",
+    text: "reasoning one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen",
+    provisional: true,
+  });
+  const reasoningWorking = presenter.renderWorking(true, 0, 40);
+  assert.equal(reasoningWorking.length, 4);
+  assert.equal(reasoningWorking.slice(1).every((line) => /thinking ·/.test(line)), true);
+
+  presenter.applyActivity({
     type: "action.output",
     sessionId: "ses_fold",
     runId,
@@ -1395,6 +1465,94 @@ test("long pasted user input collapses until Ctrl+O expands it", () => {
   assert.match(expanded, /line 4 of a long paste/);
 });
 
+test("accepted Formal Plan preview caps at 200 rendered lines and points to the immutable file", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/data",
+    provider: "fake",
+    model: "plan-preview-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const markdown = [
+    "# Long Formal Plan",
+    "",
+    "A complete plan passed to the Executor.",
+    "",
+    ...Array.from({ length: 240 }, (_, index) => `${index + 1}. Implement bounded step ${index + 1}.`),
+  ].join("\n");
+  const path = "C:\\Users\\tester\\.qi\\projects\\demo\\plans\\pln_long\\sha.md";
+  presenter.update([], {
+    sessionId: "ses_formal_preview",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    currentPlanId: "pln_long",
+    runOrder: ["run_formal"],
+    currentRunId: "run_formal",
+    runs: {
+      run_formal: {
+        runId: "run_formal",
+        trigger: "user",
+        mode: "agent",
+        status: "triggered",
+        input: `<accepted-plan>${markdown}</accepted-plan>`,
+        planBinding: { planId: "pln_long", revision: 1 },
+        stepOrder: [],
+        steps: {},
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {
+      pln_long: {
+        planId: "pln_long",
+        latestRevision: 1,
+        acceptedRevision: 1,
+        revisions: {
+          1: {
+            revision: 1,
+            format: "formal_markdown",
+            title: "Long Formal Plan",
+            overview: "A complete plan passed to the Executor.",
+            artifactRef: "art_plan",
+            sha256: "a".repeat(64),
+            path,
+            markdown,
+            items: [],
+            recordedAt: new Date(0).toISOString(),
+          },
+        },
+      },
+    },
+    planOrder: ["pln_long"],
+    presence: { state: "waiting", reason: "accepted" },
+  });
+
+  const rendered = presenter.render(100).join("\n");
+  assert.match(rendered, /Accepted Plan · Long Formal Plan · rev 1/);
+  assert.match(rendered, /1\. Implement bounded step 1/);
+  assert.doesNotMatch(rendered, /240\. Implement bounded step 240/);
+  assert.match(rendered, /Collapsed · \d+ rendered lines hidden/);
+  assert.match(rendered, new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(rendered, /\[Pasted text|<accepted-plan|Ctrl\+O/);
+});
+
 test("background ProcessTasks remain visible after their Run and can be stopped explicitly", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-task-"));
   const taskSecret = "fixture-process-task-secret-9274";
@@ -1540,6 +1698,26 @@ test("Action settlement glyphs stay distinct and plan_document has its own card"
   assert.match(text, /rev 2/);
   assert.match(text, /• Inspect/);
   assert.doesNotMatch(text, /│/);
+
+  const failed = renderToolCard({
+    actionId: "act_plan_failed",
+    toolName: "plan_document",
+    status: "failed",
+    input: {
+      operation: "create",
+      markdown: "# Formal title\n\nComplete plan.",
+      planId: "pln_model_supplied",
+    },
+    output: {
+      code: "PLAN_OPERATION_FIELDS",
+      message: "create does not accept: planId",
+    },
+    errorCode: "PLAN_OPERATION_FIELDS",
+  }, { expanded: true }).join("\n");
+  assert.match(failed, /Formal title/);
+  assert.match(failed, /create · PLAN_OPERATION_FIELDS/);
+  assert.match(failed, /create does not accept: planId/);
+  assert.doesNotMatch(failed, /rev undefined/);
 });
 
 test("pending Next Run handoff points at the choice panel, not composer digits", () => {

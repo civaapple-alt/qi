@@ -26,6 +26,10 @@ npm install @civaapple/qi-agent @civaapple/qi-ai @civaapple/qi-protocol
 projections. `agent/loop` produces events and persists authority plus `ActionStarted` before executor entry.
 Concrete SQLite storage and SSE transport belong to `@civaapple/qi-node`.
 
+Redacted model text and reasoning may also pass through the bounded process-local `RuntimeActivity` channel for
+live presentation. Terminal text and reasoning are committed once in `model.completed`; reasoning is
+explanatory model output, not completion evidence.
+
 Formal Plans, Work Plans, and Questions are separate state machines. A Formal Plan is immutable reviewed
 Markdown; acceptance starts one whole-plan Agent Run. `update_plan` snapshots are optional implementation Todo
 navigation and never completion evidence. `run.question.*` can suspend and resume a read/control Action inside

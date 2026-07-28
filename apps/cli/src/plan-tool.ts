@@ -8,30 +8,52 @@ import { Type, type Static } from "@sinclair/typebox";
 
 const MAX_PLAN_BYTES = 64 * 1024;
 const MAX_READ_LINES = 400;
-const PlanIdSchema = Type.String({ pattern: "^pln_[A-Za-z0-9][A-Za-z0-9_-]{2,127}$" });
+const PLAN_ID_PATTERN = "^pln_[A-Za-z0-9][A-Za-z0-9_-]{2,127}$";
+const PLAN_DOCUMENT_OPERATIONS = ["create", "read", "edit"] as const;
+const PlanDocumentOperationSchema = Type.String({
+  enum: [...PLAN_DOCUMENT_OPERATIONS],
+  description: "create, read, or edit the managed Formal Plan",
+});
 
-const PlanDocumentInputSchema = Type.Union([
-  Type.Object({
-    operation: Type.Literal("create"),
-    markdown: Type.String({ minLength: 1, maxLength: MAX_PLAN_BYTES }),
-  }, { additionalProperties: false }),
-  Type.Object({
-    operation: Type.Literal("read"),
-    planId: Type.Optional(PlanIdSchema),
-    revision: Type.Optional(Type.Integer({ minimum: 1 })),
-    startLine: Type.Optional(Type.Integer({ minimum: 1 })),
-    endLine: Type.Optional(Type.Integer({ minimum: 1 })),
-  }, { additionalProperties: false }),
-  Type.Object({
-    operation: Type.Literal("edit"),
-    planId: PlanIdSchema,
-    expectedSha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
-    edits: Type.Array(Type.Object({
-      oldText: Type.String({ minLength: 1, maxLength: MAX_PLAN_BYTES }),
-      newText: Type.String({ maxLength: MAX_PLAN_BYTES }),
-    }, { additionalProperties: false }), { minItems: 1, maxItems: 16 }),
-  }, { additionalProperties: false }),
-]);
+// Keep the model-facing root a plain object. Moonshot/Kimi reject root `anyOf`
+// function parameters even when the schema also declares `type: "object"`.
+// Operation-specific requirements are enforced deterministically in execute.
+const PlanDocumentInputSchema = Type.Object({
+  operation: PlanDocumentOperationSchema,
+  markdown: Type.Optional(Type.String({
+    minLength: 1,
+    maxLength: MAX_PLAN_BYTES,
+    description: "create only: the complete self-contained Formal Plan Markdown",
+  })),
+  planId: Type.Optional(Type.String({
+    pattern: PLAN_ID_PATTERN,
+    description: "read/edit only; omit for create because Qi assigns the new Plan ID",
+  })),
+  revision: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "read only: immutable revision number; omit for latest",
+  })),
+  startLine: Type.Optional(Type.Integer({ minimum: 1, description: "read only: first line, 1-based" })),
+  endLine: Type.Optional(Type.Integer({ minimum: 1, description: "read only: last line, inclusive" })),
+  expectedSha256: Type.Optional(Type.String({
+    pattern: "^[a-f0-9]{64}$",
+    description: "edit only: SHA-256 returned by the latest read/create/edit",
+  })),
+  edits: Type.Optional(Type.Array(Type.Object({
+    oldText: Type.String({ minLength: 1, maxLength: MAX_PLAN_BYTES }),
+    newText: Type.String({ maxLength: MAX_PLAN_BYTES }),
+  }, { additionalProperties: false }), {
+    minItems: 1,
+    maxItems: 16,
+    description: "edit only: 1–16 unique oldText/newText atomic patches",
+  })),
+}, {
+  additionalProperties: false,
+  description:
+    "Exact fields by operation: create={operation,markdown}; " +
+    "read={operation,planId?,revision?,startLine?,endLine?}; " +
+    "edit={operation,planId,expectedSha256,edits}. Never mix fields between operations.",
+});
 
 type PlanDocumentInput = Static<typeof PlanDocumentInputSchema>;
 
@@ -45,12 +67,13 @@ export interface PlanToolDeps {
 export function createPlanDocumentTool(deps: PlanToolDeps) {
   return defineTool({
     description:
-      "Create, read, or atomically edit the managed Formal Plan Markdown. Create requires a complete, " +
-      "self-contained document. Edit requires the latest SHA-256 and up to 16 unique oldText/newText patches. " +
+      "Create, read, or atomically edit the managed Formal Plan Markdown. Create accepts only operation and " +
+      "markdown; Qi generates the Plan ID, so never send planId with create. Edit requires planId, the latest " +
+      "SHA-256, and up to 16 unique oldText/newText patches. " +
       "Formal Plans are design documents, not Todo lists, so task-list checkboxes are rejected.",
     input: PlanDocumentInputSchema,
     output: Type.Object({
-      operation: Type.Union([Type.Literal("create"), Type.Literal("read"), Type.Literal("edit")]),
+      operation: PlanDocumentOperationSchema,
       planId: Type.String(),
       revision: Type.Integer({ minimum: 1 }),
       sha256: Type.String(),
@@ -68,6 +91,7 @@ export function createPlanDocumentTool(deps: PlanToolDeps) {
       `plan:document:${"planId" in input && input.planId ? input.planId : "current"}`,
     ],
     execute: async (input: PlanDocumentInput, context) => {
+      assertPlanDocumentOperationInput(input);
       const sessionId = context.sessionId as SessionId;
       if (input.operation === "read") {
         const view = deps.humanControl.view(sessionId);
@@ -106,7 +130,7 @@ export function createPlanDocumentTool(deps: PlanToolDeps) {
       let markdown: string;
       if (input.operation === "create") {
         planId = createId("pln") as PlanId;
-        markdown = input.markdown;
+        markdown = input.markdown!;
       } else {
         planId = input.planId as PlanId;
         const view = deps.humanControl.view(sessionId);
@@ -118,7 +142,7 @@ export function createPlanDocumentTool(deps: PlanToolDeps) {
         if (revision.sha256 !== input.expectedSha256) {
           throw new ToolFailure("PLAN_SHA_MISMATCH", "Formal Plan changed; read the latest revision before editing");
         }
-        markdown = applyAtomicEdits(revision.markdown, input.edits);
+        markdown = applyAtomicEdits(revision.markdown, input.edits!);
       }
 
       const metadata = validateFormalPlan(markdown);
@@ -164,6 +188,42 @@ export function createPlanDocumentTool(deps: PlanToolDeps) {
       }
     },
   });
+}
+
+function assertPlanDocumentOperationInput(input: PlanDocumentInput): void {
+  if (!(PLAN_DOCUMENT_OPERATIONS as readonly string[]).includes(input.operation)) {
+    throw new ToolFailure("PLAN_OPERATION_INVALID", `Unsupported operation: ${input.operation}`);
+  }
+  const has = (key: keyof PlanDocumentInput) => Object.prototype.hasOwnProperty.call(input, key);
+  const reject = (allowed: ReadonlySet<keyof PlanDocumentInput>) => {
+    const invalid = (Object.keys(input) as Array<keyof PlanDocumentInput>)
+      .filter((key) => !allowed.has(key));
+    if (invalid.length > 0) {
+      throw new ToolFailure(
+        "PLAN_OPERATION_FIELDS",
+        `${input.operation} does not accept: ${invalid.join(", ")}`,
+      );
+    }
+  };
+
+  if (input.operation === "create") {
+    reject(new Set(["operation", "markdown"]));
+    if (!has("markdown")) {
+      throw new ToolFailure("PLAN_CREATE_MARKDOWN_REQUIRED", "create requires markdown");
+    }
+    return;
+  }
+
+  if (input.operation === "read") {
+    reject(new Set(["operation", "planId", "revision", "startLine", "endLine"]));
+    return;
+  }
+
+  reject(new Set(["operation", "planId", "expectedSha256", "edits"]));
+  const missing = (["planId", "expectedSha256", "edits"] as const).filter((key) => !has(key));
+  if (missing.length > 0) {
+    throw new ToolFailure("PLAN_EDIT_FIELDS_REQUIRED", `edit requires: ${missing.join(", ")}`);
+  }
 }
 
 export function validateFormalPlan(markdown: string): { title: string; overview: string } {

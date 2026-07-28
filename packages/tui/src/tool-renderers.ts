@@ -297,18 +297,25 @@ function renderDelegate(model: ToolCardModel, options: ToolCardOptions): string[
 function renderPlanDocument(model: ToolCardModel, options: ToolCardOptions): string[] {
   const input = record(model.input);
   const output = model.output;
-  const title = String(output?.title ?? input?.title ?? "Formal Plan");
+  const title = String(output?.title ?? input?.title ?? formalPlanInputTitle(input) ?? "Formal Plan");
   const operation = typeof input?.operation === "string" ? input.operation : undefined;
   const items = Array.isArray(input?.items) ? input.items : [];
-  const result = output
+  const completed = model.status === "completed" && output !== undefined;
+  const result = completed
     ? [
         operation,
-        `rev ${String(output.revision)}`,
+        output.revision === undefined ? undefined : `rev ${String(output.revision)}`,
         output.itemCount === undefined ? undefined : `${String(output.itemCount)} items`,
       ].filter(Boolean).join(" · ")
-    : model.errorCode ?? (items.length > 0 ? `${items.length} items` : undefined);
+    : [
+        operation,
+        model.errorCode ?? (items.length > 0 ? `${items.length} items` : undefined),
+      ].filter(Boolean).join(" · ");
   if (options.summaryOnly) return [header(model, title, result)];
   const lines = [header(model, title, result)];
+  if (!completed && typeof output?.message === "string" && output.message.trim()) {
+    lines.push(`  ${oneLine(output.message, 110)}`);
+  }
   if (typeof input?.overview === "string" && input.overview.trim()) {
     lines.push(`  ${oneLine(input.overview, 110)}`);
   }
@@ -325,6 +332,13 @@ function renderPlanDocument(model: ToolCardModel, options: ToolCardOptions): str
   }
   if (typeof output?.path === "string") lines.push(`  ${output.path}`);
   return lines;
+}
+
+function formalPlanInputTitle(input: Record<string, unknown> | undefined): string | undefined {
+  if (typeof input?.markdown !== "string") return undefined;
+  const first = input.markdown.split(/\r?\n/).find((line) => line.trim());
+  const match = first?.match(/^#\s+(.+)$/);
+  return match?.[1]?.trim();
 }
 
 function renderWorkPlan(model: ToolCardModel, options: ToolCardOptions): string[] {

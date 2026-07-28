@@ -82,6 +82,7 @@ function turnRequest(root, artifactStore, overrides = {}) {
 test("TurnLoop completes a response-only Run with durable context and model boundaries", async () => {
   await withRuntime(async ({ root, artifactStore }) => {
     const store = new InMemoryEventStore();
+    const activities = [];
     const model = new ScriptedModelPort([
       [
         { type: "reasoning.delta", delta: "A short reason" },
@@ -94,6 +95,7 @@ test("TurnLoop completes a response-only Run with durable context and model boun
       eventStore: store,
       modelPort: model,
       toolRegistry: new ToolRegistry(new InMemoryCapabilityBroker()),
+      onActivity: (activity) => activities.push(activity),
     });
 
     const result = await loop.run(turnRequest(root, artifactStore));
@@ -115,6 +117,14 @@ test("TurnLoop completes a response-only Run with durable context and model boun
     assert.equal(step.context.includedBlockIds.includes("constitution"), true);
     assert.equal(step.context.includedBlockIds.includes("tool-catalog"), true);
     assert.equal(step.model.text, "A grounded answer");
+    assert.equal(step.model.reasoning, "A short reason");
+    assert.deepEqual(
+      activities.map((activity) => [activity.type, activity.text]),
+      [
+        ["model.reasoning", "A short reason"],
+        ["model.text", "A grounded answer"],
+      ],
+    );
   });
 });
 

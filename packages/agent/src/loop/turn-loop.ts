@@ -395,6 +395,14 @@ export class TurnLoop {
             text,
             provisional: true,
           }),
+          (text) => this.#onActivity?.({
+            type: "model.reasoning",
+            sessionId: request.sessionId,
+            runId,
+            stepId,
+            text,
+            provisional: true,
+          }),
         );
       } catch (error) {
         if (finalHandoffStep && !request.signal?.aborted) {
@@ -1281,6 +1289,7 @@ export class TurnLoop {
 async function aggregateModelEvents(
   events: AsyncIterable<ModelEvent>,
   onText?: (text: string) => void,
+  onReasoning?: (text: string) => void,
 ): Promise<AggregatedModelResult> {
   let text = "";
   let reasoning = "";
@@ -1296,6 +1305,7 @@ async function aggregateModelEvents(
         break;
       case "reasoning.delta":
         reasoning += event.delta;
+        onReasoning?.(redactSensitiveText(reasoning).value.slice(-16_000));
         break;
       case "action.requested":
         actions.push({ callId: event.callId, name: event.name, input: event.input });

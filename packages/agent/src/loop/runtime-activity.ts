@@ -10,6 +10,14 @@ export type RuntimeActivity =
       readonly provisional: true;
     }
   | {
+      readonly type: "model.reasoning";
+      readonly sessionId: SessionId;
+      readonly runId: RunId;
+      readonly stepId: StepId;
+      readonly text: string;
+      readonly provisional: true;
+    }
+  | {
       readonly type: "action.output";
       readonly sessionId: SessionId;
       readonly runId: RunId;

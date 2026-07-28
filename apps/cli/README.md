@@ -33,7 +33,10 @@ New Sessions default to `Agent`. A new Formal Plan is self-contained Markdown, n
 atomically enters Agent and starts one whole-plan implementation Run whose conversation history contains only
 the accepted document; Workspace instructions, permissions, and tools are still compiled normally. Complex
 implementation may use Agent-only `update_plan`; its snapshots appear in the timeline and do not prove
-completion. Legacy item plans keep their item-per-Run `/next` behavior.
+completion. The TUI displays up to 200 rendered lines of the accepted Formal Plan before the Executor timeline,
+without showing the machine `<accepted-plan>` envelope. Longer plans show a Collapsed notice and their immutable
+local file path instead of an expand control; shorter previews show the same path for direct opening. The
+Executor still receives the complete document. Legacy item plans keep their item-per-Run `/next` behavior.
 
 In a rich TTY, Plan mode advertises `ask_question`. Its blocking panel supports single choice (Enter), multiple
 choice (Space then Enter), custom/free text, Esc to persist a skipped question, and Ctrl+C to cancel the Run.
@@ -101,7 +104,9 @@ when Actions exist; settlement glyphs stay distinct (`✓` / `!` / `⊘` / `?` /
 `Edited path +N -M`, a `▎` gutter, nearby context, and no `---`/`+++`/`@@` chrome (`… truncated · Ctrl+O`).
 Composer keystrokes and the Running spinner refresh only the chrome strip; settled Runs reuse a chat fingerprint
 cache so long Sessions stay responsive. Streaming model/tool output remains visible as a bounded three-line
-Working-strip tail without invalidating the transcript. Active Runs also reuse settled-Step formatting caches, collapse prior
+Working-strip tail without invalidating the transcript; reasoning uses display-width wrapping so a provider's
+single long reasoning line still occupies up to three visible lines, then replays from committed
+`model.completed` as a distinct Thinking block. Active Runs also reuse settled-Step formatting caches, collapse prior
 Action cards to one-line summaries, and fold older Steps (`… N earlier steps · Ctrl+O`); chrome-only Session
 events skip transcript invalidate, while `authority.denied` repaints its visible `⊘` settlement.
 A fixed two-line statusline shows `model · context%` and the active mode (`Ask` / `Plan` / `Agent`) on the first

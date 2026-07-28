@@ -9,11 +9,21 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Changed
 
+- Executor timelines now render accepted Formal Plans as at most 200 terminal lines without paste
+  classification; every preview shows the immutable local path, and longer plans add a Collapsed notice while
+  Executor context remains complete. Live and committed model reasoning appears in three display-wrapped
+  Thinking lines.
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- Made the `plan_document` function parameters compatible with Moonshot/Kimi JSON Schema validation while
+  preserving strict per-operation field checks inside the Tool.
+- Fixed failed `plan_document` cards so ToolFailure envelopes show the operation, error code, and message instead
+  of a nonexistent `rev undefined`.
 
 ### Security
 

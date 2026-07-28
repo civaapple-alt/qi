@@ -60,10 +60,13 @@ before it can enter the Tool Registry.
 
 ## ADR-0005: keep provisional activity outside durable Session truth
 
-- Model text and Action output may stream through a bounded, redacted, process-local activity channel.
+- Model text, model reasoning, and Action output may stream through a bounded, redacted, process-local activity
+  channel.
 - Consumers may coalesce or drop intermediate activity.
 - Provisional activity is not completion evidence, Tool feedback, or replay state.
-- Terminal model text, Action settlement, failure meaning, and Artifact references enter the Session stream once.
+- Terminal model text and reasoning, Action settlement, failure meaning, and Artifact references enter the
+  Session stream once. A UI may render committed reasoning as a distinct Thinking block, but it remains
+  explanatory model output rather than evidence.
 
 After a crash, only committed events and Artifacts are reconstructed.
 
@@ -114,6 +117,8 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
   facts. An active-Run Question is linked to its Run/Step/Action and must settle before that Action or Run.
 - Accepting a Formal Plan atomically switches to Agent and starts exactly one implementation Run whose
   conversation history is the accepted document, not the planning discussion.
+- The Executor input envelope remains machine context. Human-facing TUI projection renders the bound Formal
+  Plan Markdown directly rather than presenting that generated envelope as a pasted user message.
 - Complex Agent work may create a separate Work Plan through `update_plan`. Work Plan status is navigation only,
   never completion evidence, and does not schedule Runs.
 - Pre-Formal-Plan item revisions retain their historical item-per-Run behavior: later items require a durable
@@ -166,9 +171,12 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 ## ADR-0017: bound TUI transcript work
 
 - Paints are classified by visible projection impact; provisional/chrome changes do not rebuild settled history.
-- Provisional output occupies one bounded live region.
+- Provisional output occupies one bounded live region; model reasoning uses a three-display-line tail there.
 - Settled Runs and Steps reuse width/state-keyed formatting caches.
 - Active Runs show a bounded recent-Step window; older Steps fold reversibly.
+- An accepted Formal Plan remains complete in Executor context, but its TUI projection renders at most 200
+  terminal lines and always names the immutable local document path. Longer plans also end with a Collapsed
+  notice; the transcript does not add a second expansion state for content that can be opened directly.
 - Presentation thresholds remain local UI policy, not Session-format semantics.
 - Denied and other distinct Action settlements remain immediately visible.
 

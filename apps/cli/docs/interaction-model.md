@@ -111,6 +111,10 @@ Session mode is durable (`ask` / `plan` / `agent`). Plan mode records managed Fo
 Accept settles review, switches to Agent, and starts one whole-plan Run
 ([ADR 0011](../../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)). The
 Executor receives the accepted document plus ID/revision/SHA but none of the planning conversation.
+The generated `<accepted-plan>` input remains machine context; the chat projection instead renders up to 200
+terminal lines of the bound Formal Plan Markdown without paste classification. Longer plans end with a
+Collapsed notice instead of `Ctrl+O`; every preview names the immutable local file path, and the Executor
+context still contains the complete document.
 Revision reads the latest document and uses SHA-checked `plan_document edit`; each edit creates an immutable
 revision and reopens review.
 
@@ -154,7 +158,10 @@ every column useful, the renderer switches to a per-row vertical field layout so
 
 Model deltas and process pipes may arrive before their durable terminal events. The TUI shows only a redacted,
 bounded, process-local tail labelled `live`; it never treats this provisional channel as settlement or evidence.
-Committed terminal output replaces the live interpretation. See [ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-activity-outside-durable-session-truth).
+Model reasoning uses the same boundary: the Working strip keeps three display-wrapped lines, and
+`model.completed.reasoning` replays as a distinct three-line Thinking block. Reasoning remains explanatory model
+output rather than completion evidence. Committed terminal output replaces the live interpretation. See
+[ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-activity-outside-durable-session-truth).
 
 ## Composer and background work
 
