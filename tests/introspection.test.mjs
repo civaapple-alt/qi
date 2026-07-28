@@ -16,7 +16,8 @@ import {
 import { SkillLoader } from "@civaapple/qi-node/skills";
 import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
-import { TurnLoop } from "@civaapple/qi-agent/loop";
+import { TurnLoop, HumanControlService, EventWriter } from "@civaapple/qi-agent/loop";
+import { createId } from "@civaapple/qi-protocol";
 import { FileArtifactStore, ToolRegistry, readTool } from "@civaapple/qi-node/tools";
 import { parse } from "yaml";
 
@@ -279,6 +280,163 @@ test("Session inspection returns bounded Run/Step projections and the model Tool
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+});
+
+test("Session inspection projects Formal Plan titles, reasoning, actionFacts, and tool summaries", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = createId("ses");
+  const control = new HumanControlService({ eventStore: store });
+  control.ensureSession(sessionId, "Inspect Formal Plan", "plan");
+  const planId = createId("pln");
+  const markdown = "# Inspect feature\n\nImplement the accepted design.\n\n## Steps\n\n1. Change protocol.\n2. Verify.";
+  control.recordPlanRevision(sessionId, {
+    planId,
+    format: "formal_markdown",
+    title: "Inspect feature",
+    overview: "Implement the accepted design.",
+    markdown,
+    artifactRef: `artifact://${"e".repeat(64)}`,
+    sha256: "e".repeat(64),
+    path: "/tmp/inspect-feature.md",
+  });
+  const accepted = control.acceptPlanAndStartFirstRun(sessionId);
+  const actor = { kind: "runtime", id: "test" };
+  const writer = new EventWriter(store, sessionId);
+  const runId = accepted.runId;
+  const stepId = "stp_inspect_01";
+  const planActionId = "act_inspect_todo";
+  const shellId = "act_inspect_sh01";
+  writer.append("run.started", { runId }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("model.completed", {
+    runId,
+    stepId,
+    requestId: "req_inspect_plan",
+    provider: "test",
+    model: "deterministic",
+    finishReason: "actions",
+    text: "Working the Formal Plan.",
+    reasoning: "Prefer update_plan then shell verify.\nKeep mutations explicit.",
+    actionCalls: [
+      { callId: "call_todo", name: "update_plan", input: { plan: [] } },
+      { callId: "call_shell", name: "shell", input: { command: "npm", args: ["test"] } },
+    ],
+  }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: planActionId,
+    toolName: "update_plan",
+    input: {
+      explanation: "Track work.",
+      plan: [
+        { workItemId: "wit_protocol", step: "Extend protocol", status: "completed" },
+        { workItemId: "wit_verify00", step: "Verify behavior", status: "in_progress" },
+      ],
+    },
+    resources: ["work-plan:current"],
+    effect: "write",
+  }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: shellId,
+    toolName: "shell",
+    input: { command: "npm", args: ["test"] },
+    resources: ["host-process:npm"],
+    effect: "execute",
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+  for (const actionId of [planActionId, shellId]) {
+    writer.append("authority.requested", { runId, stepId, actionId }, actor);
+    writer.append("authority.granted", { runId, stepId, actionId, leaseId: `lea_${actionId.slice(-8)}` }, actor);
+    writer.append("action.started", { runId, stepId, actionId }, actor);
+  }
+  writer.append("work.plan.updated", {
+    workPlanId: "wpl_inspect_01",
+    revision: 1,
+    runId,
+    stepId,
+    actionId: planActionId,
+    explanation: "Track work.",
+    items: [
+      { workItemId: "wit_protocol", step: "Extend protocol", status: "completed" },
+      { workItemId: "wit_verify00", step: "Verify behavior", status: "in_progress" },
+    ],
+  }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId: planActionId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        explanation: "Track work.",
+        plan: [
+          { workItemId: "wit_protocol", step: "Extend protocol", status: "completed" },
+          { workItemId: "wit_verify00", step: "Verify behavior", status: "in_progress" },
+        ],
+      }),
+    }],
+  }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId: shellId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        exitCode: 0,
+        stdout: "ok",
+        workspaceChange: { changed: true, diff: " M src/app.ts\n" },
+      }),
+    }],
+  }, actor);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, actor);
+
+  const runs = inspectQiSession(store, {
+    operation: "runs",
+    sessionId,
+    detail: "detail",
+  });
+  assert.equal(runs.session.currentWorkPlanId, "wpl_inspect_01");
+  assert.equal(runs.session.workPlan.itemCount, 2);
+  assert.equal(runs.session.workPlan.inProgressStep, "Verify behavior");
+  const run = runs.items[0];
+  assert.equal(run.displayTitle, "Accepted Plan · Inspect feature · rev 1");
+  assert.deepEqual(run.planBinding, { planId, revision: 1 });
+  assert.equal(run.formalPlan.title, "Inspect feature");
+  assert.equal(run.formalPlan.path, "/tmp/inspect-feature.md");
+  assert.deepEqual(run.actionFacts, { writeCompleted: 1, writeFailed: 0, readCompleted: 0 });
+
+  const step = inspectQiSession(store, {
+    operation: "last-step",
+    sessionId,
+    runId,
+    detail: "detail",
+  }).items[0];
+  assert.match(step.modelReasoning, /Prefer update_plan/);
+
+  const todo = inspectQiSession(store, {
+    operation: "action",
+    sessionId,
+    actionId: planActionId,
+    detail: "detail",
+  }).items[0];
+  assert.equal(todo.workPlanItems.length, 2);
+  assert.equal(todo.workPlanItems[1].status, "in_progress");
+
+  const shell = inspectQiSession(store, {
+    operation: "action",
+    sessionId,
+    actionId: shellId,
+    detail: "detail",
+  }).items[0];
+  assert.equal(shell.process.command, "npm test");
+  assert.equal(shell.process.exitCode, 0);
+  assert.equal(shell.process.workspaceChanged, true);
+  assert.equal(shell.diffKind, "git");
+  assert.match(shell.diff, /src\/app\.ts/);
 });
 
 test("the governed self-improvement Skill is loadable and has valid interface metadata", async () => {

@@ -1,7 +1,7 @@
 ---
 name: analyze-qi-session
-version: 1.2.0
-description: Analyze a Qi Session from a Session ID plus Workspace path, or from a local Qi Web URL containing `?session=ses_...`. Use when asked to review Run, Step, and Action behavior; explain failed, parked, denied, indeterminate, recovered, looping, context-pressure, tool-fallback, verification, or evidence problems; or propose concrete runtime and project fixes from durable Session evidence. Prefer this Skill's extractor over ad-hoc SQLite scripts.
+version: 1.3.0
+description: Analyze a Qi Session from a Session ID plus Workspace path, or from a local Qi Web URL containing `?session=ses_...`. Use when asked to review Run, Step, and Action behavior; explain failed, parked, denied, indeterminate, recovered, looping, context-pressure, tool-fallback, verification, Formal Plan / Work Plan, verbal mutation claims, or evidence problems; or propose concrete runtime and project fixes from durable Session evidence. Prefer this Skill's extractor over ad-hoc SQLite scripts.
 ---
 
 # Analyze a Qi Session
@@ -64,25 +64,38 @@ only after narrowing the entity. The legacy bounded full report is available onl
 Unknown IDs, mutually exclusive selectors, and Run/entity ownership mismatches fail with a diagnostic; they
 never fall back to full output.
 
+**Diagnostic fields to expect** (inspect queries and `--all`):
+
+- Run `displayTitle` / `planBinding` / `formalPlan` — Accepted Formal Plans use a short title; do not treat raw
+  `<accepted-plan>…</accepted-plan>` input as the user task label.
+- Run `actionFacts` (inspect) — `writeCompleted` / `writeFailed` / `readCompleted`, same counts as restored
+  history `<qi-run-facts>` footnotes.
+- Session / Run `workPlan` — Agent `update_plan` snapshot; Action detail may include `workPlanItems`.
+- Step `modelReasoning` — Thinking text; intent only, never proof of execution.
+- Action `gitWorkspaceChange` / `diffKind` / `process` — distinguish file-tool diffs from Git fingerprint changes
+  and process exit summaries.
+
 If execution or local-network authority is unavailable, state the missing capability and ask for the extractor
 JSON or exported event history. Do not infer a trace from a screenshot alone.
 
 ## Analyze in order
 
-1. Reconstruct each Run's user intent, terminal state, terminal reason, and whether completion was `response` or
-   evidence-backed `verified`.
+1. Reconstruct each Run's user intent from `displayTitle` / `formalPlan` when present (not the full accepted-plan
+   envelope), terminal state, terminal reason, and whether completion was `response` or evidence-backed `verified`.
 2. Follow Steps in sequence. Explain model response/action boundaries, context pressure, compaction, omitted blocks,
-   repeated strategies, and whether the Run made progress.
+   repeated strategies, and whether the Run made progress. Treat `modelReasoning` as intent, not settlement.
 3. Join every Action by `actionId`: proposal, authority request/decision, executor start, settlement, tool input,
-   result, error, diff, and recovery. Never interpret `step.completed · action-requested` as settled tool work.
-4. Separate four categories:
+   result, error, diff kind, and recovery. Never interpret `step.completed · action-requested` as settled tool work.
+4. Compare Work Plan Todo status with completed write/verify Actions and with `actionFacts` / `<qi-run-facts>`.
+   Verbal “已修复” without completed write Actions is the `CLAIMED_MUTATION_WITHOUT_ACTIONS` pattern.
+5. Separate four categories:
    - target-Workspace defects;
    - Qi runtime/tool/projection defects;
    - model strategy or tool-selection mistakes;
    - expected control behavior such as denial or honest parking.
-5. Inspect relevant Workspace source only after the trace identifies an owning component or target file. Use Git
+6. Inspect relevant Workspace source only after the trace identifies an owning component or target file. Use Git
    status/diff and tests as corroborating evidence; do not silently modify either Qi or the target project.
-6. Read [references/analysis-checklist.md](references/analysis-checklist.md) when classifying findings and writing
+7. Read [references/analysis-checklist.md](references/analysis-checklist.md) when classifying findings and writing
    recommendations.
 
 ## Evidence rules

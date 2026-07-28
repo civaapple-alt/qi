@@ -96,14 +96,7 @@ export function inspectQiSession(
   const view = source.load(sessionId);
   if (!view) throw new QiSessionInspectionError("SESSION_NOT_FOUND", `Session ${query.sessionId} was not found`);
   const stream = source.read(sessionId);
-  const session = {
-    sessionId,
-    title: view.title ?? sessionId,
-    mode: view.mode,
-    eventCount: stream.version,
-    runCount: view.runOrder.length,
-    activeRunId: [...view.runOrder].reverse().find((candidate) => view.runs[candidate]?.status === "active"),
-  };
+  const session = projectSessionHeader(view, sessionId, stream.version);
 
   if (query.operation === "runs") {
     const runs = view.runOrder.map((runId) => projectRun(view, stream.events, runId, detail, omissions));
@@ -249,7 +242,7 @@ export function createQiSessionInspectionTool(
 ) {
   return defineTool({
     description:
-      "Read a bounded projection of Sessions in the current Qi project. Start with runs, then inspect problems, the last Step, or one explicit Step/Action. This tool cannot accept a database path or read another project.",
+      "Read a bounded projection of Sessions in the current Qi project. Start with runs (displayTitle, Formal Plan binding, write/read Action facts), then inspect problems, the last Step (including modelReasoning), or one explicit Step/Action. Formal Plan, Work Plan, and reasoning fields are diagnostic only — not Evidence. This tool cannot accept a database path or read another project.",
     input: SessionInspectionInputSchema,
     output: Type.Unknown(),
     effect: () => "read",
@@ -276,6 +269,50 @@ function projectSessionSummary(summary: SessionSummary): Record<string, unknown>
   };
 }
 
+function projectSessionHeader(
+  view: SessionView,
+  sessionId: SessionId,
+  eventCount: number,
+): Record<string, unknown> {
+  const header: Record<string, unknown> = {
+    sessionId,
+    title: view.title ?? sessionId,
+    mode: view.mode,
+    eventCount,
+    runCount: view.runOrder.length,
+    activeRunId: [...view.runOrder].reverse().find((candidate) => view.runs[candidate]?.status === "active"),
+  };
+  if (view.currentWorkPlanId) {
+    header.currentWorkPlanId = view.currentWorkPlanId;
+    const snapshot = projectWorkPlanSnapshot(view, summaryTextLimit);
+    if (snapshot) header.workPlan = snapshot;
+  }
+  return header;
+}
+
+function projectWorkPlanSnapshot(
+  view: SessionView,
+  stepLimit: number,
+): Record<string, unknown> | undefined {
+  const workPlanId = view.currentWorkPlanId;
+  if (!workPlanId) return undefined;
+  const plan = view.workPlans[workPlanId];
+  if (!plan) return undefined;
+  const revision = plan.revisions[plan.latestRevision];
+  if (!revision) return undefined;
+  const completedCount = revision.items.filter((item) => item.status === "completed").length;
+  const active = revision.items.find((item) => item.status === "in_progress");
+  return {
+    workPlanId,
+    revision: revision.revision,
+    itemCount: revision.items.length,
+    completedCount,
+    ...(active
+      ? { inProgressStep: shorten(active.step, stepLimit) }
+      : {}),
+  };
+}
+
 function projectRun(
   view: SessionView,
   events: readonly SessionEvent[],
@@ -289,6 +326,7 @@ function projectRun(
   const problems = Object.values(run.actions).filter((action) =>
     ["failed", "denied", "cancelled", "indeterminate"].includes(action.status)
   ).length + run.stepOrder.filter((stepId) => run.steps[stepId]?.finishReason === "error").length;
+  const formalPlan = projectFormalPlanMeta(view, run.planBinding);
   const base: Record<string, unknown> = {
     kind: "run",
     runId,
@@ -297,19 +335,55 @@ function projectRun(
     trigger: run.trigger,
     mode: run.mode,
     status: run.status,
+    displayTitle: formalPlan
+      ? `Accepted Plan · ${formalPlan.title} · rev ${formalPlan.revision}`
+      : boundedText(run.input?.trim() || `${run.trigger} Run`, summaryTextLimit, omissions, "textCharacters"),
     stepCount: run.stepOrder.length,
     actionCount: Object.keys(run.actions).length,
     problemCount: problems,
+    actionFacts: countActionFacts(run),
     terminalReason: run.terminal?.reason,
     terminalDetail: boundedText(run.terminal?.detail, detailTextLimit, omissions, "textCharacters"),
   };
+  if (run.planBinding) base.planBinding = { ...run.planBinding };
   if (detail === "detail") {
     const stepIds = run.stepOrder.slice(-listLimit);
     omissions.steps += run.stepOrder.length - stepIds.length;
     base.stepIds = stepIds;
-    base.planBinding = run.planBinding;
+    if (formalPlan) base.formalPlan = formalPlan;
   }
   return base;
+}
+
+function projectFormalPlanMeta(
+  view: SessionView,
+  binding: SessionView["runs"][string]["planBinding"],
+): { planId: string; revision: number; title: string; path: string } | undefined {
+  if (!binding) return undefined;
+  const revision = view.plans[binding.planId]?.revisions[binding.revision];
+  if (!revision || revision.format !== "formal_markdown") return undefined;
+  return {
+    planId: binding.planId,
+    revision: binding.revision,
+    title: revision.title,
+    path: revision.path,
+  };
+}
+
+function countActionFacts(run: NonNullable<SessionView["runs"][string]>): {
+  writeCompleted: number;
+  writeFailed: number;
+  readCompleted: number;
+} {
+  let writeCompleted = 0;
+  let writeFailed = 0;
+  let readCompleted = 0;
+  for (const action of Object.values(run.actions)) {
+    if (action.effect === "write" && action.status === "completed") writeCompleted += 1;
+    else if (action.effect === "write" && action.status === "failed") writeFailed += 1;
+    else if (action.effect === "read" && action.status === "completed") readCompleted += 1;
+  }
+  return { writeCompleted, writeFailed, readCompleted };
 }
 
 function projectStep(
@@ -338,6 +412,7 @@ function projectStep(
     actionCount: actions.length,
     rejectedActionCount: rejected.length,
     modelText: boundedText(step.model?.text, textLimit, omissions, "textCharacters"),
+    modelReasoning: boundedText(step.model?.reasoning, textLimit, omissions, "textCharacters"),
   };
   if (detail === "detail") {
     const actionIds = actions.slice(0, listLimit).map((action) => action.actionId);
@@ -369,6 +444,9 @@ function projectAction(
   const terminalData = eventData(terminal);
   const resources = action.resources.slice(0, listLimit);
   omissions.listItems += action.resources.length - resources.length;
+  const parsed = parseModelOutput(terminalData?.modelOutput);
+  const proposed = matching.find((event) => event.type === "action.proposed");
+  const proposedInput = eventData(proposed)?.input;
   const base: Record<string, unknown> = {
     kind: "action",
     runId,
@@ -387,8 +465,141 @@ function projectAction(
     const result = terminalData?.modelOutput ?? terminalData?.outputRef ?? terminalData?.reason;
     base.result = boundedJson(result, resultTextLimit, omissions);
     if (action.freshnessRebase) base.freshnessRebase = { ...action.freshnessRebase };
+    enrichActionDetail(base, action.toolName, proposedInput, parsed, omissions);
   }
   return base;
+}
+
+function enrichActionDetail(
+  base: Record<string, unknown>,
+  toolName: string,
+  input: unknown,
+  result: unknown,
+  omissions: QiSessionInspectionOmissions,
+): void {
+  if (toolName === "update_plan") {
+    const items = extractWorkPlanItems(result) ?? extractWorkPlanItems(input);
+    if (items) {
+      const selected = items.slice(0, listLimit);
+      omissions.listItems += items.length - selected.length;
+      base.workPlanItems = selected;
+    }
+  }
+  if (toolName === "shell" || toolName === "script" || toolName === "verify") {
+    base.process = extractProcessSummary(toolName, input, result);
+  }
+  const diffFields = extractDiffFields(result);
+  if (diffFields.diffKind) {
+    base.diffKind = diffFields.diffKind;
+    base.diff = boundedText(diffFields.diff, resultTextLimit, omissions, "resultCharacters");
+    if (diffFields.diffTruncated) base.diffTruncated = true;
+  }
+}
+
+function extractWorkPlanItems(source: unknown): Array<{ workItemId?: string; step: string; status: string }> | undefined {
+  const value = record(source);
+  const plan = Array.isArray(value?.plan) ? value.plan : undefined;
+  if (!plan) return undefined;
+  const items = plan
+    .map(record)
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => ({
+      ...(typeof item.workItemId === "string" ? { workItemId: item.workItemId } : {}),
+      step: typeof item.step === "string" ? item.step : "",
+      status: typeof item.status === "string" ? item.status : "pending",
+    }))
+    .filter((item) => item.step.length > 0);
+  return items.length > 0 ? items : undefined;
+}
+
+function extractProcessSummary(
+  toolName: string,
+  input: unknown,
+  result: unknown,
+): Record<string, unknown> {
+  const inputRecord = record(input);
+  const payload = processPayload(result);
+  const workspaceChange = record(payload?.workspaceChange);
+  let command: string | undefined;
+  if (toolName === "verify") {
+    command = `verify ${typeof inputRecord?.profile === "string" ? inputRecord.profile : "?"}`;
+  } else if (toolName === "script") {
+    command = `${typeof inputRecord?.profile === "string" ? inputRecord.profile : "?"} script`;
+  } else {
+    const args = Array.isArray(inputRecord?.args) ? inputRecord.args.map(String) : [];
+    command = [typeof inputRecord?.command === "string" ? inputRecord.command : undefined, ...args]
+      .filter(Boolean)
+      .join(" ") || undefined;
+  }
+  return {
+    ...(command === undefined ? {} : { command }),
+    ...(typeof payload?.exitCode === "number" ? { exitCode: payload.exitCode } : {}),
+    workspaceChanged: workspaceChange?.changed === true,
+  };
+}
+
+function extractDiffFields(result: unknown): {
+  diffKind: "file" | "git" | undefined;
+  diff: string | undefined;
+  diffTruncated: boolean;
+} {
+  const value = record(result);
+  const details = record(value?.details);
+  const workspaceChange = record(value?.workspaceChange) ?? record(details?.workspaceChange);
+  const fileDiff = typeof value?.diff === "string" ? value.diff : undefined;
+  const gitDiff = typeof workspaceChange?.diff === "string" ? workspaceChange.diff : undefined;
+  if (fileDiff) {
+    return {
+      diffKind: "file",
+      diff: fileDiff,
+      diffTruncated: value?.diffTruncated === true,
+    };
+  }
+  if (gitDiff || workspaceChange?.changed === true) {
+    return {
+      diffKind: "git",
+      diff: gitDiff,
+      diffTruncated: workspaceChange?.diffTruncated === true,
+    };
+  }
+  return { diffKind: undefined, diff: undefined, diffTruncated: false };
+}
+
+function parseModelOutput(parts: unknown): unknown {
+  if (!Array.isArray(parts)) return undefined;
+  for (const part of parts) {
+    const item = record(part);
+    if (item?.type !== "text" || typeof item.text !== "string") continue;
+    try {
+      return JSON.parse(item.text) as unknown;
+    } catch {
+      return item.text;
+    }
+  }
+  return undefined;
+}
+
+function processPayload(output: unknown): Record<string, unknown> | undefined {
+  const value = record(output);
+  if (!value) return undefined;
+  const details = record(value.details);
+  if (
+    details
+    && ["exitCode", "timedOut", "stdout", "stderr", "workspaceChange"].some((key) => key in details)
+  ) {
+    return details;
+  }
+  return value;
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function shorten(value: string, maximum: number): string {
+  return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
 }
 
 function resolveRun(view: SessionView, requested: string | "last" | undefined) {

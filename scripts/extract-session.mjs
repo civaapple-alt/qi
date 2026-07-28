@@ -392,6 +392,29 @@ function createReport(bundle, workspace) {
       runId: run.runId,
       trigger: run.trigger,
       input: boundString(run.input, 4_000),
+      displayTitle: run.displayTitle,
+      formalPlan: run.formalPlan
+        ? {
+            planId: run.formalPlan.planId,
+            revision: run.formalPlan.revision,
+            title: run.formalPlan.title,
+            path: run.formalPlan.path,
+            previewCollapsed: run.formalPlan.previewCollapsed,
+            markdownPreview: boundString(run.formalPlan.markdownPreview, 8_000),
+          }
+        : undefined,
+      workPlan: run.workPlan
+        ? {
+            workPlanId: run.workPlan.workPlanId,
+            revision: run.workPlan.revision,
+            explanation: boundString(run.workPlan.explanation, 1_000),
+            items: (run.workPlan.items ?? []).slice(0, 32).map((item) => ({
+              workItemId: item.workItemId,
+              step: boundString(item.step, 500),
+              status: item.status,
+            })),
+          }
+        : undefined,
       status: run.status,
       displayStatus: run.displayStatus,
       terminalReason: run.terminalReason,
@@ -413,6 +436,7 @@ function createReport(bundle, workspace) {
         provider: step.provider,
         model: step.model,
         modelText: boundString(step.modelText, 4_000),
+        modelReasoning: boundString(step.modelReasoning, 4_000),
         context: step.context,
         rejectedCalls: step.rejectedCalls,
         actions: step.actions.map((action) => ({
@@ -428,6 +452,40 @@ function createReport(bundle, workspace) {
           resultSummary: action.resultSummary,
           diff: boundString(action.diff, 12_000),
           diffTruncated: action.diffTruncated,
+          gitWorkspaceChange: action.gitWorkspaceChange,
+          workPlanItems: action.workPlanItems
+            ? action.workPlanItems.slice(0, 32).map((item) => ({
+                workItemId: item.workItemId,
+                step: boundString(item.step, 500),
+                status: item.status,
+              }))
+            : undefined,
+          workPlanExplanation: boundString(action.workPlanExplanation, 1_000),
+          askQuestions: action.askQuestions
+            ? action.askQuestions.slice(0, 16).map((question) => ({
+                id: question.id,
+                header: boundString(question.header, 200),
+                prompt: boundString(question.prompt, 1_000),
+                selection: question.selection,
+                options: (question.options ?? []).slice(0, 16).map((option) => ({
+                  id: option.id,
+                  label: boundString(option.label, 200),
+                })),
+                selectedOptionIds: question.selectedOptionIds,
+                text: boundString(question.text, 1_000),
+                skipped: question.skipped,
+              }))
+            : undefined,
+          process: action.process
+            ? {
+                command: boundString(action.process.command, 500),
+                exitCode: action.process.exitCode,
+                timedOut: action.process.timedOut,
+                stdout: boundString(action.process.stdout, 4_000),
+                stderr: boundString(action.process.stderr, 4_000),
+                workspaceChanged: action.process.workspaceChanged,
+              }
+            : undefined,
           durationMs: action.durationMs,
           recovered: action.recovered,
           milestones: action.milestones,
@@ -537,7 +595,7 @@ export function claimsVerbalWorkspaceMutation(text) {
   );
 }
 
-export { detectSignals };
+export { detectSignals, createReport };
 
 function actionEvidence(run, action) {
   return {

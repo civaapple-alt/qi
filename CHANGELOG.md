@@ -12,6 +12,13 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Changed
 
+- `qi_session_inspect` / `inspectQiSession` and extract-session `--all` now surface Formal Plan short titles and
+  bindings, Work Plan snapshots, bounded `modelReasoning`, write/read `actionFacts`, and file-vs-Git diff / process
+  summaries; `analyze-qi-session` Skill 1.3.0 documents those diagnostic fields.
+- Web Run Narrative now projects committed model reasoning as a Thinking block, shortens Accepted Formal Plan
+  titles via `planBinding` metadata (with a bounded Formal Plan preview), and renders specialized cards for
+  Work Plan todos, AskQuestion, process output tails, and file-mutation diffs instead of a generic Workspace
+  diff fold for every Action.
 - TUI `update_plan` Work Plan cards now keep a full ✔/◐/○ Todo list in the chat stream (including mid-Run
   collapsed Steps), with a `Working on N to-dos · M/N done` header instead of a one-line summary.
 - Collapsed or mid-Run `shell`/`script`/`verify` cards now show up to three trailing output lines instead of one.

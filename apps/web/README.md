@@ -37,16 +37,22 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
 - `GET /api/projects` lists directories under the projects root that contain `qi.sqlite`.
 - `GET /api/sessions?project=<slug>` (projects mode) and `GET /api/session/:id/workbench?project=<slug>` open one
   project database; Sessions are ordered by latest event time.
-- Run labels use recorded user input; selecting one updates the URL and moves the center view to that Run.
+- Run labels prefer a short `displayTitle` (Accepted Formal Plans use `Accepted Plan · {title} · rev {n}`);
+  raw `run.input` remains available and is not used as the sidebar or narrative title when a Formal Plan binding exists.
 - A Step whose model requested Actions is not presented as fully complete until those Actions settle.
 - Action lifecycle labels are derived by joining events on `actionId`; later events never invent missing authority
   or tool identity.
+- Committed `step.model.reasoning` projects as a collapsible Thinking block (default ~3 lines). It is narrative-only
+  and is not Evidence.
+- `update_plan`, `ask_question`, process tools (`shell`/`script`/`verify`), and file mutations (`edit`/`write`/
+  `move`/`remove`) use specialized narrative cards; generic JSON Tool result remains available under a details fold.
+- Action results, file diffs, and Git workspace-change diffs are diagnostics. They are not called Evidence Ledger
+  records unless `evidence.recorded` exists.
 - ProcessTasks are rendered from the Session's durable task projection independently of Run narrative folding;
   running servers and watchers therefore remain visible after their originating Run completes.
-- Action results and Workspace diffs are diagnostics. They are not called Evidence Ledger records unless
-  `evidence.recorded` exists.
-- Missing Goal, control receipt, evidence, or accepted memory is an explicit, explanatory empty state. The Web
-  surface never fabricates those contracts from conversational behavior.
+- Missing Goal, control receipt, evidence, or accepted memory is an explicit, explanatory empty state. When a
+  Formal Plan or Work Plan is bound, the Contract pane surfaces that binding instead of leading with “No formal
+  Goal”. The Web surface never fabricates those contracts from conversational behavior.
 
 The raw history and committed SSE endpoints remain available for consumers that need protocol events directly.
 

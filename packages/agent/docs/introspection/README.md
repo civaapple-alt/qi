@@ -46,6 +46,16 @@ matching read lease for `qi:self-model:<section>`.
 problems, the last Step, or one Step/Action. Summary and detail projections retain IDs, event sequence bounds,
 status, error codes, and any durable edit freshness rebase while bounding text, results, and lists and reporting
 every omission.
+
+Diagnostic fields (not Evidence):
+
+- Run `displayTitle`, light `planBinding`, detail `formalPlan` (`title` / `revision` / `path`), and
+  `actionFacts` (`writeCompleted` / `writeFailed` / `readCompleted`, same counts as `<qi-run-facts>`).
+- Session header `currentWorkPlanId` and compact `workPlan` snapshot when present.
+- Step `modelReasoning` beside `modelText`.
+- Action detail summaries for `update_plan` (`workPlanItems`), process tools (`process`), and
+  `diffKind` (`file` | `git`) with a bounded `diff` preview.
+
 `createQiSessionInspectionTool(source, currentSessionId)` exposes the same semantics as `qi_session_inspect`.
 The CLI injects only its current project EventStore; callers cannot supply a database path or cross-project root.
 

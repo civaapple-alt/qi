@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { QiWebServer, projectWebSession } from "@civaapple/qi-web";
 import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
-import { EventWriter } from "@civaapple/qi-agent/loop";
+import { EventWriter, HumanControlService } from "@civaapple/qi-agent/loop";
 import { SessionEventHub } from "@civaapple/qi-node/stream";
+import { createId } from "@civaapple/qi-protocol";
 
 test("Web workbench serves real Session projections, history and committed live events without demo data", async () => {
   const store = new InMemoryEventStore();
@@ -27,6 +28,11 @@ test("Web workbench serves real Session projections, history and committed live 
     assert.match(application, /\/api\/meta/);
     assert.match(application, /withProject/);
     assert.match(application, /formatClock/);
+    assert.match(application, /function renderThinking/);
+    assert.match(application, /File change ·/);
+    assert.match(application, /Working on /);
+    assert.match(application, /Git workspace change/);
+    assert.match(application, /run\.displayTitle/);
     assert.doesNotMatch(application, /narrative\.runs\.slice\(\)\.reverse\(\)/);
 
     const meta = await fetch(`${address.url}/api/meta`).then((response) => response.json());
@@ -104,6 +110,7 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
     model: "deterministic",
     finishReason: "actions",
     text: "I will update the implementation.",
+    reasoning: "Need to fix the total helper.\nPrefer an edit over a rewrite.\nKeep the public API stable.",
     actionCalls: [{ callId: "call_web_narrative", name: "edit", input: { path: "src/total.ts" } }],
   }, actor);
   writer.append("action.proposed", {
@@ -139,6 +146,7 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
   const narrative = projectWebSession(view, store.read(sessionId).events);
   const run = narrative.runs[0];
   assert.equal(run.input, "Fix the total calculation");
+  assert.equal(run.displayTitle, "Fix the total calculation");
   assert.equal(run.displayStatus, "responded");
   assert.ok(run.startedAt);
   assert.match(run.startedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -149,15 +157,202 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
   assert.equal(step.status, "settled");
   assert.equal(step.finishReason, "action-requested");
   assert.equal(step.context.estimatedTokens, 320);
+  assert.match(step.modelReasoning, /Prefer an edit over a rewrite/);
   const action = step.actions[0];
   assert.equal(action.toolName, "edit");
   assert.equal(action.target, "src/total.ts");
   assert.equal(action.resultSummary, "1 replacement(s)");
   assert.match(action.diff, /\+return total/);
+  assert.equal(action.gitWorkspaceChange, false);
   assert.ok(action.milestones.proposed < action.milestones.started);
   assert.ok(action.milestones.started < action.milestones.terminal);
   assert.deepEqual(view.evidence, {});
   assert.deepEqual(view.memories, {});
+});
+
+test("Web narrative shortens Accepted Plan titles and projects Thinking, Work Plan, and tool cards", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = createId("ses");
+  const control = new HumanControlService({ eventStore: store });
+  control.ensureSession(sessionId, "Formal narrative", "plan");
+  const planId = createId("pln");
+  const markdown = [
+    "# Feature plan",
+    "",
+    "Implement the accepted design.",
+    "",
+    ...Array.from({ length: 210 }, (_, index) => `${index + 1}. Bounded step ${index + 1}.`),
+  ].join("\n");
+  control.recordPlanRevision(sessionId, {
+    planId,
+    format: "formal_markdown",
+    title: "Feature plan",
+    overview: "Implement the accepted design.",
+    markdown,
+    artifactRef: `artifact://${"d".repeat(64)}`,
+    sha256: "d".repeat(64),
+    path: "/tmp/feature-plan.md",
+  });
+  const accepted = control.acceptPlanAndStartFirstRun(sessionId);
+  assert.match(accepted.input, /<accepted-plan/);
+
+  const actor = { kind: "runtime", id: "test" };
+  const writer = new EventWriter(store, sessionId);
+  const runId = accepted.runId;
+  const stepId = "stp_web_plan01";
+  const editId = "act_web_edit01";
+  const planActionId = "act_web_todo01";
+  const shellId = "act_web_shell1";
+  writer.append("run.started", { runId }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("model.completed", {
+    runId,
+    stepId,
+    requestId: "req_web_plan",
+    provider: "test",
+    model: "deterministic",
+    finishReason: "actions",
+    text: "Executing the Formal Plan.",
+    reasoning: "line one\nline two\nline three\nline four",
+    actionCalls: [
+      { callId: "call_todo", name: "update_plan", input: { plan: [] } },
+      { callId: "call_edit", name: "edit", input: { path: "src/app.ts" } },
+      { callId: "call_shell", name: "shell", input: { command: "npm", args: ["test"] } },
+    ],
+  }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: planActionId,
+    toolName: "update_plan",
+    input: {
+      explanation: "Track the accepted plan.",
+      plan: [
+        { workItemId: "wit_protocol", step: "Extend protocol", status: "completed" },
+        { workItemId: "wit_runtime0", step: "Wire runtime", status: "in_progress" },
+        { workItemId: "wit_verify00", step: "Verify behavior", status: "pending" },
+      ],
+    },
+    resources: ["work-plan:current"],
+    effect: "write",
+  }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: editId,
+    toolName: "edit",
+    input: { path: "src/app.ts", oldText: "a", newText: "b" },
+    resources: ["workspace:src/app.ts"],
+    effect: "write",
+  }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: shellId,
+    toolName: "shell",
+    input: { command: "npm", args: ["test"] },
+    resources: ["host-process:npm"],
+    effect: "execute",
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+
+  for (const actionId of [planActionId, editId, shellId]) {
+    writer.append("authority.requested", { runId, stepId, actionId }, actor);
+    writer.append("authority.granted", { runId, stepId, actionId, leaseId: `lea_${actionId.slice(-8)}` }, actor);
+    writer.append("action.started", { runId, stepId, actionId }, actor);
+  }
+
+  writer.append("work.plan.updated", {
+    workPlanId: "wpl_web_plan01",
+    revision: 1,
+    runId,
+    stepId,
+    actionId: planActionId,
+    explanation: "Track the accepted plan.",
+    items: [
+      { workItemId: "wit_protocol", step: "Extend protocol", status: "completed" },
+      { workItemId: "wit_runtime0", step: "Wire runtime", status: "in_progress" },
+      { workItemId: "wit_verify00", step: "Verify behavior", status: "pending" },
+    ],
+  }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId: planActionId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        explanation: "Track the accepted plan.",
+        plan: [
+          { workItemId: "wit_protocol", step: "Extend protocol", status: "completed" },
+          { workItemId: "wit_runtime0", step: "Wire runtime", status: "in_progress" },
+          { workItemId: "wit_verify00", step: "Verify behavior", status: "pending" },
+        ],
+      }),
+    }],
+  }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId: editId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        path: "src/app.ts",
+        replacements: 1,
+        diff: "--- a/src/app.ts\n+++ b/src/app.ts\n@@\n-a\n+b",
+      }),
+    }],
+  }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId: shellId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        exitCode: 0,
+        stdout: "setup\ncompile\nok",
+        stderr: "",
+        workspaceChange: {
+          changed: true,
+          diff: " M src/app.ts\n",
+        },
+      }),
+    }],
+  }, actor);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, actor);
+
+  const view = store.load(sessionId);
+  assert.ok(view);
+  const narrative = projectWebSession(view, store.read(sessionId).events);
+  const run = narrative.runs[0];
+  assert.equal(run.displayTitle, "Accepted Plan · Feature plan · rev 1");
+  assert.notEqual(run.displayTitle, run.input);
+  assert.ok(run.formalPlan);
+  assert.equal(run.formalPlan.title, "Feature plan");
+  assert.equal(run.formalPlan.path, "/tmp/feature-plan.md");
+  assert.equal(run.formalPlan.previewCollapsed, true);
+  assert.match(run.formalPlan.markdownPreview, /1\. Bounded step 1/);
+  assert.doesNotMatch(run.formalPlan.markdownPreview, /210\. Bounded step 210/);
+  assert.ok(run.workPlan);
+  assert.equal(run.workPlan.items.length, 3);
+  assert.match(run.steps[0].modelReasoning, /line four/);
+
+  const [todo, edit, shell] = run.steps[0].actions;
+  assert.equal(todo.toolName, "update_plan");
+  assert.equal(todo.workPlanItems.length, 3);
+  assert.equal(todo.workPlanItems[1].status, "in_progress");
+  assert.equal(todo.workPlanExplanation, "Track the accepted plan.");
+  assert.equal(edit.toolName, "edit");
+  assert.match(edit.diff, /\+b/);
+  assert.equal(edit.gitWorkspaceChange, false);
+  assert.equal(shell.toolName, "shell");
+  assert.equal(shell.process.command, "npm test");
+  assert.equal(shell.process.exitCode, 0);
+  assert.equal(shell.process.workspaceChanged, true);
+  assert.equal(shell.gitWorkspaceChange, true);
+  assert.match(shell.diff, /src\/app\.ts/);
 });
 
 test("Web workbench renders durable ProcessTasks and subscribes to their lifecycle", async () => {

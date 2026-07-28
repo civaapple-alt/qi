@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   candidateSessionDatabases,
   claimsVerbalWorkspaceMutation,
+  createReport,
   detectSignals,
   parseArguments,
   resolveSessionDatabase,
   selectedOperation,
   workspaceProjectSlug,
 } from "../scripts/extract-session.mjs";
+
+const root = process.cwd();
 
 test("analyze-qi-session project identity is readable and collision-resistant", () => {
   assert.match(workspaceProjectSlug("D:\\lab-ws\\lab"), /^lab-[0-9a-f]{12}$/);
@@ -199,4 +202,86 @@ test("detectSignals flags verbal mutation claims without completed write Actions
   assert.ok(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_verbal"));
   assert.equal(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_honest"), false);
   assert.equal(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_real_write"), false);
+});
+
+test("analyze-qi-session skill and extract --all surface Formal Plan / reasoning diagnostics", async () => {
+  const skill = await readFile(join(root, ".qi", "skills", "analyze-qi-session", "SKILL.md"), "utf8");
+  assert.match(skill, /version:\s*1\.3\.0/);
+  assert.match(skill, /displayTitle/);
+  assert.match(skill, /modelReasoning/);
+  assert.match(skill, /actionFacts/);
+  const checklist = await readFile(
+    join(root, ".qi", "skills", "analyze-qi-session", "references", "analysis-checklist.md"),
+    "utf8",
+  );
+  assert.match(checklist, /Formal Plan vs Work Plan/);
+  assert.match(checklist, /Thinking is not Evidence/);
+  assert.match(checklist, /qi-run-facts/);
+
+  const report = createReport({
+    source: { kind: "test" },
+    view: {
+      sessionId: "ses_extract_fields",
+      title: "Extract fields",
+      version: 1,
+      presence: { state: "idle", reason: "test" },
+      goals: {},
+      evidence: {},
+      memories: {},
+    },
+    events: [],
+    narrative: {
+      sessionId: "ses_extract_fields",
+      runs: [{
+        runId: "run_extract_fields",
+        trigger: "user",
+        input: "<accepted-plan># Long plan</accepted-plan>",
+        displayTitle: "Accepted Plan · Long plan · rev 1",
+        formalPlan: {
+          planId: "pln_extract01",
+          revision: 1,
+          title: "Long plan",
+          path: "/tmp/long.md",
+          previewCollapsed: false,
+          markdownPreview: "# Long plan",
+        },
+        workPlan: {
+          workPlanId: "wpl_extract01",
+          revision: 1,
+          explanation: "Track",
+          items: [{ workItemId: "wit_extract01", step: "Do work", status: "in_progress" }],
+        },
+        status: "completed",
+        displayStatus: "responded",
+        terminalReason: "response",
+        summary: { stepCount: 1, actionCount: 1 },
+        steps: [{
+          stepId: "stp_extract01",
+          index: 1,
+          status: "settled",
+          finishReason: "response",
+          modelText: "Done.",
+          modelReasoning: "Keep mutations explicit.",
+          rejectedCalls: [],
+          actions: [{
+            actionId: "act_extract01",
+            toolName: "shell",
+            effect: "execute",
+            resources: [],
+            target: "npm test",
+            status: "completed",
+            gitWorkspaceChange: true,
+            process: { command: "npm test", exitCode: 0, workspaceChanged: true },
+            milestones: {},
+          }],
+        }],
+      }],
+    },
+  });
+  assert.equal(report.runs[0].displayTitle, "Accepted Plan · Long plan · rev 1");
+  assert.equal(report.runs[0].formalPlan.title, "Long plan");
+  assert.equal(report.runs[0].workPlan.items[0].status, "in_progress");
+  assert.equal(report.runs[0].steps[0].modelReasoning, "Keep mutations explicit.");
+  assert.equal(report.runs[0].steps[0].actions[0].gitWorkspaceChange, true);
+  assert.equal(report.runs[0].steps[0].actions[0].process.command, "npm test");
 });

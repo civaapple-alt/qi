@@ -13,21 +13,52 @@ Use this checklist after extracting the Session report. It is a review rubric, n
 
 | Layer | Inspect | Typical concern |
 | --- | --- | --- |
-| Run | input, status, terminal reason, completion kind | `responded` presented as verified; partial effects before failure |
-| Step | context budget, model finish reason, rejected calls, progress | repeated strategy; context pressure; action batch confusion |
-| Action | tool, effect, resource, authority, start, settlement | missing settlement; denial ignored; unsafe or imprecise fallback |
+| Run | `displayTitle`, Formal Plan binding, status, terminal reason, completion kind, `actionFacts` | raw accepted-plan input treated as the task; `responded` presented as verified; partial effects before failure |
+| Step | context budget, model finish reason, `modelReasoning`, rejected calls, progress | Thinking mistaken for evidence; repeated strategy; context pressure; action batch confusion |
+| Action | tool, effect, resource, authority, start, settlement, `diffKind` / Git workspace change | missing settlement; denial ignored; shell Git fingerprint confused with file-tool diff |
+| Work Plan | `update_plan` items vs write/verify Actions | Todo “completed” without durable mutation; provisional Work item ID loops |
 | Workspace | target, freshness, diff, Git state | whole-file rewrite; stale edit; mutation without useful diff |
 | Verification | declared profile or deterministic command, exit evidence | mutation completed without relevant validation |
 | Evidence | evaluation and Evidence Ledger linkage | tool success mislabeled as acceptance evidence |
 | Recovery | later Step/Action after a failure | recovery hidden; same failure repeated without strategy change |
+| History | restored `<qi-run-facts>` footnotes | footnotes are counts only — they do not replace the Action timeline |
 
 ## Common patterns
+
+### Formal Plan Run vs conversational Run
+
+Accepted Formal Plan Runs bind `planBinding` and surface as `Accepted Plan · {title} · rev {n}`. The durable Run
+`input` may still be the full `<accepted-plan>…</accepted-plan>` Markdown envelope — use `displayTitle` /
+`formalPlan` for the task label, and treat the envelope as Executor context, not as a short user message.
+
+### Formal Plan vs Work Plan
+
+A Formal Plan is the reviewed Markdown document (immutable path/revision). A Work Plan is the Agent-only
+`update_plan` Todo snapshot. Do not conflate Plan Review acceptance with Work Plan progress, and do not treat Todo
+status as proof that `edit`/`write` ran.
+
+### Thinking is not Evidence
+
+`modelReasoning` / Thinking blocks express intermediate intent. They do not settle Actions, mutate the Workspace,
+or enter the Evidence Ledger.
+
+### History footnotes are not a tool transcript
+
+Cross-Run restored assistant history may append `<qi-run-facts writeCompleted=… readCompleted=… terminal=… />`.
+Those counts match inspect `actionFacts` and are diagnostic only — open the Action timeline for settlement proof.
 
 ### Verbal mutation claim without write Actions
 
 Treat model narration of “已修复 / edit returned diff” as unproven until a completed write Action (or authorized
 shell mutation with before/after evidence) exists in the same Run. Extract reports may emit
 `CLAIMED_MUTATION_WITHOUT_ACTIONS` for this pattern; it is diagnostic and does not rewrite Run completion.
+
+### File diff vs Git workspace change
+
+`edit`/`write` diffs are precise file mutations. Some `shell`/`script`/`verify` results only record a Git
+before/after fingerprint (`gitWorkspaceChange` / `diffKind: "git"`). Do not treat an empty or absent file diff as
+proof that no Workspace change occurred when Git change is marked, and do not treat Git change as Evidence Ledger
+acceptance.
 
 ### Dedicated mutation failure followed by shell mutation
 
