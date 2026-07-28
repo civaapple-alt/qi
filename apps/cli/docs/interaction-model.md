@@ -114,14 +114,17 @@ Executor receives the accepted document plus ID/revision/SHA but none of the pla
 The generated `<accepted-plan>` input remains machine context; the chat projection instead renders up to 200
 terminal lines of the bound Formal Plan Markdown without paste classification. Longer plans end with a
 Collapsed notice instead of `Ctrl+O`; every preview names the immutable local file path, and the Executor
-context still contains the complete document.
+context still contains the complete document. The same preview is visible in the timeline before the Plan
+Review choices appear, so the user can inspect exactly what will be accepted.
 Revision reads the latest document and uses SHA-checked `plan_document edit`; each edit creates an immutable
 revision and reopens review.
 
 Rich TTY Plan Runs may block on `ask_question`. Its panel supports single/multiple/text/custom answers, Esc skip
-per question, and Ctrl+C Run cancellation; the answer resumes the same Action and Run. Non-TTY omits this tool,
-so the Planner emits a normal next-turn question list. Legacy item plans alone retain the Next Run panel and
-`/next`. `/work` and `/todo` are intentionally absent; Work Todo snapshots live in the conversation timeline.
+per question, and Ctrl+C Run cancellation; choice questions expose `Other…` unless `allowText: false` is
+explicitly supplied. The answer resumes the same Action and Run, and its committed timeline card keeps all
+questions/options visible with selected, custom-text, and skipped results. Non-TTY omits this tool, so the
+Planner emits a normal next-turn question list. Legacy item plans alone retain the Next Run panel and `/next`.
+`/work` and `/todo` are intentionally absent; Work Todo snapshots live in the conversation timeline.
 
 ## Tool rendering
 
@@ -142,7 +145,9 @@ every column useful, the renderer switches to a per-row vertical field layout so
 - `plan_document`: create/read/edit card for a complete Formal Plan; SHA-checked edits publish immutable
   `plans/<planId>/<sha256>.md` revisions. Durable truth remains under `/plan`.
 - `update_plan`: Codex-style Todo snapshot with stable Work item IDs and at most one `in_progress`. It is
-  implementation navigation, not completion evidence.
+  implementation navigation, not completion evidence. On create, Qi assigns the Work Plan and Work item IDs even
+  if the model supplied provisional item IDs; later calls use only IDs returned by a successful snapshot. Failed
+  cards retain the rejection code and actionable message.
 - Discovery Actions (read/list/search/…) each keep their own compact card in the transcript; they are not folded
   into an explore summary.
 - Delegate: parent timeline shows a Subagents progress block (`Running` / `Finished` per depth-1 delegation) with

@@ -31,6 +31,7 @@ import {
   TuiPresenter,
   TuiRuntime,
 } from "../apps/cli/dist/index.js";
+import { createAskQuestionTool } from "../apps/cli/dist/ask-question-tool.js";
 import { createPlanDocumentTool, validateFormalPlan } from "../apps/cli/dist/plan-tool.js";
 
 test("TUI command catalog separates inspection, navigation, and control", () => {
@@ -1720,6 +1721,222 @@ test("Action settlement glyphs stay distinct and plan_document has its own card"
   assert.doesNotMatch(failed, /rev undefined/);
 });
 
+test("completed ask_question cards retain every option and confirmed answer", () => {
+  const card = renderToolCard({
+    actionId: "act_questions",
+    toolName: "ask_question",
+    status: "completed",
+    input: {
+      questions: [
+        {
+          id: "style",
+          header: "Style",
+          prompt: "Choose the writing style",
+          selection: "single",
+          options: [
+            { id: "classic", label: "Classic", description: "Traditional narration" },
+            { id: "gulong", label: "Gu Long", description: "Concise and suspenseful" },
+          ],
+          allowText: true,
+        },
+        {
+          id: "themes",
+          header: "Themes",
+          prompt: "Choose one or more themes",
+          selection: "multiple",
+          options: [
+            { id: "mystery", label: "Mystery" },
+            { id: "honor", label: "Honor" },
+            { id: "romance", label: "Romance" },
+          ],
+          allowText: true,
+        },
+        {
+          id: "detail",
+          header: "Detail",
+          prompt: "Add a required detail",
+          selection: "text",
+          options: [],
+          allowText: true,
+        },
+      ],
+    },
+    output: {
+      answers: [
+        { questionId: "style", selectedOptionIds: ["gulong"], skipped: false },
+        {
+          questionId: "themes",
+          selectedOptionIds: ["mystery", "honor"],
+          text: "A colder ending",
+          skipped: false,
+        },
+        { questionId: "detail", selectedOptionIds: [], text: "Open on a rainy night", skipped: false },
+      ],
+    },
+  }, { expanded: true }).join("\n");
+
+  assert.match(card, /3 questions · 3 answered/);
+  assert.match(card, /Choose the writing style/);
+  assert.match(card, /○ Classic/);
+  assert.match(card, /● Gu Long/);
+  assert.match(card, /☑ Mystery/);
+  assert.match(card, /☑ Honor/);
+  assert.match(card, /☐ Romance/);
+  assert.match(card, /✓ Other: A colder ending/);
+  assert.match(card, /✓ Answer: Open on a rainy night/);
+
+  const skipped = renderToolCard({
+    actionId: "act_skipped_question",
+    toolName: "ask_question",
+    status: "completed",
+    input: {
+      questions: [{
+        id: "optional",
+        header: "Optional",
+        prompt: "Choose or skip",
+        selection: "single",
+        options: [{ id: "yes", label: "Yes" }],
+        allowText: true,
+      }],
+    },
+    output: {
+      answers: [{ questionId: "optional", selectedOptionIds: [], skipped: true }],
+    },
+  }).join("\n");
+  assert.match(skipped, /1 question · 0 answered · 1 skipped/);
+  assert.match(skipped, /○ Yes/);
+  assert.match(skipped, /↷ Skipped/);
+});
+
+test("confirmed ask_question cards stay expanded while a Plan Run continues", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "questions-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const actor = { kind: "runtime", id: "test" };
+  const input = {
+    questions: [{
+      id: "style",
+      header: "Style",
+      prompt: "Choose the style",
+      selection: "single",
+      options: [{ id: "classic", label: "Classic" }, { id: "gulong", label: "Gu Long" }],
+      allowText: true,
+    }],
+  };
+  const output = {
+    answers: [{ questionId: "style", selectedOptionIds: [], text: "More experimental", skipped: false }],
+  };
+  presenter.update([
+    {
+      type: "action.proposed",
+      sequence: 1,
+      occurredAt: new Date(0).toISOString(),
+      actor,
+      data: {
+        runId: "run_questions",
+        stepId: "stp_questions",
+        actionId: "act_questions",
+        toolName: "ask_question",
+        effect: "read",
+        input,
+        resources: ["run-question:user"],
+      },
+    },
+    {
+      type: "action.started",
+      sequence: 2,
+      occurredAt: new Date(0).toISOString(),
+      actor,
+      data: {
+        runId: "run_questions",
+        stepId: "stp_questions",
+        actionId: "act_questions",
+        leaseId: "lease_questions",
+      },
+    },
+    {
+      type: "action.completed",
+      sequence: 3,
+      occurredAt: new Date(0).toISOString(),
+      actor,
+      data: {
+        runId: "run_questions",
+        stepId: "stp_questions",
+        actionId: "act_questions",
+        modelOutput: [{ type: "text", text: JSON.stringify(output) }],
+      },
+    },
+  ], {
+    sessionId: "ses_questions",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "plan",
+    runOrder: ["run_questions"],
+    currentRunId: "run_questions",
+    runs: {
+      run_questions: {
+        runId: "run_questions",
+        trigger: "user",
+        mode: "plan",
+        status: "active",
+        input: "Plan the work",
+        stepOrder: ["stp_questions", "stp_continuing"],
+        steps: {
+          stp_questions: {
+            stepId: "stp_questions",
+            status: "completed",
+            model: { text: "I need one clarification.", finishReason: "actions" },
+          },
+          stp_continuing: {
+            stepId: "stp_continuing",
+            status: "running",
+          },
+        },
+        actions: {
+          act_questions: {
+            actionId: "act_questions",
+            stepId: "stp_questions",
+            toolName: "ask_question",
+            effect: "read",
+            status: "completed",
+            resources: ["run-question:user"],
+          },
+        },
+        evaluations: {},
+        steering: [],
+        delegations: {},
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "busy", reason: "running" },
+  });
+
+  const rendered = presenter.render(100).join("\n");
+  assert.match(rendered, /Choose the style/);
+  assert.match(rendered, /○ Classic/);
+  assert.match(rendered, /○ Gu Long/);
+  assert.match(rendered, /✓ Other: More experimental/);
+});
+
 test("pending Next Run handoff points at the choice panel, not composer digits", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",
@@ -1991,7 +2208,7 @@ test("parked budget handoff shows reason and continue guidance", () => {
   assert.equal(presenter.selectedRunFailureDetail(), "budget: Reached maxSteps=20");
 });
 
-test("pending Plan Review handoff stays compact for the interactive panel", () => {
+test("pending Formal Plan Review shows the complete bounded plan before its choices", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",
     dataRoot: "/tmp/ws/.qi",
@@ -2006,6 +2223,18 @@ test("pending Plan Review handoff stays compact for the interactive panel", () =
     maxActionsPerStep: 6,
   });
   const occurredAt = new Date(0).toISOString();
+  const reviewMarkdown = [
+    "# Demo Formal Plan",
+    "",
+    "The reviewer must see this complete document before deciding.",
+    "",
+    "## Implementation",
+    "",
+    "1. Inspect the current behavior.",
+    "2. Implement the reviewed change.",
+    "3. Verify the result.",
+  ].join("\n");
+  const reviewPath = "/tmp/plans/pln_1/review.md";
   presenter.update([], {
     sessionId: "ses_review",
     createdAt: occurredAt,
@@ -2059,15 +2288,14 @@ test("pending Plan Review handoff stays compact for the interactive panel", () =
         revisions: {
           1: {
             revision: 1,
-            title: "Demo",
-            overview: "Overview",
+            format: "formal_markdown",
+            title: "Demo Formal Plan",
+            overview: "The reviewer must see this complete document before deciding.",
             artifactRef: "artifact://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            path: "/tmp/plans/pln_1.md",
-            items: [
-              { planItemId: "pit_a", title: "One", description: "d1", dependsOn: [] },
-              { planItemId: "pit_b", title: "Two", description: "d2", dependsOn: [] },
-            ],
+            path: reviewPath,
+            markdown: reviewMarkdown,
+            items: [],
           },
         },
       },
@@ -2076,8 +2304,14 @@ test("pending Plan Review handoff stays compact for the interactive panel", () =
     presence: { state: "waiting", reason: "Awaiting Plan review" },
   });
   const rendered = presenter.render().join("\n");
+  assert.match(rendered, /Formal Plan for Review · Demo Formal Plan · rev 1/);
+  assert.match(rendered, /The reviewer must see this complete document before deciding/);
+  assert.match(rendered, /1\. Inspect the current behavior/);
+  assert.match(rendered, /3\. Verify the result/);
+  assert.match(rendered, new RegExp(reviewPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(rendered, /Plan Review pending/);
   assert.match(rendered, /开始实现/);
+  assert.ok(rendered.indexOf("Formal Plan for Review") < rendered.indexOf("Plan Review pending"));
   assert.doesNotMatch(rendered, /── Handoff ──/);
   // Todo stays out of the stream until 开始实现 starts a Plan-bound Run.
   assert.doesNotMatch(rendered, /^Todo\s+/m);
@@ -2537,6 +2771,56 @@ test("QuestionPanel answers multiple/text questions and persists Esc as skip", (
   ]);
 });
 
+test("ask_question enables custom input by default unless explicitly disabled", async () => {
+  let received;
+  const tool = createAskQuestionTool({
+    wait: async (_sessionId, _refs, questions) => {
+      received = questions;
+      return questions.map((question) => ({
+        questionId: question.id,
+        selectedOptionIds: question.selection === "text" ? [] : [question.options[0].id],
+        ...(question.selection === "text" ? { text: "custom detail" } : {}),
+        skipped: false,
+      }));
+    },
+  });
+
+  const result = await tool.execute({
+    questions: [
+      {
+        id: "default_choice",
+        header: "Default",
+        prompt: "Choose or customize",
+        selection: "single",
+        options: [{ id: "a", label: "A" }],
+      },
+      {
+        id: "closed_choice",
+        header: "Closed",
+        prompt: "Choose only",
+        selection: "multiple",
+        options: [{ id: "b", label: "B" }],
+        allowText: false,
+      },
+      {
+        id: "free_text",
+        header: "Detail",
+        prompt: "Describe it",
+        selection: "text",
+      },
+    ],
+  }, {
+    sessionId: "ses_question_defaults",
+    runId: "run_question_defaults",
+    stepId: "stp_question_defaults",
+    actionId: "act_question_defaults",
+    signal: new AbortController().signal,
+  });
+
+  assert.deepEqual(received.map((question) => question.allowText), [true, false, true]);
+  assert.equal(result.answers[2].text, "custom detail");
+});
+
 test("Agent update_plan records a stable Work Plan snapshot and renders it in the timeline", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-work-plan-"));
   const runtime = await TuiRuntime.create({
@@ -2551,9 +2835,9 @@ test("Agent update_plan records a stable Work Plan snapshot and renders it in th
           input: {
             explanation: "Track the cross-package change.",
             plan: [
-              { step: "Extend protocol", status: "completed" },
-              { step: "Wire runtime", status: "in_progress" },
-              { step: "Verify behavior", status: "pending" },
+              { workItemId: "wit_model_protocol", step: "Extend protocol", status: "completed" },
+              { workItemId: "wit_model_runtime", step: "Wire runtime", status: "in_progress" },
+              { workItemId: "wit_model_verify", step: "Verify behavior", status: "pending" },
             ],
           },
         },
@@ -2570,6 +2854,8 @@ test("Agent update_plan records a stable Work Plan snapshot and renders it in th
     const workPlan = view?.currentWorkPlanId ? view.workPlans[view.currentWorkPlanId] : undefined;
     assert.equal(workPlan?.latestRevision, 1);
     assert.equal(workPlan?.revisions[1].items[1].status, "in_progress");
+    assert.ok(workPlan?.revisions[1].items.every((item) => item.workItemId.startsWith("wit_")));
+    assert.ok(workPlan?.revisions[1].items.every((item) => !item.workItemId.startsWith("wit_model_")));
     const action = Object.values(view.runs[result.runId].actions)[0];
     const event = runtime.events().find((candidate) => candidate.type === "action.completed");
     assert.ok(action);
@@ -2589,6 +2875,24 @@ test("Agent update_plan records a stable Work Plan snapshot and renders it in th
     });
     assert.match(card.join("\n"), /To-do · Working on Wire runtime/);
     assert.match(card.join("\n"), /1\/3 done/);
+
+    const failedCard = renderToolCard({
+      actionId: "act_failed_work_plan",
+      toolName: "update_plan",
+      status: "failed",
+      errorCode: "WORK_PLAN_REJECTED",
+      input: {
+        workPlanId: "wpl_invented",
+        plan: [{ step: "Do the work", status: "in_progress" }],
+      },
+      output: {
+        code: "WORK_PLAN_REJECTED",
+        message: "Work Plan wpl_invented does not exist. Omit workPlanId and every workItemId when creating.",
+      },
+    }).join("\n");
+    assert.match(failedCard, /WORK_PLAN_REJECTED/);
+    assert.match(failedCard, /does not exist.*Omit workPlanId/);
+    assert.doesNotMatch(failedCard, /0\/1 done/);
   } finally {
     await runtime.close();
     await rm(root, { recursive: true, force: true });

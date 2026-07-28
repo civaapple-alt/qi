@@ -13,6 +13,10 @@ Reusable Qi-specific terminal presentation and control components built on
   keep the latest three display-wrapped provisional model text/reasoning/tool lines visible in the Working strip.
 - Render committed model reasoning as a distinct three-line Thinking block, and render an accepted Formal Plan
   as a 200-line transcript preview with its immutable local path instead of treating it as pasted input.
+- Render that same bounded Formal Plan preview before Plan Review choices, so the reviewed document is visible
+  before acceptance.
+- Retain confirmed `ask_question` cards with every question and option plus selected, custom-text, and skipped
+  answers; durable Action input/output, rather than transient panel state, drives replay.
 - Keep bounded file Diff previews for completed mutations in the active Run's retained eight-Step window, and
   expose bounded process failure evidence instead of hiding it inside the ToolFailure envelope.
 - Provide reusable composer, follow-up queue, selection/form/scroll panels, themes, and layout helpers.
@@ -67,8 +71,9 @@ implement the `pi-tui` `Component`/`Focusable` contracts can be mounted in an ex
 - `ComposerComponent`, `FollowUpQueue`, and `FollowUpsComponent`;
 - `ListPanel`, `MultiSelectPanel`, `FormPanel` (text, secret, and terminal-dropdown fields with optional custom
   input), `QuestionPanel`, `ScrollPanel`, `SessionsPanel`, and `PanelHost`;
+- committed `ask_question` Action cards that replay prompts, options, and confirmed answers;
 - Codex-style `update_plan` Todo snapshots in the Action timeline; legacy Plan-item Todo projection remains
-  replay-only for legacy plans.
+  replay-only for legacy plans. Failed snapshots include their durable rejection code and message.
 - command parsing/autocomplete and localization helpers;
 - Markdown, layout, theme, Action-card, Session-list, and repaint helpers.
 

@@ -115,12 +115,20 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
   list and carries no mutable implementation status.
 - Plan-mode clarification Questions, approval outcomes, Plan review, and legacy next-Run choices are durable
   facts. An active-Run Question is linked to its Run/Step/Action and must settle before that Action or Run.
+- Choice Questions allow a custom-text `Other` answer by default unless the caller explicitly disables it.
+  Committed Question input and output preserve every prompt, option, selected option ID, custom answer, and skip
+  result so replay can render the confirmed interaction without relying on transient panel state.
 - Accepting a Formal Plan atomically switches to Agent and starts exactly one implementation Run whose
   conversation history is the accepted document, not the planning discussion.
 - The Executor input envelope remains machine context. Human-facing TUI projection renders the bound Formal
   Plan Markdown directly rather than presenting that generated envelope as a pasted user message.
+- Before Plan Review can be settled, the timeline projects the complete Formal Plan with the same
+  200-rendered-line bound and immutable local path used for Executor presentation; review choices must not hide
+  the document being accepted.
 - Complex Agent work may create a separate Work Plan through `update_plan`. Work Plan status is navigation only,
   never completion evidence, and does not schedule Runs.
+- Qi assigns Work Plan and Work item IDs on first creation. Model-supplied item IDs are discarded on create;
+  later updates may use only IDs returned by a successful prior `update_plan` result.
 - Pre-Formal-Plan item revisions retain their historical item-per-Run behavior: later items require a durable
   `continue | stop | return_to_plan` choice. Terminal Runs are never resumed.
 - At most one top-level Run is non-terminal.
@@ -174,8 +182,8 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 - Provisional output occupies one bounded live region; model reasoning uses a three-display-line tail there.
 - Settled Runs and Steps reuse width/state-keyed formatting caches.
 - Active Runs show a bounded recent-Step window; older Steps fold reversibly.
-- An accepted Formal Plan remains complete in Executor context, but its TUI projection renders at most 200
-  terminal lines and always names the immutable local document path. Longer plans also end with a Collapsed
+- A Formal Plan remains complete in review and Executor context, but both TUI projections render at most 200
+  terminal lines and always name the immutable local document path. Longer plans also end with a Collapsed
   notice; the transcript does not add a second expansion state for content that can be opened directly.
 - Presentation thresholds remain local UI policy, not Session-format semantics.
 - Denied and other distinct Action settlements remain immediately visible.

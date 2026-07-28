@@ -1130,10 +1130,13 @@ export class TuiPresenter {
       );
     }
     if (review?.status === "pending" && review.planId === plan.planId && review.revision === revision.revision) {
+      const acceptDescription = revision.format === "formal_markdown"
+        ? "switch to Agent and start one whole-plan Executor Run"
+        : "switch to Agent and start the first item Run";
       lines.push(
         "",
         "Plan Review pending",
-        "  1 /plan accept — 开始实现：switch to Agent and start the first item Run",
+        `  1 /plan accept — 开始实现：${acceptDescription}`,
         "  2 /plan revise [feedback] — 修改计划并更新 plan_document",
         "  3 /plan reject [feedback] — dismiss, or revise when feedback is provided",
       );
@@ -1173,23 +1176,10 @@ export class TuiPresenter {
   private renderUserMessage(run: RunView): string[] {
     const formalPlan = this.formalPlanRevision(run);
     if (formalPlan?.markdown) {
-      const rendered = renderMarkdown(formalPlan.markdown, {
-        width: Math.max(40, this.#width - 2),
-        expandCodeBlocks: true,
-      });
-      const collapsed = rendered.length > FORMAL_PLAN_MAX_RENDERED_LINES;
       return [
         `${USER_MESSAGE_PREFIX}Accepted Plan · ${formalPlan.title} · rev ${formalPlan.revision}`,
         "",
-        ...rendered.slice(0, FORMAL_PLAN_MAX_RENDERED_LINES),
-        ...(collapsed
-          ? [
-              "",
-              `… Collapsed · ${rendered.length - FORMAL_PLAN_MAX_RENDERED_LINES} rendered lines hidden`,
-            ]
-          : []),
-        "",
-        `Formal Plan file · ${formalPlan.path}`,
+        ...this.renderFormalPlanPreview(formalPlan),
       ];
     }
     const input = run.input?.trim() ?? "";
@@ -1213,6 +1203,33 @@ export class TuiPresenter {
     if (!binding) return undefined;
     const revision = this.#view?.plans[binding.planId]?.revisions[binding.revision];
     return revision?.format === "formal_markdown" ? revision : undefined;
+  }
+
+  private pendingFormalPlanRevision(): PlanRevisionView | undefined {
+    const review = this.#view?.pendingReview;
+    if (!review || review.status !== "pending") return undefined;
+    const revision = this.#view?.plans[review.planId]?.revisions[review.revision];
+    return revision?.format === "formal_markdown" ? revision : undefined;
+  }
+
+  private renderFormalPlanPreview(revision: PlanRevisionView): string[] {
+    if (!revision.markdown) return [`Formal Plan file · ${revision.path}`];
+    const rendered = renderMarkdown(revision.markdown, {
+      width: Math.max(40, this.#width - 2),
+      expandCodeBlocks: true,
+    });
+    const collapsed = rendered.length > FORMAL_PLAN_MAX_RENDERED_LINES;
+    return [
+      ...rendered.slice(0, FORMAL_PLAN_MAX_RENDERED_LINES),
+      ...(collapsed
+        ? [
+            "",
+            `… Collapsed · ${rendered.length - FORMAL_PLAN_MAX_RENDERED_LINES} rendered lines hidden`,
+          ]
+        : []),
+      "",
+      `Formal Plan file · ${revision.path}`,
+    ];
   }
 
   /**
@@ -1326,7 +1343,14 @@ export class TuiPresenter {
         && ["write", "edit", "move", "remove"].includes(action.toolName)
         && typeof card.output?.diff === "string"
         && card.output.diff.length > 0;
-      if (activeRun && options.collapse && !stepExpanded && !retainedMutationDiff) {
+      const retainedQuestionAnswer = action.status === "completed" && action.toolName === "ask_question";
+      if (
+        activeRun
+        && options.collapse
+        && !stepExpanded
+        && !retainedMutationDiff
+        && !retainedQuestionAnswer
+      ) {
         lines.push(...renderToolCard(card, { summaryOnly: true }));
         continue;
       }
@@ -1502,11 +1526,20 @@ export class TuiPresenter {
     const locale = this.#locale;
     const question = this.#view?.pendingQuestion;
     if (this.#view?.pendingReview?.status === "pending") {
-      // Interactive TUI opens a ↑↓ / Enter Plan Review panel; keep transcript quiet.
+      const formalPlan = this.pendingFormalPlanRevision();
       return [
         "",
+        ...(formalPlan
+          ? [
+              `Formal Plan for Review · ${formalPlan.title} · rev ${formalPlan.revision}`,
+              "",
+              ...this.renderFormalPlanPreview(formalPlan),
+              "",
+            ]
+          : []),
         "Plan Review pending",
-        "  ↑↓ / Enter in the review panel · Esc to discuss · say 开始实现 to execute",
+        "  Review the complete plan above, then use ↑↓ / Enter in the review panel",
+        "  Esc to discuss · say 开始实现 to execute",
         "  1 开始实现 · 2 修改计划 · 3 拒绝 · /plan",
       ];
     }

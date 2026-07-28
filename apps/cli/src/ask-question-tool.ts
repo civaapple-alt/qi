@@ -23,7 +23,9 @@ const QuestionSchema = Type.Object({
     label: Type.String({ minLength: 1, maxLength: 200 }),
     description: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
   }, { additionalProperties: false }), { maxItems: 8 })),
-  allowText: Type.Optional(Type.Boolean()),
+  allowText: Type.Optional(Type.Boolean({
+    description: "Choice questions default to true; set false only when custom user input is invalid",
+  })),
 }, { additionalProperties: false });
 
 const AskQuestionInputSchema = Type.Object({
@@ -98,7 +100,8 @@ export function createAskQuestionTool(
   return defineTool({
     description:
       "Ask the user 1–3 blocking clarification questions during this Plan Run. Supports single choice, " +
-      "multiple choice, free text, optional custom text, and explicit skipping. Execution resumes in this Run.",
+      "multiple choice, free text, custom text, and explicit skipping. Choice questions allow an Other input " +
+      "by default; set allowText=false only when custom input would be invalid. Execution resumes in this Run.",
     input: AskQuestionInputSchema,
     output: Type.Object({
       answers: Type.Array(Type.Object({
@@ -125,7 +128,7 @@ export function createAskQuestionTool(
           prompt: question.prompt,
           selection: question.selection,
           options,
-          allowText: question.selection === "text" || question.allowText === true,
+          allowText: question.selection === "text" || question.allowText !== false,
         };
       });
       const answers = await coordinator.wait(

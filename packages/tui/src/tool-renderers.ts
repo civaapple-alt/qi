@@ -43,6 +43,7 @@ const renderers: Record<string, Renderer> = {
   delegate: renderDelegate,
   plan_document: renderPlanDocument,
   update_plan: renderWorkPlan,
+  ask_question: renderAskQuestion,
 };
 
 export function renderToolCard(model: ToolCardModel, options: ToolCardOptions = {}): string[] {
@@ -351,8 +352,12 @@ function renderWorkPlan(model: ToolCardModel, options: ToolCardOptions): string[
   const active = items.find((item) => record(item)?.status === "in_progress");
   const activeStep = active ? String(record(active)?.step ?? "") : "";
   const title = activeStep ? `To-do · Working on ${oneLine(activeStep, 72)}` : "To-do";
-  const lines = [header(model, title, `${completed}/${items.length} done`)];
+  const result = model.status === "completed" ? `${completed}/${items.length} done` : model.errorCode;
+  const lines = [header(model, title, result)];
   if (options.summaryOnly) return lines;
+  if (model.status !== "completed" && typeof output?.message === "string" && output.message.trim()) {
+    lines.push(`  ${oneLine(output.message, 110)}`);
+  }
   const explanation = String(output?.explanation ?? input?.explanation ?? "").trim();
   if (explanation) lines.push(`  ${oneLine(explanation, 110)}`);
   const limit = options.expanded ? (options.outputLines ?? 32) : Math.min(8, options.outputLines ?? 8);
@@ -364,6 +369,75 @@ function renderWorkPlan(model: ToolCardModel, options: ToolCardOptions): string[
     lines.push(`  ${glyph} ${oneLine(String(value.step ?? ""), 108)}`);
   }
   if (items.length > limit) lines.push(`  … ${items.length - limit} more`);
+  return lines;
+}
+
+function renderAskQuestion(model: ToolCardModel, options: ToolCardOptions): string[] {
+  const input = record(model.input);
+  const output = model.status === "completed" ? model.output : undefined;
+  const questions = Array.isArray(input?.questions)
+    ? input.questions
+        .map(record)
+        .filter((question): question is Record<string, unknown> => Boolean(question))
+    : [];
+  const answers = new Map(
+    (Array.isArray(output?.answers) ? output.answers : [])
+      .map(record)
+      .filter((answer): answer is Record<string, unknown> => Boolean(answer))
+      .map((answer) => [String(answer.questionId ?? ""), answer]),
+  );
+  const skipped = [...answers.values()].filter((answer) => answer.skipped === true).length;
+  const answered = answers.size - skipped;
+  const result = model.status === "completed"
+    ? [
+        `${questions.length} question${questions.length === 1 ? "" : "s"}`,
+        `${answered} answered`,
+        skipped > 0 ? `${skipped} skipped` : undefined,
+      ].filter(Boolean).join(" · ")
+    : model.errorCode;
+  const lines = [header(model, "User clarification", result)];
+  if (options.summaryOnly) return lines;
+
+  questions.forEach((question, questionIndex) => {
+    const questionId = String(question.id ?? "");
+    const answer = answers.get(questionId);
+    const selection = String(question.selection ?? "single");
+    const headerText = String(question.header ?? `Question ${questionIndex + 1}`);
+    const prompt = String(question.prompt ?? "");
+    const selected = new Set(
+      Array.isArray(answer?.selectedOptionIds)
+        ? answer.selectedOptionIds.map((optionId) => String(optionId))
+        : [],
+    );
+    lines.push(`  ${questionIndex + 1}. ${oneLine(headerText, 100)} · ${selection}`);
+    if (prompt.trim()) lines.push(`     ${oneLine(prompt, 110)}`);
+
+    const questionOptions = Array.isArray(question.options)
+      ? question.options
+          .map(record)
+          .filter((option): option is Record<string, unknown> => Boolean(option))
+      : [];
+    for (const option of questionOptions) {
+      const optionId = String(option.id ?? "");
+      const chosen = selected.has(optionId);
+      const mark = selection === "multiple"
+        ? (chosen ? "☑" : "☐")
+        : (chosen ? "●" : "○");
+      lines.push(`     ${mark} ${oneLine(String(option.label ?? optionId), 104)}`);
+      if (typeof option.description === "string" && option.description.trim()) {
+        lines.push(`       ${oneLine(option.description, 102)}`);
+      }
+    }
+
+    if (answer?.skipped === true) {
+      lines.push("     ↷ Skipped");
+    } else if (typeof answer?.text === "string" && answer.text.trim()) {
+      const answerLabel = selection === "text" ? "Answer" : "Other";
+      lines.push(`     ✓ ${answerLabel}: ${oneLine(answer.text, 98)}`);
+    } else if (model.status === "completed" && selected.size === 0) {
+      lines.push("     ○ No answer recorded");
+    }
+  });
   return lines;
 }
 

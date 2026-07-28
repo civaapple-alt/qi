@@ -13,6 +13,11 @@ steps and investigation history belong in pull requests, not release notes.
   classification; every preview shows the immutable local path, and longer plans add a Collapsed notice while
   Executor context remains complete. Live and committed model reasoning appears in three display-wrapped
   Thinking lines.
+- Choice questions in Plan-mode `ask_question` now offer custom `Other…` input by default unless explicitly
+  disabled, and confirmed timeline cards retain every question and option with selected, custom, or skipped
+  results.
+- Formal Plans now appear in the timeline, bounded to 200 rendered lines with their immutable local path, before
+  the Plan Review choices are offered.
 
 ### Deprecated
 
@@ -24,6 +29,8 @@ steps and investigation history belong in pull requests, not release notes.
   preserving strict per-operation field checks inside the Tool.
 - Fixed failed `plan_document` cards so ToolFailure envelopes show the operation, error code, and message instead
   of a nonexistent `rev undefined`.
+- Fixed first-call `update_plan` loops by replacing model-supplied provisional Work item IDs with Runtime IDs;
+  nonexistent update IDs now return explicit create/update guidance, and failed Todo cards show that reason.
 
 ### Security
 

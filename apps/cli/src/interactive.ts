@@ -688,11 +688,17 @@ export class InteractiveTui {
   #openPlanReviewPanel(focusId?: "start" | "revise" | "reject"): void {
     if (this.#runtime.view()?.pendingReview?.status !== "pending") return;
     if (this.#panels.open) this.#panels.closeAll();
+    const view = this.#runtime.view();
+    const review = view?.pendingReview;
+    const revision = review ? view?.plans[review.planId]?.revisions[review.revision] : undefined;
+    const formal = revision?.format === "formal_markdown";
     const items = [
       {
         id: "start",
         label: "开始实现",
-        description: "接受计划并启动第一项 Agent Run（一项一 Run）",
+        description: formal
+          ? "接受完整计划并启动一个 Agent Executor Run"
+          : "接受计划并启动第一项 Agent Run（一项一 Run）",
         current: focusId === "start",
       },
       {
@@ -714,7 +720,7 @@ export class InteractiveTui {
       : items;
     this.#panels.push(new ListPanel({
       title: "Plan Review",
-      hints: "↑↓ select · Enter confirm · Esc discuss in chat",
+      hints: "完整计划已在时间线上方展示 · ↑↓ select · Enter confirm · Esc review/discuss",
       items: ordered,
       onClose: this.#panels.dismiss,
       onSelect: (item) => {
@@ -780,7 +786,7 @@ export class InteractiveTui {
           const accepted = this.#runtime.acceptPlan();
           this.#presenter.update(this.#runtime.events(), this.#runtime.view());
           this.#planReviewKey = undefined;
-          this.#presenter.setNotice("Plan accepted · starting the first item Run.");
+          this.#presenter.setNotice("Plan accepted · starting the Executor Run.");
           this.#startTriggeredRun(accepted.runId, accepted.input);
           return;
         }

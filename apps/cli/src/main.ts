@@ -382,7 +382,7 @@ async function main(): Promise<void> {
         if (verb === "accept" || verb === "start") {
           const accepted = runtime.acceptPlan();
           presenter?.update(runtime.events(), runtime.view());
-          process.stdout.write("Plan accepted · starting the first item Run.\n");
+          process.stdout.write("Plan accepted · starting the Agent Run.\n");
           const task = runtime.runTriggered(accepted.runId, accepted.input)
             .then((result) => {
               presenter?.update(runtime.events(), result.view);

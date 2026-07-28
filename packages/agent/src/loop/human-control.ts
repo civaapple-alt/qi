@@ -180,9 +180,12 @@ export class HumanControlService {
   ): SessionView {
     const writer = this.#writer(sessionId);
     const view = requireView(writer.view);
+    const prior = input.workPlanId === undefined ? undefined : view.workPlans[input.workPlanId];
+    if (input.workPlanId && !prior) throw new Error(`Work Plan ${input.workPlanId} does not exist`);
+    if (input.workPlanId === undefined && input.plan.some((item) => item.workItemId !== undefined)) {
+      throw new Error("A new Work Plan cannot supply workItemId; Qi assigns stable IDs on creation");
+    }
     const workPlanId = input.workPlanId ?? (createId("wpl") as WorkPlanId);
-    const prior = view.workPlans[workPlanId];
-    if (input.workPlanId && !prior) throw new Error(`Work Plan ${workPlanId} does not exist`);
     const priorIds = new Set(
       prior?.revisions[prior.latestRevision]?.items.map((item) => item.workItemId) ?? [],
     );

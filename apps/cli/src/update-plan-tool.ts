@@ -11,10 +11,16 @@ import { ToolFailure, defineTool } from "@civaapple/qi-node/tools";
 import { Type, type Static } from "@sinclair/typebox";
 
 const WorkPlanInputSchema = Type.Object({
-  workPlanId: Type.Optional(Type.String({ pattern: "^wpl_[A-Za-z0-9][A-Za-z0-9_-]{2,127}$" })),
+  workPlanId: Type.Optional(Type.String({
+    pattern: "^wpl_[A-Za-z0-9][A-Za-z0-9_-]{2,127}$",
+    description: "Omit when creating. For updates, use only the workPlanId returned by a successful prior call; never invent one.",
+  })),
   explanation: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
   plan: Type.Array(Type.Object({
-    workItemId: Type.Optional(Type.String({ pattern: "^wit_[A-Za-z0-9][A-Za-z0-9_-]{2,127}$" })),
+    workItemId: Type.Optional(Type.String({
+      pattern: "^wit_[A-Za-z0-9][A-Za-z0-9_-]{2,127}$",
+      description: "Omit for every item on create. On update, preserve IDs returned by the last successful snapshot; never invent one.",
+    })),
     step: Type.String({ minLength: 1, maxLength: 1_000 }),
     status: Type.Union([
       Type.Literal("pending"),
@@ -31,7 +37,9 @@ export function createUpdatePlanTool(humanControl: HumanControlService) {
     description:
       "Create or update the implementation Work Plan/Todo for a complex Agent task. Use it for cross-package, " +
       "three-or-more-step, phased migration, or multi-round verification work; skip it for simple tasks. " +
-      "Keep at most one item in_progress. This is navigation, not completion evidence.",
+      "On the first call omit workPlanId and every workItemId; Qi assigns and returns stable IDs. On later calls " +
+      "use only IDs from the last successful output. Keep at most one item in_progress. This is navigation, not " +
+      "completion evidence.",
     input: WorkPlanInputSchema,
     output: Type.Object({
       workPlanId: Type.String(),
@@ -56,6 +64,7 @@ export function createUpdatePlanTool(humanControl: HumanControlService) {
         throw new ToolFailure("WORK_PLAN_IN_PROGRESS", "At most one Work Plan item may be in_progress");
       }
       try {
+        const creating = input.workPlanId === undefined;
         const view = humanControl.recordWorkPlanUpdate(
           context.sessionId as SessionId,
           {
@@ -67,7 +76,9 @@ export function createUpdatePlanTool(humanControl: HumanControlService) {
             ...(input.workPlanId === undefined ? {} : { workPlanId: input.workPlanId as WorkPlanId }),
             ...(input.explanation === undefined ? {} : { explanation: input.explanation }),
             plan: input.plan.map((item) => ({
-              ...(item.workItemId === undefined ? {} : { workItemId: item.workItemId as WorkItemId }),
+              ...(!creating && item.workItemId !== undefined
+                ? { workItemId: item.workItemId as WorkItemId }
+                : {}),
               step: item.step,
               status: item.status,
             })),
@@ -85,9 +96,11 @@ export function createUpdatePlanTool(humanControl: HumanControlService) {
           plan: snapshot.items,
         };
       } catch (error) {
+        const detail = error instanceof Error ? error.message : "Work Plan update was rejected";
         throw new ToolFailure(
           "WORK_PLAN_REJECTED",
-          error instanceof Error ? error.message : "Work Plan update was rejected",
+          `${detail}. To create the first Work Plan, omit workPlanId and every workItemId. ` +
+          "To update one, use only IDs from the last successful update_plan output.",
         );
       }
     },

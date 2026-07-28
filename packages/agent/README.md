@@ -32,7 +32,8 @@ explanatory model output, not completion evidence.
 
 Formal Plans, Work Plans, and Questions are separate state machines. A Formal Plan is immutable reviewed
 Markdown; acceptance starts one whole-plan Agent Run. `update_plan` snapshots are optional implementation Todo
-navigation and never completion evidence. `run.question.*` can suspend and resume a read/control Action inside
+navigation and never completion evidence. Qi assigns Work Plan/Work item IDs on create; later updates preserve
+only IDs returned by a successful snapshot. `run.question.*` can suspend and resume a read/control Action inside
 the same Plan Run, while legacy `control.question.*` remains the between-Run compatibility path.
 
 `qi-agent` does not depend on `qi-node`, `qi-tui`, or an application. Node filesystem, process, database,
