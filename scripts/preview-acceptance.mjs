@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ const cliManifest = JSON.parse(await readFile(join(root, "apps", "cli", "package
 const startedAt = new Date();
 const started = performance.now();
 const checks = [];
-const temporaryRoot = await mkdtemp(join(tmpdir(), "qi-preview-acceptance-"));
+const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), "qi-preview-acceptance-")));
 const prefix = join(temporaryRoot, "prefix");
 const workspace = join(temporaryRoot, "workspace");
 const dataRoot = join(temporaryRoot, "data");
