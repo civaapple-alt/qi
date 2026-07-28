@@ -1344,12 +1344,15 @@ export class TuiPresenter {
         && typeof card.output?.diff === "string"
         && card.output.diff.length > 0;
       const retainedQuestionAnswer = action.status === "completed" && action.toolName === "ask_question";
+      // Work Plan Todo snapshots stay in the chat stream as full lists, not sticky footers.
+      const retainedWorkPlan = action.toolName === "update_plan";
       if (
         activeRun
         && options.collapse
         && !stepExpanded
         && !retainedMutationDiff
         && !retainedQuestionAnswer
+        && !retainedWorkPlan
       ) {
         lines.push(...renderToolCard(card, { summaryOnly: true }));
         continue;
@@ -1358,7 +1361,10 @@ export class TuiPresenter {
       const expanded = this.#expanded.has(`action:${actionId}`)
         || this.#actionId === actionId
         || shouldExpandByDefault(action.status);
-      const rendered = renderToolCard(card, { expanded, outputLines: expanded ? 12 : 4 });
+      const outputLines = retainedWorkPlan
+        ? (expanded ? 32 : 16)
+        : (expanded ? 12 : 4);
+      const rendered = renderToolCard(card, { expanded, outputLines });
       lines.push(...rendered);
     }
     return lines;

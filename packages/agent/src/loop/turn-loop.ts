@@ -16,6 +16,7 @@ import {
   StateTransitionError,
   type EventStore,
   type RunPlanBinding,
+  type RunView,
   type SessionMode,
   type SessionView,
 } from "@civaapple/qi-agent/kernel";
@@ -1510,6 +1511,24 @@ function truncateSummary(value: string, maximum: number): string {
   return normalized.length <= maximum ? normalized : `${normalized.slice(0, maximum - 1)}…`;
 }
 
+/** Compact durable Action/terminal facts appended to restored assistant history (not a tool transcript). */
+export function formatRunHistoryFacts(run: RunView): string {
+  const actions = Object.values(run.actions);
+  let writeCompleted = 0;
+  let writeFailed = 0;
+  let readCompleted = 0;
+  for (const action of actions) {
+    if (action.effect === "write" && action.status === "completed") writeCompleted += 1;
+    else if (action.effect === "write" && action.status === "failed") writeFailed += 1;
+    else if (action.effect === "read" && action.status === "completed") readCompleted += 1;
+  }
+  const terminal = run.terminal?.reason ?? run.status;
+  return (
+    `<qi-run-facts runId="${run.runId}" writeCompleted=${writeCompleted} ` +
+    `writeFailed=${writeFailed} readCompleted=${readCompleted} terminal=${terminal} />`
+  );
+}
+
 function compileConversationHistory(
   view: SessionView | undefined,
   budgetTokens: number,
@@ -1528,7 +1547,7 @@ function compileConversationHistory(
       .reverse()
       .map((stepId) => run.steps[stepId]?.model?.text.trim())
       .find((text): text is string => Boolean(text));
-    const assistantText = isBudgetHandoff
+    const narrative = isBudgetHandoff
       ? [
           "<qi-budget-handoff>",
           "The previous Run was paused for budget; it was not completed.",
@@ -1536,7 +1555,8 @@ function compileConversationHistory(
           "</qi-budget-handoff>",
         ].join("\n")
       : finalText;
-    if (!assistantText) continue;
+    if (!narrative) continue;
+    const assistantText = `${narrative}\n\n${formatRunHistoryFacts(run)}`;
     turns.push({
       runId,
       messages: [

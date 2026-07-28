@@ -277,6 +277,17 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 - Qi 0.6 supports declaration-only packages. Executable plugins require a separate ADR for process isolation,
   restricted Host API, lifecycle, and crash settlement.
 
+## ADR-0024: annotate restored Run history with projection facts, not tool transcripts
+
+- Cross-Run conversation history still restores only the final assistant text of completed (or budget-handoff)
+  Runs; tool transcripts remain durable Session evidence and do not masquerade as dialogue.
+- Each restored assistant message appends a compact `<qi-run-facts>` footer with write/read Action counts and
+  terminal reason from the Run projection.
+- The footer exists so later Runs can distinguish verbal “already fixed” narration from durable write settlement
+  without replaying Action payloads or inventing Runtime hard-blocks on free-form responses.
+- Session extractors may emit a diagnostic `CLAIMED_MUTATION_WITHOUT_ACTIONS` signal when a responded Run claims
+  mutation in prose with zero completed write Actions; that signal does not change Run completion semantics.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

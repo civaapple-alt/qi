@@ -7,8 +7,18 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+- Session extract reports may emit `CLAIMED_MUTATION_WITHOUT_ACTIONS` when a responded Run claims a Workspace
+  mutation in prose without any completed write Action (diagnostic only; Run completion is unchanged).
+
 ### Changed
 
+- TUI `update_plan` Work Plan cards now keep a full ✔/◐/○ Todo list in the chat stream (including mid-Run
+  collapsed Steps), with a `Working on N to-dos · M/N done` header instead of a one-line summary.
+- Collapsed or mid-Run `shell`/`script`/`verify` cards now show up to three trailing output lines instead of one.
+- Restored cross-Run conversation history now appends a compact `<qi-run-facts>` footer with durable write/read
+  Action counts and terminal reason, without replaying tool transcripts.
+- Agent constitution and mode guidance now state that minimizing investigative tool calls does not skip
+  `edit`/`write`, and that planned code blocks are not proof of a durable Workspace mutation.
 - Executor timelines now render accepted Formal Plans as at most 200 terminal lines without paste
   classification; every preview shows the immutable local path, and longer plans add a Collapsed notice while
   Executor context remains complete. Live and committed model reasoning appears in three display-wrapped

@@ -2328,9 +2328,24 @@ test("shell cards use compact $ command · duration grammar", () => {
   });
   const text = collapsed.join("\n");
   assert.match(text, /\$ git status 6\.1s/);
-  assert.match(text, /output lines hidden · Ctrl\+O/);
+  assert.match(text, /1 output lines hidden · Ctrl\+O/);
+  assert.match(text, /line2/);
+  assert.match(text, /line3/);
   assert.match(text, /nothing to commit/);
+  assert.doesNotMatch(text, /^  line1$/m);
   assert.doesNotMatch(text, /cwd /);
+
+  const summary = renderToolCard({
+    actionId: "act_shell",
+    toolName: "shell",
+    status: "completed",
+    elapsed: "6.1s",
+    input: { command: "git", args: ["status"] },
+    output: { exitCode: 0, stdout: "line1\nline2\nline3\nnothing to commit\n" },
+  }, { summaryOnly: true });
+  assert.match(summary[0] ?? "", /\$ git status 6\.1s/);
+  assert.equal(summary.length, 4);
+  assert.match(summary.join("\n"), /line2[\s\S]*line3[\s\S]*nothing to commit/);
 });
 
 test("failed shell cards unwrap bounded process evidence from the ToolFailure envelope", () => {
@@ -2359,8 +2374,10 @@ test("failed shell cards unwrap bounded process evidence from the ToolFailure en
   assert.doesNotMatch(collapsed, /partial output/);
 
   const summary = renderToolCard(model, { summaryOnly: true }).join("\n");
-  assert.equal(summary.split("\n").length, 1);
-  assert.match(summary, /exit 1.*SyntaxError/);
+  assert.match(summary, /\$ node -e/);
+  assert.match(summary, /SyntaxError: Expected ',', got ';'/);
+  assert.ok(summary.split("\n").length >= 2);
+  assert.ok(summary.split("\n").length <= 4);
 
   const expanded = renderToolCard(model, { expanded: true }).join("\n");
   assert.match(expanded, /cwd packages\/kernel/);
@@ -2873,8 +2890,37 @@ test("Agent update_plan records a stable Work Plan snapshot and renders it in th
         plan: workPlan.revisions[1].items,
       },
     });
-    assert.match(card.join("\n"), /To-do · Working on Wire runtime/);
-    assert.match(card.join("\n"), /1\/3 done/);
+    const cardText = card.join("\n");
+    assert.match(cardText, /To-do · Working on 3 to-dos/);
+    assert.match(cardText, /1\/3 done/);
+    assert.match(cardText, /✔ Extend protocol/);
+    assert.match(cardText, /◐ Wire runtime/);
+    assert.match(cardText, /○ Verify behavior/);
+    assert.equal(renderToolCard({
+      actionId: action.actionId,
+      toolName: "update_plan",
+      status: "completed",
+      output: { plan: workPlan.revisions[1].items },
+    }, { summaryOnly: true }).length, 1);
+
+    const presenter = new TuiPresenter({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi"),
+      provider: "fake",
+      model: "work-plan-v1",
+      capabilities: [],
+      contextWindowTokens: 80_000,
+      maxSteps: 8,
+    });
+    const liveView = structuredClone(view);
+    liveView.runs[result.runId].status = "active";
+    presenter.update(runtime.events(), liveView);
+    const chat = presenter.renderChat().join("\n");
+    assert.match(chat, /To-do · Working on 3 to-dos/);
+    assert.match(chat, /✔ Extend protocol/);
+    assert.match(chat, /◐ Wire runtime/);
+    assert.match(chat, /○ Verify behavior/);
+    assert.doesNotMatch(chat, /Todo  Working on/);
 
     const failedCard = renderToolCard({
       actionId: "act_failed_work_plan",
@@ -2893,6 +2939,7 @@ test("Agent update_plan records a stable Work Plan snapshot and renders it in th
     assert.match(failedCard, /WORK_PLAN_REJECTED/);
     assert.match(failedCard, /does not exist.*Omit workPlanId/);
     assert.doesNotMatch(failedCard, /0\/1 done/);
+    assert.match(failedCard, /◐ Do the work/);
   } finally {
     await runtime.close();
     await rm(root, { recursive: true, force: true });

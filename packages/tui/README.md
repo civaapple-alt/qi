@@ -72,8 +72,11 @@ implement the `pi-tui` `Component`/`Focusable` contracts can be mounted in an ex
 - `ListPanel`, `MultiSelectPanel`, `FormPanel` (text, secret, and terminal-dropdown fields with optional custom
   input), `QuestionPanel`, `ScrollPanel`, `SessionsPanel`, and `PanelHost`;
 - committed `ask_question` Action cards that replay prompts, options, and confirmed answers;
-- Codex-style `update_plan` Todo snapshots in the Action timeline; legacy Plan-item Todo projection remains
+- Codex-style `update_plan` Todo snapshots in the Action timeline (full ✔/◐/○ lists that flow with the chat
+  stream, not a sticky footer); legacy Plan-item Todo projection remains
   replay-only for legacy plans. Failed snapshots include their durable rejection code and message.
+- Collapsed or mid-Run `shell`/`script`/`verify` cards keep the `$ command · duration` header and up to three
+  trailing stdout/stderr lines (more lines stay behind Ctrl+O).
 - command parsing/autocomplete and localization helpers;
 - Markdown, layout, theme, Action-card, Session-list, and repaint helpers.
 

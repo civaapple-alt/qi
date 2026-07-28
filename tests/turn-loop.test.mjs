@@ -206,14 +206,11 @@ test("TurnLoop restores bounded completed conversation history across Runs", asy
           "assistant",
           "user",
         ]);
-        assert.deepEqual(
-          request.messages.slice(1).map((message) => message.content[0].text),
-          [
-            "Does Web support chat?",
-            "Web is currently a read-only workbench.",
-            "What did I just ask?",
-          ],
-        );
+        const texts = request.messages.slice(1).map((message) => message.content[0].text);
+        assert.equal(texts[0], "Does Web support chat?");
+        assert.match(texts[1], /^Web is currently a read-only workbench\.\n\n<qi-run-facts /);
+        assert.match(texts[1], /writeCompleted=0 writeFailed=0 readCompleted=0 terminal=response \/>$/);
+        assert.equal(texts[2], "What did I just ask?");
         return [
           { type: "text.delta", delta: "You asked whether Web supports chat." },
           { type: "completed", finishReason: "stop" },
@@ -251,6 +248,103 @@ test("TurnLoop restores bounded completed conversation history across Runs", asy
       omittedRun.steps[omittedRun.stepOrder[0]].context.omittedBlockIds
         .filter((id) => id.startsWith("history:omitted:")),
       recalled.view.runOrder.slice(0, 2).map((runId) => `history:omitted:${runId}`),
+    );
+  });
+});
+
+test("TurnLoop annotates restored history with durable write/read Action facts", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const { writeFile } = await import("node:fs/promises");
+    const { createHash } = await import("node:crypto");
+    const target = join(root, "note.txt");
+    const original = "hello\n";
+    await writeFile(target, original, "utf8");
+    const sha256 = createHash("sha256").update(original, "utf8").digest("hex");
+
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_history_facts",
+      subject: "agent_main",
+      tools: ["edit"],
+      effects: ["write"],
+      resources: ["file:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("edit", editTool);
+    let verbalClaimHistory;
+    let afterWriteHistory;
+    const model = new ScriptedModelPort([
+      [
+        { type: "text.delta", delta: "两处问题都已修复，edit 返回 diff 确认。" },
+        { type: "completed", finishReason: "stop" },
+      ],
+      (request) => {
+        verbalClaimHistory = request.messages
+          .find((message) => message.role === "assistant")
+          ?.content.find((part) => part.type === "text")
+          ?.text;
+        return [
+          {
+            type: "action.requested",
+            callId: "call-history-edit",
+            name: "edit",
+            input: {
+              path: "note.txt",
+              oldText: "hello",
+              newText: "world",
+              expectedSha256: sha256,
+            },
+          },
+          { type: "completed", finishReason: "actions" },
+        ];
+      },
+      [
+        { type: "text.delta", delta: "Edit landed with tool evidence." },
+        { type: "completed", finishReason: "stop" },
+      ],
+      (request) => {
+        afterWriteHistory = request.messages
+          .filter((message) => message.role === "assistant")
+          .map((message) => message.content.find((part) => part.type === "text")?.text);
+        return [
+          { type: "text.delta", delta: "Saw prior write facts." },
+          { type: "completed", finishReason: "stop" },
+        ];
+      },
+    ]);
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: model,
+      toolRegistry: registry,
+    });
+
+    await loop.run(turnRequest(root, artifactStore, {
+      input: "Please fix the layout flicker.",
+      contextBudgetTokens: 8_000,
+    }));
+    await loop.run(turnRequest(root, artifactStore, {
+      input: "Actually apply the edit.",
+      contextBudgetTokens: 8_000,
+    }));
+    await loop.run(turnRequest(root, artifactStore, {
+      input: "Summarize prior mutations.",
+      contextBudgetTokens: 8_000,
+    }));
+
+    assert.match(
+      verbalClaimHistory,
+      /两处问题都已修复，edit 返回 diff 确认。\n\n<qi-run-facts runId="run_[^"]+" writeCompleted=0 writeFailed=0 readCompleted=0 terminal=response \/>/,
+    );
+    assert.equal(afterWriteHistory.length, 2);
+    assert.match(
+      afterWriteHistory[0],
+      /writeCompleted=0 writeFailed=0 readCompleted=0 terminal=response \/>$/,
+    );
+    assert.match(
+      afterWriteHistory[1],
+      /writeCompleted=1 writeFailed=0 readCompleted=0 terminal=response \/>$/,
     );
   });
 });

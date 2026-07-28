@@ -106,20 +106,26 @@ function renderProcess(model: ToolCardModel, options: ToolCardOptions): string[]
     exitSummary && model.status !== "completed" ? `· ${exitSummary}` : undefined,
   ].filter(Boolean).join(" ");
   if (options.summaryOnly) {
-    const tail = lastNonEmpty(stream);
-    return [`${title}${tail ? ` · ${oneLine(tail, 80)}` : ""}`];
+    const lines = [title];
+    appendProcessTail(lines, streamLines, 3);
+    return lines;
   }
   const lines = [title];
 
   if (model.status === "running" || model.liveTail?.text) {
-    const live = model.liveTail?.text ? lastNonEmpty(model.liveTail.text) : "running…";
-    lines.push(`  · ${oneLine(live, 110)}`);
+    const live = model.liveTail?.text
+      ? tailLines(model.liveTail.text, 3)
+      : ["running…"];
+    for (const line of live) lines.push(`  · ${oneLine(line, 110)}`);
   } else {
     if (exitSummary && model.status !== "completed") lines.push(`  ${exitSummary}`);
     if (!options.expanded && streamLines.length > 0) {
-      const hidden = Math.max(0, streamLines.length - 1);
+      const visible = Math.min(3, streamLines.length);
+      const hidden = Math.max(0, streamLines.length - visible);
       if (hidden > 0) lines.push(`  … ${hidden} output lines hidden · Ctrl+O to expand`);
-      lines.push(`  ${oneLine(streamLines.at(-1) ?? "", 110)}`);
+      for (const line of streamLines.slice(-visible)) {
+        lines.push(`  ${oneLine(line, 110)}`);
+      }
     }
   }
 
@@ -349,9 +355,10 @@ function renderWorkPlan(model: ToolCardModel, options: ToolCardOptions): string[
     ? output.plan
     : Array.isArray(input?.plan) ? input.plan : [];
   const completed = items.filter((item) => record(item)?.status === "completed").length;
-  const active = items.find((item) => record(item)?.status === "in_progress");
-  const activeStep = active ? String(record(active)?.step ?? "") : "";
-  const title = activeStep ? `To-do · Working on ${oneLine(activeStep, 72)}` : "To-do";
+  const activeCount = items.filter((item) => record(item)?.status === "in_progress").length;
+  const title = activeCount > 0
+    ? `To-do · Working on ${items.length} to-do${items.length === 1 ? "" : "s"}`
+    : "To-do";
   const result = model.status === "completed" ? `${completed}/${items.length} done` : model.errorCode;
   const lines = [header(model, title, result)];
   if (options.summaryOnly) return lines;
@@ -360,15 +367,17 @@ function renderWorkPlan(model: ToolCardModel, options: ToolCardOptions): string[
   }
   const explanation = String(output?.explanation ?? input?.explanation ?? "").trim();
   if (explanation) lines.push(`  ${oneLine(explanation, 110)}`);
-  const limit = options.expanded ? (options.outputLines ?? 32) : Math.min(8, options.outputLines ?? 8);
+  const limit = options.expanded
+    ? Math.max(16, options.outputLines ?? 32)
+    : Math.max(16, options.outputLines ?? 16);
   for (const item of items.slice(0, limit)) {
     const value = record(item);
     if (!value) continue;
     const status = value.status;
-    const glyph = status === "completed" ? "✓" : status === "in_progress" ? "→" : "○";
+    const glyph = status === "completed" ? "✔" : status === "in_progress" ? "◐" : "○";
     lines.push(`  ${glyph} ${oneLine(String(value.step ?? ""), 108)}`);
   }
-  if (items.length > limit) lines.push(`  … ${items.length - limit} more`);
+  if (items.length > limit) lines.push(`  … +${items.length - limit} more`);
   return lines;
 }
 
@@ -609,6 +618,15 @@ function diffStats(diff: string): { additions: number; removals: number } {
 function lastNonEmpty(value: string): string {
   const lines = normalizedLines(value).filter((line) => line.trim());
   return lines.at(-1) ?? "";
+}
+
+/** Append up to `limit` trailing process-output lines under a collapsed shell/script/verify card. */
+function appendProcessTail(lines: string[], streamLines: readonly string[], limit: number): void {
+  if (streamLines.length === 0 || limit <= 0) return;
+  const visible = Math.min(limit, streamLines.length);
+  for (const line of streamLines.slice(-visible)) {
+    lines.push(`  ${oneLine(line, 110)}`);
+  }
 }
 
 function tailLines(value: string, limit: number): string[] {

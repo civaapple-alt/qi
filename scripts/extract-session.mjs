@@ -484,6 +484,20 @@ function detectSignals(narrative, events) {
     if (writeActions.length > 0 && run.displayStatus === "responded") {
       signals.push(signal("info", "NO_FORMAL_ACCEPTANCE", "Workspace mutation ended with response completion, not evidence-backed verified completion", { runId: run.runId }));
     }
+    if (run.displayStatus === "responded" && writeActions.length === 0) {
+      const finalText = [...run.steps]
+        .reverse()
+        .map((step) => step.modelText)
+        .find((text) => typeof text === "string" && text.trim().length > 0);
+      if (typeof finalText === "string" && claimsVerbalWorkspaceMutation(finalText)) {
+        signals.push(signal(
+          "medium",
+          "CLAIMED_MUTATION_WITHOUT_ACTIONS",
+          "Final response claims a Workspace mutation, but this Run had no completed write Action",
+          { runId: run.runId },
+        ));
+      }
+    }
     const failedDedicated = failedActions.filter((action) => new Set(["edit", "write", "move", "remove"]).has(action.toolName));
     const laterShellMutation = actions.find((action) => action.toolName === "shell" && action.status === "completed" && action.diff);
     if (failedDedicated.length > 0 && laterShellMutation) {
@@ -511,6 +525,19 @@ function isVerificationAction(action) {
   const command = [value.command, ...(Array.isArray(value.args) ? value.args : [])].filter((item) => typeof item === "string").join(" ").toLowerCase();
   return /(?:^|\s)(?:test|typecheck|lint|build)(?:\s|$)|pytest|go test|cargo test|mvn(?:w)? .*test|gradle(?:w)? .*test/.test(command);
 }
+
+/** Narrow prose patterns that claim a durable Workspace mutation completed. */
+export function claimsVerbalWorkspaceMutation(text) {
+  if (typeof text !== "string" || !text.trim()) return false;
+  return (
+    /已(?:经)?修复|已实际(?:执行|修改|完成|落盘)|(?:两处|问题)?都改掉了|已改掉|本轮实际修改成功|刚刚已用\s*`?edit`?|已用\s*`?edit`?\s*工具|(?:编辑工具|edit)\s*返回(?:了)?(?:确认\s*)?diff|diff\s*(?:均)?确认|强制滚动代码已(?:彻底)?删除|改动已实际落盘/i
+      .test(text)
+    || /\balready\s+fixed\b|\bedit\s+returned\s+(?:a\s+)?diff\b|\bmutation\s+(?:has\s+)?landed\b|\bfixed\s+with\s+(?:an?\s+)?edit\b/i
+      .test(text)
+  );
+}
+
+export { detectSignals };
 
 function actionEvidence(run, action) {
   return {

@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   candidateSessionDatabases,
+  claimsVerbalWorkspaceMutation,
+  detectSignals,
   parseArguments,
   resolveSessionDatabase,
   selectedOperation,
@@ -118,4 +120,83 @@ test("analyze-qi-session resolves by project ID alone", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("claimsVerbalWorkspaceMutation matches high-confidence mutation claims only", () => {
+  assert.equal(claimsVerbalWorkspaceMutation("两处问题都已修复，edit 返回 diff 确认。"), true);
+  assert.equal(claimsVerbalWorkspaceMutation("刚刚已用 edit 工具实际完成两处修改"), true);
+  assert.equal(claimsVerbalWorkspaceMutation("The edit returned a diff confirming the change."), true);
+  assert.equal(claimsVerbalWorkspaceMutation("I can fix the layout next if you want."), false);
+  assert.equal(claimsVerbalWorkspaceMutation("The previous Run had writeCompleted=0."), false);
+});
+
+test("detectSignals flags verbal mutation claims without completed write Actions", () => {
+  const narrative = {
+    runs: [
+      {
+        runId: "run_verbal",
+        status: "completed",
+        displayStatus: "responded",
+        terminalReason: "response",
+        startSequence: 1,
+        endSequence: 4,
+        summary: { stepCount: 1, actionCount: 0 },
+        steps: [
+          {
+            stepId: "stp_verbal",
+            modelText: "两处都改掉了：scrollbar-gutter 已修复，diff 确认。",
+            rejectedCalls: [],
+            actions: [],
+          },
+        ],
+      },
+      {
+        runId: "run_honest",
+        status: "completed",
+        displayStatus: "responded",
+        terminalReason: "response",
+        startSequence: 5,
+        endSequence: 8,
+        summary: { stepCount: 1, actionCount: 0 },
+        steps: [
+          {
+            stepId: "stp_honest",
+            modelText: "I have not edited any files yet; say if I should proceed.",
+            rejectedCalls: [],
+            actions: [],
+          },
+        ],
+      },
+      {
+        runId: "run_real_write",
+        status: "completed",
+        displayStatus: "responded",
+        terminalReason: "response",
+        startSequence: 9,
+        endSequence: 20,
+        summary: { stepCount: 1, actionCount: 1 },
+        steps: [
+          {
+            stepId: "stp_write",
+            modelText: "两处问题都已修复。",
+            rejectedCalls: [],
+            actions: [
+              {
+                actionId: "act_write",
+                stepId: "stp_write",
+                toolName: "edit",
+                effect: "write",
+                status: "completed",
+                milestones: { proposed: 10, authorityGranted: 11, started: 12, terminal: 13 },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const codes = detectSignals(narrative, []).map((item) => `${item.code}:${item.evidence.runId}`);
+  assert.ok(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_verbal"));
+  assert.equal(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_honest"), false);
+  assert.equal(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_real_write"), false);
 });

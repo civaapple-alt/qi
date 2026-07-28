@@ -23,6 +23,12 @@ Use this checklist after extracting the Session report. It is a review rubric, n
 
 ## Common patterns
 
+### Verbal mutation claim without write Actions
+
+Treat model narration of “已修复 / edit returned diff” as unproven until a completed write Action (or authorized
+shell mutation with before/after evidence) exists in the same Run. Extract reports may emit
+`CLAIMED_MUTATION_WITHOUT_ACTIONS` for this pattern; it is diagnostic and does not rewrite Run completion.
+
 ### Dedicated mutation failure followed by shell mutation
 
 Check whether `edit` or `write` failed first, whether the shell actually changed the Workspace, and whether its

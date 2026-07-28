@@ -79,7 +79,11 @@ preview. See [ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-a
 ## Context between Runs
 
 A new user-triggered Run reconstructs completed conversational turns from the same Session as portable user and
-assistant messages. Only the final response of a completed Run is normally restored. A budget-parked Run is
+assistant messages. Only the final response of a completed Run is normally restored. Each restored assistant
+message appends a compact `<qi-run-facts … />` footer derived from the Run projection (`writeCompleted`,
+`writeFailed`, `readCompleted`, and terminal reason). That footer is Session-fact annotation, not a tool
+transcript: it counters long-Session imitation of verbal “already fixed” narration without smuggling Action
+payloads into conversation. A budget-parked Run is
 restored only when a Step explicitly completed with `finishReason: handoff`; the injected wrapper states that the
 prior Run was paused, not completed. If the model produced no usable handoff, the Loop derives a deterministic
 summary from durable Step/Action/Plan facts. Tool transcripts, failed partial responses, and active Runs otherwise

@@ -133,10 +133,10 @@ running, `○` other. The TUI must not collapse these into a binary error flag.
 Markdown tables wrap cell content within adaptively allocated columns. When the terminal is too narrow to keep
 every column useful, the renderer switches to a per-row vertical field layout so right-side values are retained.
 
-- Shell/script/verify: compact `$ command duration` (or script/verify equivalents) with the last output line and
-  `… N output lines hidden · Ctrl+O`. Expansion reveals cwd and a bounded stdout/stderr window. Elapsed time comes
-  only from committed event timestamps. Non-zero exits and timeouts are failed settlements. Live tails use a flat
-  `·` prefix rather than box-drawing chrome.
+- Shell/script/verify: compact `$ command duration` (or script/verify equivalents) with up to three trailing
+  output lines and `… N output lines hidden · Ctrl+O` when more remain. Expansion reveals cwd and a bounded
+  stdout/stderr window. Elapsed time comes only from committed event timestamps. Non-zero exits and timeouts are
+  failed settlements. Live tails use a flat `·` prefix (also up to three lines) rather than box-drawing chrome.
 - Read: header-only (`path · N lines`); file contents are never echoed into the transcript.
 - Write/edit: completed cards read `Edited <path> +N -M` (Cursor-style). The body uses a `▎` gutter, shows
   change lines with nearby context, and omits `---`/`+++`/`@@` chrome. Long patches collapse surplus middle as
@@ -144,10 +144,12 @@ every column useful, the renderer switches to a per-row vertical field layout so
   durable Action card / Artifact reference.
 - `plan_document`: create/read/edit card for a complete Formal Plan; SHA-checked edits publish immutable
   `plans/<planId>/<sha256>.md` revisions. Durable truth remains under `/plan`.
-- `update_plan`: Codex-style Todo snapshot with stable Work item IDs and at most one `in_progress`. It is
-  implementation navigation, not completion evidence. On create, Qi assigns the Work Plan and Work item IDs even
-  if the model supplied provisional item IDs; later calls use only IDs returned by a successful snapshot. Failed
-  cards retain the rejection code and actionable message.
+- `update_plan`: Codex-style Todo snapshot with stable Work item IDs and at most one `in_progress`. Timeline cards
+  keep the full ✔/◐/○ item list in the chat stream (including mid-Run collapsed Steps), with a
+  `Working on N to-dos · M/N done` header — not a sticky footer. It is implementation navigation, not completion
+  evidence. On create, Qi assigns the Work Plan and Work item IDs even if the model supplied provisional item IDs;
+  later calls use only IDs returned by a successful snapshot. Failed cards retain the rejection code and
+  actionable message.
 - Discovery Actions (read/list/search/…) each keep their own compact card in the transcript; they are not folded
   into an explore summary.
 - Delegate: parent timeline shows a Subagents progress block (`Running` / `Finished` per depth-1 delegation) with
