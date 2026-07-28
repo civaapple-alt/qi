@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { QiWebServer, projectWebSession } from "@civaapple/qi-web";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { EventWriter } from "@civaapple/qi-loop";
-import { SessionEventHub } from "@civaapple/qi-stream";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { EventWriter } from "@civaapple/qi-agent/loop";
+import { SessionEventHub } from "@civaapple/qi-node/stream";
 
 test("Web workbench serves real Session projections, history and committed live events without demo data", async () => {
   const store = new InMemoryEventStore();

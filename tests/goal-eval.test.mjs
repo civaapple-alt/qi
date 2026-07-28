@@ -7,9 +7,9 @@ import {
   SemanticEvaluator,
   evaluatorIdentity,
   failureFingerprint,
-} from "@civaapple/qi-eval";
-import { InMemoryEventStore, StateTransitionError } from "@civaapple/qi-kernel";
-import { EventWriter } from "@civaapple/qi-loop";
+} from "@civaapple/qi-agent/eval";
+import { InMemoryEventStore, StateTransitionError } from "@civaapple/qi-agent/kernel";
+import { EventWriter } from "@civaapple/qi-agent/loop";
 
 const control = {
   issuedTo: "user",

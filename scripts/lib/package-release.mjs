@@ -4,16 +4,10 @@ import { join, resolve } from "node:path";
 
 const coreWave = new Set([
   "@civaapple/qi-protocol",
-  "@civaapple/qi-kernel",
-  "@civaapple/qi-capability",
-  "@civaapple/qi-llm",
-  "@civaapple/qi-context",
-  "@civaapple/qi-workspace",
-  "@civaapple/qi-tools",
-  "@civaapple/qi-loop",
-  "@civaapple/qi-tui",
+  "@civaapple/qi-ai",
   "@civaapple/qi-agent",
-  "@civaapple/qi-introspection",
+  "@civaapple/qi-node",
+  "@civaapple/qi-tui",
 ]);
 
 const dependencySections = [
@@ -96,7 +90,7 @@ export async function createPackageReleasePlan(rootPath) {
   });
 
   const graphChecks = [
-    check("package-count", packages.length === 21, `${packages.length}; expected 21`),
+    check("package-count", packages.length === 5, `${packages.length}; expected 5 runtime packages`),
     check("unique-names", duplicateNames.length === 0, duplicateNames.join(", ") || "all names unique"),
     check("coordinated-version", versions.length === 1 && versions[0] === rootManifest.version, versions.join(", ")),
     check("namespace", namespaceConsistent, namespaceConsistent ? "@civaapple/qi-*" : "inconsistent package namespace"),

@@ -8,26 +8,10 @@ import { spawn } from "node:child_process";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageDirectories = [
   "protocol",
-  "kernel",
-  "session-store",
-  "capability",
-  "llm",
-  "context",
-  "workspace",
-  "tools",
-  "loop",
-  "stream",
-  "eval",
-  "memory",
-  "skills",
-  "mcp",
-  "codeact",
-  "graph",
-  "coordinator",
-  "scheduler",
-  "tui",
+  "ai",
   "agent",
-  "introspection",
+  "node",
+  "tui",
 ];
 
 const rootManifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));

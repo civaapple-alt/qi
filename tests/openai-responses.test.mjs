@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OpenAIResponsesModelPort } from "@civaapple/qi-llm";
+import { OpenAIResponsesModelPort } from "@civaapple/qi-ai";
 
 function asyncEvents(events) {
   return {

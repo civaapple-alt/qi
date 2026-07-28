@@ -13,8 +13,8 @@ import {
 } from "@earendil-works/pi-tui";
 import { dirname, resolve } from "node:path";
 import type { SessionEvent, SessionId } from "@civaapple/qi-protocol";
-import { nextSessionMode, type RuntimeActivity, type SessionMode } from "@civaapple/qi-loop";
-import type { VerificationCandidate } from "@civaapple/qi-tools";
+import { nextSessionMode, type RuntimeActivity, type SessionMode } from "@civaapple/qi-agent/loop";
+import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import type { AuthSession, AuthSessionStatus } from "./auth.js";
 import { parseLoginCommand } from "./auth.js";
 import {

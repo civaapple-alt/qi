@@ -4,14 +4,14 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import {
   AuthorityDeniedError,
   FileArtifactStore,
   ToolFailure,
   ToolRegistry,
   createFetchTool,
-} from "@civaapple/qi-tools";
+} from "@civaapple/qi-node/tools";
 
 const publicAddress = { address: "93.184.216.34", family: 4 };
 

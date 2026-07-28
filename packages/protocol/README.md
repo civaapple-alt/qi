@@ -9,7 +9,7 @@ runtime parsers. Producers and consumers must agree here before a new fact can e
 
 ## Non-goals
 
-- It does not decide whether a transition is legal; `@civaapple/qi-kernel` owns that policy.
+- It does not decide whether a transition is legal; `@civaapple/qi-agent/kernel` owns that policy.
 - It does not persist, project, transport, or execute events.
 - It does not expose provider-specific model payloads as Session truth.
 

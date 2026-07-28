@@ -1,9 +1,9 @@
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { EventStore, SessionSummary } from "@civaapple/qi-kernel";
-import { SqliteEventStore } from "@civaapple/qi-session-store";
+import type { EventStore, SessionSummary } from "@civaapple/qi-agent/kernel";
+import { SqliteEventStore } from "@civaapple/qi-node/storage";
 
-export const PROJECT_DB_NAME = "qi.sqlite";
+export const PROJECT_DB_NAME = "state/qi.sqlite";
 
 export interface WebProjectSummary {
   readonly id: string;
@@ -25,8 +25,13 @@ export async function listWebProjects(projectsRoot: string): Promise<WebProjectS
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
     const path = join(root, entry.name);
-    const dbPath = join(path, PROJECT_DB_NAME);
+    const dbPath = join(path, "state", "qi.sqlite");
     try {
+      const descriptor = JSON.parse(await readFile(join(path, "project.json"), "utf8")) as {
+        projectId?: unknown;
+        workspaceRoot?: unknown;
+      };
+      if (descriptor.projectId !== entry.name || typeof descriptor.workspaceRoot !== "string") continue;
       const info = await stat(dbPath);
       if (!info.isFile()) continue;
       projects.push({

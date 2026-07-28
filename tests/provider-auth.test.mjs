@@ -3,8 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { EncryptedFileCredentialStore, InMemoryCredentialBroker } from "@civaapple/qi-capability";
-import { getProviderProfile, listProviderProfiles } from "@civaapple/qi-llm";
+import { InMemoryCredentialBroker } from "@civaapple/qi-agent/capability";
+import { EncryptedFileCredentialStore } from "@civaapple/qi-node/storage";
+import { getProviderProfile, listProviderProfiles } from "@civaapple/qi-ai";
 import { AuthSession, parseLoginCommand } from "../apps/cli/dist/auth.js";
 import {
   createFetchKimiOAuthTransport,

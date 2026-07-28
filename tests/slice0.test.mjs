@@ -8,7 +8,7 @@ import {
   StateTransitionError,
   applySessionEvent,
   replaySession,
-} from "@civaapple/qi-kernel";
+} from "@civaapple/qi-agent/kernel";
 
 const fixtureUrl = new URL("../fixtures/golden/authority-denied.json", import.meta.url);
 const rawFixture = JSON.parse(await readFile(fixtureUrl, "utf8"));

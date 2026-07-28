@@ -3,9 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { EventWriter } from "@civaapple/qi-loop";
-import { SessionEventTriggerSink, SqliteWatcherScheduler } from "@civaapple/qi-scheduler";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { EventWriter } from "@civaapple/qi-agent/loop";
+import { SessionEventTriggerSink, SqliteWatcherScheduler } from "@civaapple/qi-node/scheduler";
 
 async function temporary(run) {
   const root = await mkdtemp(join(tmpdir(), "qi-watch-test-"));

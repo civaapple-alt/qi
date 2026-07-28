@@ -48,7 +48,7 @@ authorized, create and test a local tarball:
 
 ```sh
 npm run pack:cli
-npm install -g ./.cli-package/civaapple-qi-0.5.1.tgz
+npm install -g ./.cli-package/civaapple-qi-0.6.0.tgz
 qi --help
 ```
 
@@ -82,7 +82,7 @@ background = false
 delegate = false
 ```
 
-Project policy lives under `$QI_HOME/projects/<workspace-slug>/config.toml`. Resolution order is:
+Project policy lives under `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`. Resolution order is:
 
 ```text
 CLI flags > project config > user config > built-in defaults
@@ -98,29 +98,22 @@ execution-side handles and are not persisted in Session events, Artifacts, or TO
 
 | Package | Responsibility |
 | --- | --- |
-| [`@civaapple/qi-agent`](packages/agent) | Thin default-deny embedding façade |
 | [`@civaapple/qi-protocol`](packages/protocol) | Durable IDs and Session event schemas |
-| [`@civaapple/qi-kernel`](packages/kernel) | Transition validation and event projection |
-| [`@civaapple/qi-session-store`](packages/session-store) | Atomic SQLite persistence |
-| [`@civaapple/qi-stream`](packages/stream) | Committed history/live delivery and SSE |
-| [`@civaapple/qi-llm`](packages/llm) | Portable model protocol and provider adapters |
-| [`@civaapple/qi-context`](packages/context) | Deterministic context budgeting |
-| [`@civaapple/qi-capability`](packages/capability) | Leases, delegation bounds, credentials, redaction |
-| [`@civaapple/qi-workspace`](packages/workspace) | Observations, isolation, processes, effect settlement |
-| [`@civaapple/qi-tools`](packages/tools) | Typed Tool phases and built-ins |
-| [`@civaapple/qi-loop`](packages/loop) | Turn orchestration, safe boundaries, recovery |
-| [`@civaapple/qi-eval`](packages/eval) | Goals, evidence, calibration, convergence |
-| [`@civaapple/qi-memory`](packages/memory) | Provenance-backed memory lifecycle |
-| [`@civaapple/qi-skills`](packages/skills) | Progressive declarative Skill loading |
-| [`@civaapple/qi-mcp`](packages/mcp) | Quarantined remote Tool binding |
-| [`@civaapple/qi-codeact`](packages/codeact) | Controlled programmatic Tool composition |
-| [`@civaapple/qi-graph`](packages/graph) | Deterministic-first graph constraints |
-| [`@civaapple/qi-coordinator`](packages/coordinator) | Isolated depth-1 delegation |
-| [`@civaapple/qi-scheduler`](packages/scheduler) | Bounded proactive watchers |
-| [`@civaapple/qi-introspection`](packages/introspection) | Versioned self model and read-only queries |
+| [`@civaapple/qi-ai`](packages/ai) | ModelPort, provider adapters, and Context Compiler |
+| [`@civaapple/qi-agent`](packages/agent) | State machine, lifecycle, capability, portable Tool/Effect ports, evaluation, memory, and extension contracts |
+| [`@civaapple/qi-node`](packages/node) | Paths, SQLite, Workspace, built-in Tools, package installer, Skills, MCP, CodeAct, Scheduler, and SSE |
 | [`@civaapple/qi-tui`](packages/tui) | Reusable terminal projections and controls |
+| [`@civaapple/qi`](apps/cli) | CLI, package management, and product composition |
 
 `apps/cli` is the interactive execution composition. `apps/web` is a read-only local history workbench.
+
+Qi 0.6 uses `$QI_HOME/layout.json` generation 2. Runtime databases and machine policy live under
+`$QI_HOME/projects/<workspace-name>-<path-hash>/`; Workspace `.qi` contains only versionable declarations and
+package locks. Existing non-empty 0.5 data roots are not migrated or deleted automatically.
+
+Declaration-only packages install with `qi install npm:<name>@<exact-version>`, `qi install
+git:<url>#<commit>`, or `qi install local:<path>`. Use `--scope project` to write the exact lock to Workspace
+`.qi`; verified package content stays in the shared `$QI_HOME/packages/store`.
 
 ## Development
 

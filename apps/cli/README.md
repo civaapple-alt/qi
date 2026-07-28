@@ -1,6 +1,6 @@
 # `@civaapple/qi`
 
-Version **0.5.1** (moves with the Qi monorepo release).
+Version **0.6.0** (moves with the Qi monorepo release).
 
 Qi's CLI application composes authentication, project policy, persistence, Tools, the local single-writer
 Runtime, and the interactive terminal lifecycle. Reusable Session presenters, controls, panels, themes, and
@@ -49,7 +49,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/skills` | Skills hub: list discovered Skills, or Install → scope → name/path form |
 | `/tasks [stop …]` | Background tasks hub (list / stop) |
 | `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path form) / unmount (picker); slash args still work |
-| `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `config.toml`) |
+| `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `policy.toml`) |
 | `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
 | `/runs` | Session history hub → interactive Runs / Steps / Actions / Agents lists (Enter selects observation) |
 | `/sessions` | List Workspace Sessions; type-to-search; Enter resumes in-process |
@@ -111,11 +111,13 @@ workspace instructions; nested `AGENTS.md` files are not auto-loaded.
 
 CLI flags are parsed by a pure helper that supports credential-free `--help`/`--version`. Bare `qi` uses the
 current directory as the Workspace (optional positional `qi PATH` or `--workspace PATH`). `--data PATH`
-names the exact Qi data directory; when omitted it defaults to `~/.qi/projects/<workspace-slug>` (or
+names the exact Qi project-private data directory; when omitted it defaults to
+`~/.qi/projects/<workspace-name>-<path-hash>` (or
 `$QI_HOME/projects/...`), e.g. `C:\Users\…\.qi\projects\D-ai-project-qi`. Workspace-local
 `.qi` still holds Skills and `qi.verify.json`.
 
-Per-Workspace policy lives in `$QI_HOME/projects/<slug>/config.toml` (`max_steps`, `[capabilities]`, `[shell]`,
+Per-Workspace policy lives in `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`
+(`max_steps`, `[capabilities]`, `[shell]`,
 `[[mounts]]`), overlaying global `~/.qi/config.toml`; CLI flags still win. `--add-dir PATH` and
 `/mounts add` authorize **read-only** mounts (`mount:<id>/…`); mutations stay in the primary Workspace.
 Outside-root reads fail with `PATH_GRANT_REQUIRED` and open an allow/deny panel
@@ -163,7 +165,7 @@ Main Runs default to 32 Steps. `max_steps` accepts 8–100 in user or project TO
 32 is a tool-free handoff and parks the Run for budget with explicit progress, blockers, next actions, and
 verification state.
 
-The Skill catalog combines `<workspace>/.qi/skills` and `~/.qi/skills`; Workspace wins on a name
+The Skill catalog combines `<workspace>/.qi/skills` and `$QI_HOME/resources/skills`; Workspace wins on a name
 collision. Only metadata enters the initial model context. The `skill` tool progressively loads a selected
 `SKILL.md` or named resource. `/skills` → **Install skill** picks user vs Workspace scope, then a form for a
 compatible Skill name or local path (for example from `~/.codex/skills/.system`); Qi does not search or

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ASK_MODE_TOOLS, InMemoryCapabilityBroker } from "@civaapple/qi-capability";
+import { ASK_MODE_TOOLS, InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import {
   createQiIntrospectionTool,
   createQiSessionInspectionTool,
@@ -12,12 +12,12 @@ import {
   qiSelfModel,
   parseQiSelfModel,
   queryQiSelfModel,
-} from "@civaapple/qi-introspection";
-import { SkillLoader } from "@civaapple/qi-skills";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { TurnLoop } from "@civaapple/qi-loop";
-import { FileArtifactStore, ToolRegistry, readTool } from "@civaapple/qi-tools";
+} from "@civaapple/qi-agent/extensions";
+import { SkillLoader } from "@civaapple/qi-node/skills";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { TurnLoop } from "@civaapple/qi-agent/loop";
+import { FileArtifactStore, ToolRegistry, readTool } from "@civaapple/qi-node/tools";
 import { parse } from "yaml";
 
 const root = process.cwd();
@@ -85,7 +85,7 @@ test("self queries and Context are bounded, provenance-bearing, and authority-ne
   const packages = queryQiSelfModel("packages");
   assert.ok(Array.isArray(packages));
   const context = createQiSelfContext(["identity", "invariants", "gaps"]);
-  assert.equal(context.source, "@civaapple/qi-introspection");
+  assert.equal(context.source, "@civaapple/qi-agent/extensions");
   assert.equal(context.required, false);
   assert.match(context.content, /not authority/i);
   assert.ok(context.content.length < 64_000);
@@ -145,7 +145,7 @@ test("qi_introspect remains default-deny and executes only with an explicit read
     { section: "identity" },
     { ...context, actionId: "act_introspection_granted" },
   );
-  assert.equal(settlement.output.release, "0.5.1");
+  assert.equal(settlement.output.release, "0.6.0");
   assert.match(settlement.output.authorityNotice, /cannot grant capabilities/u);
 });
 

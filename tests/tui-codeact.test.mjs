@@ -3,9 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { probeContainerRuntime } from "@civaapple/qi-codeact";
-import { TuiRuntime } from "@civaapple/qi";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { probeContainerRuntime } from "@civaapple/qi-node/codeact";
+import { TuiRuntime } from "../apps/cli/dist/index.js";
 
 // The codeact tool is gated on a real container runtime responding to a probe, which varies by host. These tests
 // probe independently first so the expectation always matches this machine's actual capability, rather than

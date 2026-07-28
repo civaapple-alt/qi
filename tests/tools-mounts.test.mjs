@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { InMemoryCapabilityBroker } from "../packages/capability/dist/index.js";
+import { InMemoryCapabilityBroker } from "../packages/agent/dist/capability/index.js";
 import {
   FileArtifactStore,
   ToolFailure,
@@ -11,7 +11,7 @@ import {
   readTool,
   writeTool,
   resolveAccessiblePath,
-} from "../packages/tools/dist/index.js";
+} from "../packages/node/dist/tools/index.js";
 
 function grant(broker) {
   const expiresAt = new Date(Date.now() + 60_000).toISOString();

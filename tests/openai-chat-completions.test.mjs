@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OpenAIChatCompletionsModelPort } from "@civaapple/qi-llm";
+import { OpenAIChatCompletionsModelPort } from "@civaapple/qi-ai";
 
 function asyncEvents(events) {
   return {
@@ -121,7 +121,7 @@ test("Chat Completions adapter does not release incomplete tool arguments", asyn
 });
 
 test("normalizeFunctionParameters forces type object for TypeBox unions", async () => {
-  const { normalizeFunctionParameters } = await import("@civaapple/qi-llm");
+  const { normalizeFunctionParameters } = await import("@civaapple/qi-ai");
   const union = {
     anyOf: [
       { type: "object", properties: { operation: { const: "list", type: "string" } }, required: ["operation"] },

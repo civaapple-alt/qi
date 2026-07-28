@@ -3,9 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { EventWriter, SessionSupervisor } from "@civaapple/qi-loop";
-import { SqliteEventStore } from "@civaapple/qi-session-store";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { EventWriter, SessionSupervisor } from "@civaapple/qi-agent/loop";
+import { SqliteEventStore } from "@civaapple/qi-node/storage";
 
 test("SessionSupervisor parks a crashed running Action as indeterminate after SQLite restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-recovery-"));

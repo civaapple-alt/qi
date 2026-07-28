@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
 import { parseSessionEvent } from "@civaapple/qi-protocol";
-import { EventStreamService, SessionEventHub, encodeSseEvent } from "@civaapple/qi-stream";
+import { EventStreamService, SessionEventHub, encodeSseEvent } from "@civaapple/qi-node/stream";
 
 const fixtureUrl = new URL("../fixtures/golden/authority-denied.json", import.meta.url);
 const fixture = JSON.parse(await readFile(fixtureUrl, "utf8")).map(parseSessionEvent);

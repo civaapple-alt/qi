@@ -1,5 +1,5 @@
-import { listProviderProfiles } from "@civaapple/qi-llm";
-import type { VerificationCandidate } from "@civaapple/qi-tools";
+import { listProviderProfiles } from "@civaapple/qi-ai";
+import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import type { AuthSession } from "../auth.js";
 import {
   defaultUserConfigPath,

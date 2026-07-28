@@ -3,7 +3,7 @@ import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import {
   CodeActRunner,
   ContainerProgramSandbox,
@@ -11,10 +11,10 @@ import {
   FixtureProgramSandbox,
   buildContainerInvocation,
   probeContainerRuntime,
-} from "@civaapple/qi-codeact";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { EventWriter } from "@civaapple/qi-loop";
-import { FileArtifactStore, ToolRegistry, artifactTool, readTool, searchTool } from "@civaapple/qi-tools";
+} from "@civaapple/qi-node/codeact";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { EventWriter } from "@civaapple/qi-agent/loop";
+import { FileArtifactStore, ToolRegistry, artifactTool, readTool, searchTool } from "@civaapple/qi-node/tools";
 
 async function setup(run, grant = true) {
   const root = await mkdtemp(join(tmpdir(), "qi-codeact-test-"));

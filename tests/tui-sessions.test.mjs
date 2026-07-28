@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
 import {
   SessionsPanel,
   NEW_SESSION_ID,
@@ -15,7 +15,7 @@ import {
   autocompleteSlashCommands,
   primarySlashCommands,
   t,
-} from "@civaapple/qi";
+} from "../apps/cli/dist/index.js";
 
 test("formatRelativeTime covers just now / minutes / hours / days / date", () => {
   const now = Date.parse("2026-07-23T12:00:00.000Z");

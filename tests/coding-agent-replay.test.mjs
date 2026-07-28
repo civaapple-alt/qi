@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { TuiRuntime } from "@civaapple/qi";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { TuiRuntime } from "../apps/cli/dist/index.js";
 
 const execFileAsync = promisify(execFile);
 

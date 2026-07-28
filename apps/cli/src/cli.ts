@@ -60,6 +60,9 @@ export type ParsedTuiCli =
 
 const HELP_TEXT =
   "qi [WORKSPACE] [options]\n" +
+  "qi install|update SOURCE [--scope user|project] [--workspace PATH]\n" +
+  "qi remove PACKAGE_ID [--scope user|project] [--workspace PATH]\n" +
+  "qi list [--scope user|project] [--workspace PATH]\n" +
   "  WORKSPACE defaults to the current directory (same as `qi --workspace .`).\n" +
   "  Options: [--workspace PATH] [--data PATH] [--provider openai|xai] [--model ID] [--base-url URL]\n" +
   "           [--session ID] [--max-steps 8..100] [--config PATH|--no-config] [--add-dir PATH]…\n" +
@@ -76,7 +79,7 @@ const VALUE_FLAGS = [
   "--workspace", "--data", "--provider", "--model", "--base-url", "--session", "--config", "--add-dir", "--max-steps",
 ] as const;
 
-export function qiCliVersion(packageVersion = process.env.npm_package_version ?? "0.5.1"): string {
+export function qiCliVersion(packageVersion = process.env.npm_package_version ?? "0.6.0"): string {
   return `qi ${packageVersion}`;
 }
 

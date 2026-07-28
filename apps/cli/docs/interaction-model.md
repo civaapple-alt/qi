@@ -182,7 +182,8 @@ pressure. If required context still cannot fit, the Run parks at the safe Step b
 ## Read-only directory mounts
 
 Cross-directory reads use human-gated mounts, not model-owned authority. Project policy lives at
-`$QI_HOME/projects/<workspace-slug>/config.toml` (`[capabilities]`, `[shell]`, `[[mounts]]`); merge order is
+`$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`
+(`[capabilities]`, `[shell]`, `[[mounts]]`); merge order is
 CLI flags > project TOML > global `~/.qi/config.toml`. `/mounts add <path>`, `/mounts`, and
 `/mounts unmount <id>` manage mounts in-session. `/permissions` (also under `/settings`) lists effective Session
 capabilities with Space multi-select, applies the selection to the current Session (tool catalog + leases)

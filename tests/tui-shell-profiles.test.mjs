@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { TuiRuntime } from "@civaapple/qi";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { TuiRuntime } from "../apps/cli/dist/index.js";
 
 test("TUI advertises shell and script only for authorized probed profiles", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-shell-"));

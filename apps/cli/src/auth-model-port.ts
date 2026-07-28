@@ -1,5 +1,5 @@
-import type { ModelCapabilities, ModelPort, ModelRef, ModelRequest, ModelEvent } from "@civaapple/qi-llm";
-import { modelCapabilitiesFromProfile } from "@civaapple/qi-llm";
+import type { ModelCapabilities, ModelPort, ModelRef, ModelRequest, ModelEvent } from "@civaapple/qi-ai";
+import { modelCapabilitiesFromProfile } from "@civaapple/qi-ai";
 import type { AuthSession } from "./auth.js";
 
 /** ModelPort that resolves credentials through AuthSession only at call time. */

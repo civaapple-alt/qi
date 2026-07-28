@@ -9,11 +9,14 @@ import {
   resolveSessionDatabase,
   selectedOperation,
   workspaceProjectSlug,
-} from "../.qi/skills/analyze-qi-session/scripts/extract-session.mjs";
+} from "../scripts/extract-session.mjs";
 
-test("analyze-qi-session slug matches TUI Cursor-style encoding", () => {
-  assert.equal(workspaceProjectSlug("D:\\lab-ws\\lab"), "D-lab-ws-lab");
-  assert.equal(workspaceProjectSlug("/home/alwar/work/fastai"), "home-alwar-work-fastai");
+test("analyze-qi-session project identity is readable and collision-resistant", () => {
+  assert.match(workspaceProjectSlug("D:\\lab-ws\\lab"), /^lab-[0-9a-f]{12}$/);
+  assert.notEqual(
+    workspaceProjectSlug("D:\\lab-ws\\lab"),
+    workspaceProjectSlug("E:\\lab-ws\\lab"),
+  );
 });
 
 test("analyze-qi-session defaults to bounded Runs and validates narrow query selectors", () => {
@@ -54,18 +57,15 @@ test("analyze-qi-session accepts --workspace-root and QI_WORKSPACE", () => {
   );
 });
 
-test("analyze-qi-session prefers QI_HOME project DB over workspace-local", async () => {
+test("analyze-qi-session resolves only the QI_HOME private project database", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-extract-db-"));
   try {
     const workspace = join(root, "lab");
     const qiHome = join(root, "home");
     const slug = workspaceProjectSlug(workspace);
-    const homeDb = join(qiHome, "projects", slug, "qi.sqlite");
-    const localDb = join(workspace, ".qi", "qi.sqlite");
+    const homeDb = join(qiHome, "projects", slug, "state", "qi.sqlite");
     await mkdir(join(homeDb, ".."), { recursive: true });
-    await mkdir(join(localDb, ".."), { recursive: true });
     await writeFile(homeDb, "");
-    await writeFile(localDb, "");
 
     const candidates = candidateSessionDatabases({
       workspace,
@@ -73,7 +73,7 @@ test("analyze-qi-session prefers QI_HOME project DB over workspace-local", async
     });
     assert.deepEqual(
       candidates.map((item) => item.kind),
-      ["qi-home", "workspace-local"],
+      ["qi-home"],
     );
 
     const resolved = resolveSessionDatabase({
@@ -86,34 +86,32 @@ test("analyze-qi-session prefers QI_HOME project DB over workspace-local", async
   }
 });
 
-test("analyze-qi-session falls back to workspace-local when home DB is missing", async () => {
+test("analyze-qi-session never falls back to Workspace-local runtime state", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-extract-local-"));
   try {
     const workspace = join(root, "lab");
     const qiHome = join(root, "home");
-    const localDb = join(workspace, ".qi", "qi.sqlite");
-    await mkdir(join(localDb, ".."), { recursive: true });
-    await writeFile(localDb, "");
-
-    const resolved = resolveSessionDatabase({
-      workspace,
-      environment: { QI_HOME: qiHome },
-    });
-    assert.equal(resolved, localDb);
+    assert.throws(
+      () => resolveSessionDatabase({
+        workspace,
+        environment: { QI_HOME: qiHome },
+      }),
+      /No qi\.sqlite found/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("analyze-qi-session resolves by project slug alone", async () => {
+test("analyze-qi-session resolves by project ID alone", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-extract-slug-"));
   try {
     const qiHome = join(root, "home");
-    const db = join(qiHome, "projects", "D-lab-ws-lab", "qi.sqlite");
+    const db = join(qiHome, "projects", "lab-123456789abc", "state", "qi.sqlite");
     await mkdir(join(db, ".."), { recursive: true });
     await writeFile(db, "");
     const resolved = resolveSessionDatabase({
-      projectSlug: "D-lab-ws-lab",
+      projectSlug: "lab-123456789abc",
       environment: { QI_HOME: qiHome },
     });
     assert.equal(resolved, db);

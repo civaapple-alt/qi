@@ -109,7 +109,7 @@ and recovery semantics.
 
 ## 5. Context, models, and memory
 
-`@civaapple/qi-llm` defines a portable streaming model protocol. Provider profiles explicitly declare wire API,
+`@civaapple/qi-ai` defines a portable streaming model protocol. Provider profiles explicitly declare wire API,
 auth schemes, model window, and supported capabilities. Provider-specific details do not enter Session truth.
 
 Credential values remain behind execution-side handles. High-confidence secret redaction runs before provider
@@ -181,29 +181,36 @@ Session's authority.
 
 | Package | Responsibility |
 | --- | --- |
-| `protocol` | Wire IDs and Session event schemas |
-| `kernel` | Transition validation and event projection |
-| `session-store` | Atomic SQLite persistence |
-| `stream` | Committed history/live delivery and SSE |
-| `llm` | Portable model protocol and provider adapters |
-| `context` | Deterministic context budgeting |
-| `capability` | Leases, delegation bounds, credentials, redaction |
-| `workspace` | World observations, isolation, processes, effect settlement |
-| `tools` | Typed Tool phases and built-ins |
-| `loop` | Model turns, safe boundaries, recovery |
-| `eval` | Goals, evidence, calibration, convergence |
-| `memory` | Provenance-backed claim lifecycle |
-| `skills` | Progressive declarative Skill loading |
-| `mcp` | Quarantined remote Tool binding |
-| `codeact` | Controlled programmatic Tool composition |
-| `graph` | Deterministic-first sampling constraints |
-| `coordinator` | Isolated depth-1 delegation |
-| `scheduler` | Bounded proactive watchers |
-| `introspection` | Versioned self model and read-only queries |
-| `tui` | Reusable terminal projections and controls |
-| `agent` | Thin default-deny embedding façade |
+| `@civaapple/qi-protocol` | Wire IDs, Session event schemas, parsing, and compatibility |
+| `@civaapple/qi-ai` | ModelPort, provider adapters, and deterministic Context Compiler |
+| `@civaapple/qi-agent` | Kernel, TurnLoop/EventWriter, capability, portable Tool/Effect ports, evaluation, memory policy, coordination, and extension contracts |
+| `@civaapple/qi-node` | Paths, SQLite, Workspace, built-in Tools, package installation, Skills, MCP, CodeAct, Scheduler, stream/SSE, and encrypted storage |
+| `@civaapple/qi-tui` | Reusable terminal projections and controls |
+| `@civaapple/qi` | CLI, package management, trust prompts, and product composition |
 
 Applications live under `apps/`: `cli` is the execution composition; `web` is a read-only understanding surface.
+
+The dependency direction is `protocol + ai -> agent -> node`, while `tui` depends only on `protocol + agent`.
+The CLI composes all five runtime packages. Subpaths expose cohesive modules without creating more publication
+units. State/event ownership remains: Protocol defines events; Agent Kernel validates and projects; Agent Loop
+produces; Node storage persists; Node stream transports committed events.
+
+### Private and shared data
+
+`@civaapple/qi-node/paths` is the only path resolver. `$QI_HOME/layout.json` identifies layout generation 2
+(Qi 0.6). Machine-private credentials, user resources, the content-addressed package store, and project-private
+state live under `$QI_HOME`. Each project directory is `<basename>-<canonical-realpath-sha256-prefix>` and keeps
+SQLite databases in `state/`, plus Artifacts, Plans, Tasks, activation, cache, and temporary data.
+
+Workspace `.qi` is an allowlisted declaration surface only: package request/lock files, frozen verify profiles,
+Skills, prompts, themes, Agent/workflow declarations, and secret-free MCP declarations. It contains no runtime
+database, package payload, executable code, credential, Artifact, log, cache, or temporary file. Ordinary Agent
+file tools remain denied; dedicated services validate and atomically write only their owned subtree.
+
+Declarative packages may originate from exact npm versions with registry integrity, Git commits, or digest-pinned
+local directories. Installation stages without lifecycle scripts, validates paths/types/size/symlinks/secrets,
+then atomically publishes immutable content under `$QI_HOME/packages/store/sha256-*`. Registration contributes
+resources but never a Capability Lease. Executable third-party plugins require a future isolation ADR.
 
 ## 10. Verification and maturity
 

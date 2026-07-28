@@ -15,6 +15,7 @@ export * from "./kimi-oauth.js";
 export * from "./layout.js";
 export * from "./markdown.js";
 export * from "./paint.js";
+export * from "./package-command.js";
 export * from "./panels/index.js";
 export * from "./paths.js";
 export * from "./presenter.js";

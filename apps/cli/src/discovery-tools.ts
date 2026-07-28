@@ -1,4 +1,4 @@
-import { findTrustedExecutable } from "@civaapple/qi-tools";
+import { findTrustedExecutable } from "@civaapple/qi-node/tools";
 import { t, type Locale } from "./i18n.js";
 
 const DISCOVERY_COMMANDS = ["rg", "fd"] as const;

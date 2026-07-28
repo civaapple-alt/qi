@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ContextBudgetError, compileContext } from "@civaapple/qi-context";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
+import { ContextBudgetError, compileContext } from "@civaapple/qi-ai/context";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
 
 const model = { provider: "fake", model: "deterministic-v1" };
 const request = {

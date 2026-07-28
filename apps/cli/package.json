@@ -1,38 +1,21 @@
 {
   "name": "@civaapple/qi",
-  "version": "0.5.1",
-  "private": true,
-  "description": "Qi CLI application composition and terminal runtime owner",
+  "version": "0.6.0",
+  "description": "Qi CLI application composition, plugin management, and terminal runtime",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "bin": {
     "qi": "./dist/main.js"
   },
   "engines": {
     "node": ">=22.19.0"
   },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
+  "files": ["dist", "README.md", "LICENSE"],
   "dependencies": {
-    "@civaapple/qi-capability": "0.5.1",
-    "@civaapple/qi-codeact": "0.5.1",
-    "@civaapple/qi-coordinator": "0.5.1",
-    "@civaapple/qi-eval": "0.5.1",
-    "@civaapple/qi-introspection": "0.5.1",
-    "@civaapple/qi-kernel": "0.5.1",
-    "@civaapple/qi-llm": "0.5.1",
-    "@civaapple/qi-loop": "0.5.1",
-    "@civaapple/qi-protocol": "0.5.1",
-    "@civaapple/qi-session-store": "0.5.1",
-    "@civaapple/qi-skills": "0.5.1",
-    "@civaapple/qi-tools": "0.5.1",
-    "@civaapple/qi-tui": "0.5.1",
-    "@civaapple/qi-workspace": "0.5.1",
+    "@civaapple/qi-agent": "0.6.0",
+    "@civaapple/qi-ai": "0.6.0",
+    "@civaapple/qi-node": "0.6.0",
+    "@civaapple/qi-protocol": "0.6.0",
+    "@civaapple/qi-tui": "0.6.0",
     "@earendil-works/pi-tui": "0.81.1",
     "@sinclair/typebox": "0.34.52",
     "smol-toml": "1.7.0"
@@ -46,5 +29,9 @@
   "bugs": {
     "url": "https://github.com/civaapple-alt/qi/issues"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

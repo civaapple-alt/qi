@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Type } from "@sinclair/typebox";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { TurnLoop } from "@civaapple/qi-loop";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { TurnLoop } from "@civaapple/qi-agent/loop";
 import {
   FileArtifactStore,
   ToolRegistry,
@@ -17,8 +17,8 @@ import {
   readTool,
   searchTool,
   writeTool,
-} from "@civaapple/qi-tools";
-import { effectIdempotencyKey } from "@civaapple/qi-workspace";
+} from "@civaapple/qi-node/tools";
+import { effectIdempotencyKey } from "@civaapple/qi-node/workspace";
 
 function delayedReadTool(activity) {
   return defineTool({

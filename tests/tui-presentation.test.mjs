@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { stripVTControlCharacters } from "node:util";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
 import {
   commandHelp,
   FollowUpQueue,
@@ -27,7 +27,7 @@ import {
   statusGlyph,
   TuiPresenter,
   TuiRuntime,
-} from "@civaapple/qi";
+} from "../apps/cli/dist/index.js";
 
 test("TUI command catalog separates inspection, navigation, and control", () => {
   assert.deepEqual(parseTuiCommand("/actions"), { name: "actions", argument: "" });

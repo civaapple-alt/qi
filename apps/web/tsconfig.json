@@ -7,9 +7,8 @@
   },
   "references": [
     { "path": "../../packages/protocol" },
-    { "path": "../../packages/kernel" },
-    { "path": "../../packages/session-store" },
-    { "path": "../../packages/stream" }
+    { "path": "../../packages/agent" },
+    { "path": "../../packages/node" }
   ],
   "include": ["src/**/*.ts"]
 }

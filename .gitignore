@@ -9,8 +9,21 @@ coverage/
 .release/
 .artifacts/
 .qi/*
+!.qi/packages.toml
+!.qi/packages.lock.json
+!.qi/qi.verify.json
 !.qi/skills/
 !.qi/skills/**
+!.qi/prompts/
+!.qi/prompts/**
+!.qi/themes/
+!.qi/themes/**
+!.qi/agents/
+!.qi/agents/**
+!.qi/workflows/
+!.qi/workflows/**
+!.qi/mcp/
+!.qi/mcp/**
 .cache/
 .eslintcache
 

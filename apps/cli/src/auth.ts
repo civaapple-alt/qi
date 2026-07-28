@@ -1,17 +1,17 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import {
-  EncryptedFileCredentialStore,
   InMemoryCredentialBroker,
   type SecureCredentialStore,
-} from "@civaapple/qi-capability";
+} from "@civaapple/qi-agent/capability";
+import { EncryptedFileCredentialStore } from "@civaapple/qi-node/storage";
 import {
   classifyProfileEndpoint,
   createModelPortForProfile,
   listProviderProfiles,
   requireProviderProfile,
   type ModelPort,
-} from "@civaapple/qi-llm";
+} from "@civaapple/qi-ai";
 import {
   createFetchKimiOAuthTransport,
   KIMI_CODING_API_BASE,

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { OpenAIResponsesModelPort } from "@civaapple/qi-llm";
+import { OpenAIResponsesModelPort } from "@civaapple/qi-ai";
 import { resolveProviderConfig, TuiRuntime } from "@civaapple/qi";
 import { assertCodingAcceptance } from "./coding-acceptance-oracle.mjs";
 

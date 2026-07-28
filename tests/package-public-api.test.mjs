@@ -3,39 +3,36 @@ import test from "node:test";
 
 const expectedRuntimeExports = {
   "@civaapple/qi-agent": ["QiAgent", "InMemoryArtifactStore"],
-  "@civaapple/qi-capability": [
-    "ASK_MODE_TOOLS", "EncryptedFileCredentialStore", "InMemoryCapabilityBroker",
+  "@civaapple/qi-agent/capability": [
+    "ASK_MODE_TOOLS", "InMemoryCapabilityBroker",
     "InMemoryCredentialBroker", "PLAN_MODE_EXTRA_TOOLS", "SESSION_MODES",
     "formatModeLabel", "isToolAllowedInMode", "mergeRedactionSummaries", "modeAllowsIntent",
     "nextSessionMode", "redactSensitiveText", "redactSensitiveValue", "toolsForMode",
   ],
-  "@civaapple/qi-codeact": [
+  "@civaapple/qi-node/codeact": [
     "CodeActRunner", "ContainerProgramSandbox", "ControlledToolClient",
     "FixtureProgramSandbox", "buildContainerInvocation", "probeContainerRuntime",
   ],
-  "@civaapple/qi-context": ["ContextBudgetError", "approximateTokenEstimator", "compileContext"],
-  "@civaapple/qi-coordinator": [
-    "Coordinator", "MultiAgentBaselineGate", "contextBlocksFromRefs", "runDelegatedTurn",
+  "@civaapple/qi-ai/context": ["ContextBudgetError", "approximateTokenEstimator", "compileContext"],
+  "@civaapple/qi-agent/extensions": [
+    "Coordinator", "DECLARATIVE_RESOURCE_KINDS", "GraphGovernor", "MultiAgentBaselineGate",
+    "PublicPackageMaturitySchema", "QI_SELF_SECTIONS", "QiSelfDecisionSchema", "QiSelfGapSchema",
+    "QiSelfInvariantSchema", "QiSelfModelSchema", "QiSelfPackageSchema",
+    "QiSessionInspectionError", "RuntimeMaturitySchema", "SelfModelPackageKindSchema",
+    "contextBlocksFromRefs", "createQiIntrospectionTool", "createQiSelfContext",
+    "createQiSessionInspectionTool", "inspectQiSession", "parseQiPluginManifest",
+    "parseQiSelfModel", "qiSelfModel", "queryQiSelfModel", "runDelegatedTurn", "validateGraph",
   ],
-  "@civaapple/qi-eval": [
+  "@civaapple/qi-agent/eval": [
     "DeterministicEvaluator", "EvaluatorCalibrationRegistry", "GoalEngine", "SemanticEvaluator",
     "evaluatorIdentity", "failureFingerprint",
   ],
-  "@civaapple/qi-graph": ["GraphGovernor", "validateGraph"],
-  "@civaapple/qi-introspection": [
-    "QI_SELF_SECTIONS", "QiSelfDecisionSchema", "QiSelfGapSchema",
-    "QiSelfInvariantSchema", "QiSelfModelSchema", "QiSelfPackageSchema",
-    "QiSessionInspectionError",
-    "PublicPackageMaturitySchema", "RuntimeMaturitySchema", "SelfModelPackageKindSchema",
-    "createQiIntrospectionTool", "createQiSelfContext", "createQiSessionInspectionTool",
-    "inspectQiSession", "qiSelfModel", "parseQiSelfModel", "queryQiSelfModel",
-  ],
-  "@civaapple/qi-kernel": [
+  "@civaapple/qi-agent/kernel": [
     "ConcurrencyError", "InMemoryEventStore", "KERNEL_ASK_MODE_TOOLS",
     "KERNEL_PLAN_MODE_EXTRA_TOOLS", "StateTransitionError", "applySessionEvent",
     "replaySession",
   ],
-  "@civaapple/qi-llm": [
+  "@civaapple/qi-ai": [
     "BUILTIN_PROVIDER_PROFILES", "ModelContentPartSchema", "ModelEventSchema",
     "ModelMessageSchema", "ModelRefSchema", "ModelRequestSchema",
     "OpenAIChatCompletionsModelPort", "OpenAIResponsesModelPort", "PortableToolSchema",
@@ -44,14 +41,19 @@ const expectedRuntimeExports = {
     "modelCapabilitiesFromProfile", "normalizeFunctionParameters", "parseModelEvent",
     "parseModelRequest", "requireProviderProfile",
   ],
-  "@civaapple/qi-loop": [
+  "@civaapple/qi-agent/loop": [
     "ASK_MODE_TOOLS", "EventWriter", "HumanControlService", "PLAN_MODE_EXTRA_TOOLS",
     "SESSION_MODES", "SessionSupervisor", "SteeringMailbox", "TurnLoop",
     "firstIncompleteItem", "formatModeLabel", "formatPlanItemInput", "isToolAllowedInMode",
     "latestTerminalPlanBoundRun", "nextSessionMode", "toolsForMode",
   ],
-  "@civaapple/qi-mcp": ["McpBridge"],
-  "@civaapple/qi-memory": ["ContinuityController", "MemoryController", "SqliteMemoryIndex"],
+  "@civaapple/qi-agent/tools": [
+    "AuthorityDeniedError", "EffectReplayBlockedError", "StaleToolError", "ToolFailure",
+    "ToolInputError", "ToolOutputError", "ToolRegistry", "defineTool",
+  ],
+  "@civaapple/qi-agent/effects": ["effectIdempotencyKey", "effectIntentHash"],
+  "@civaapple/qi-node/mcp": ["McpBridge"],
+  "@civaapple/qi-agent/memory": ["ContinuityController", "MemoryController"],
   "@civaapple/qi-protocol": [
     "ActionIdSchema", "EvaluationIdSchema", "EventIdSchema", "EvidenceIdSchema",
     "GoalIdSchema", "LeaseIdSchema", "MemoryIdSchema", "PlanIdSchema",
@@ -59,14 +61,27 @@ const expectedRuntimeExports = {
     "SessionEventSchema", "SessionIdSchema", "SessionModeSchema", "StepIdSchema",
     "TaskIdSchema", "assertSchema", "createId", "parseSessionEvent",
   ],
-  "@civaapple/qi-scheduler": ["SessionEventTriggerSink", "SqliteWatcherScheduler"],
-  "@civaapple/qi-session-store": ["SqliteEventStore"],
-  "@civaapple/qi-skills": [
+  "@civaapple/qi-node/scheduler": ["SessionEventTriggerSink", "SqliteWatcherScheduler"],
+  "@civaapple/qi-node/storage": [
+    "EncryptedFileCredentialStore", "SqliteEventStore", "SqliteMemoryIndex",
+  ],
+  "@civaapple/qi-node": [
+    "QI_LAYOUT_GENERATION", "QI_LAYOUT_VERSION", "assertSafePrivateRoot",
+    "canonicalWorkspacePath", "defaultProjectConfigPath", "defaultProjectsRoot",
+    "defaultQiHome", "defaultSessionDataRoot", "discoverProjects", "ensureProjectLayout",
+    "ensureQiLayout", "projectPaths", "workspaceProjectId",
+  ],
+  "@civaapple/qi-node/extensions": [
+    "DeclarativePackageStore", "WORKSPACE_QI_DIRECTORIES", "WORKSPACE_QI_FILES",
+    "assertPinnedPackageSource", "resolveLayeredResources", "validateDeclarativeTree",
+    "validateWorkspaceQiDirectory",
+  ],
+  "@civaapple/qi-node/skills": [
     "SkillCatalog", "SkillLoader", "SkillStaleError", "SkillUpdateIndeterminateError",
     "loadAgentDefinition", "parseFrontmatter", "requireString",
   ],
-  "@civaapple/qi-stream": ["EventStreamService", "SessionEventHub", "encodeSseEvent", "sseStream"],
-  "@civaapple/qi-tools": [
+  "@civaapple/qi-node/stream": ["EventStreamService", "SessionEventHub", "encodeSseEvent", "sseStream"],
+  "@civaapple/qi-node/tools": [
     "AuthorityDeniedError", "EffectReplayBlockedError", "FileArtifactStore",
     "SHELL_PROFILE_IDS", "StaleToolError", "ToolFailure", "ToolInputError",
     "ToolOutputError", "ToolRegistry", "artifactTool", "builtinTools", "createFetchTool",
@@ -95,7 +110,7 @@ const expectedRuntimeExports = {
     "splitKeepRight", "statusGlyph", "t", "theme", "toSlashCommand", "truncateToWidth",
     "tuiCommands", "visibleWidth",
   ],
-  "@civaapple/qi-workspace": [
+  "@civaapple/qi-node/workspace": [
     "ContainerWorkspaceAdapter", "GitWorktreeAdapter", "LocalWorkspace",
     "SqliteEffectJournal", "effectIdempotencyKey", "effectIntentHash", "hostProcessRunner",
     "minimalHostEnvironment", "runHostProcess", "scrubCredentialEnvironment",
@@ -103,7 +118,7 @@ const expectedRuntimeExports = {
   ],
 };
 
-test("all 21 package runtime export surfaces are explicitly reviewed", async () => {
+test("all controlled six-package runtime entrypoints are explicitly reviewed", async () => {
   for (const [packageName, expected] of Object.entries(expectedRuntimeExports)) {
     const packageModule = await import(packageName);
     assert.deepEqual(

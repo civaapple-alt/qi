@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ArtifactStore } from "@civaapple/qi-tools";
+import type { ArtifactStore } from "@civaapple/qi-agent/tools";
 
 interface StoredArtifact {
   readonly content: Uint8Array;

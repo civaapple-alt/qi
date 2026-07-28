@@ -3,23 +3,14 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "tsBuildInfoFile": "dist/tui.tsbuildinfo"
+    "tsBuildInfoFile": "dist/cli.tsbuildinfo"
   },
   "references": [
     { "path": "../../packages/protocol" },
-    { "path": "../../packages/kernel" },
-    { "path": "../../packages/session-store" },
-    { "path": "../../packages/llm" },
-    { "path": "../../packages/capability" },
-    { "path": "../../packages/codeact" },
-    { "path": "../../packages/coordinator" },
-    { "path": "../../packages/eval" },
-    { "path": "../../packages/introspection" },
-    { "path": "../../packages/skills" },
-    { "path": "../../packages/tools" },
-    { "path": "../../packages/tui" },
-    { "path": "../../packages/loop" },
-    { "path": "../../packages/workspace" }
+    { "path": "../../packages/ai" },
+    { "path": "../../packages/agent" },
+    { "path": "../../packages/node" },
+    { "path": "../../packages/tui" }
   ],
   "include": ["src/**/*.ts"]
 }

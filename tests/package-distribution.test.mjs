@@ -69,15 +69,15 @@ test("CLI package stage bundles runtime packages and packs a runnable bin", asyn
   assert.equal(packageJson.bin.qi, "./dist/main.js");
   assert.equal(packageJson.engines.node, ">=22.19.0");
   assert.ok(packageJson.dependencies["@earendil-works/pi-tui"]);
-  assert.equal(packageJson.dependencies["@civaapple/qi-loop"], packageJson.version);
-  assert.ok(packageJson.bundledDependencies.includes("@civaapple/qi-loop"));
-  assert.ok(packageJson.bundledDependencies.includes("@civaapple/qi-coordinator"));
-  assert.ok(packageJson.bundledDependencies.includes("@civaapple/qi-eval"));
+  assert.equal(packageJson.dependencies["@civaapple/qi-agent"], packageJson.version);
+  assert.equal(packageJson.dependencies["@civaapple/qi-node"], packageJson.version);
+  assert.ok(packageJson.bundledDependencies.includes("@civaapple/qi-agent"));
+  assert.ok(packageJson.bundledDependencies.includes("@civaapple/qi-node"));
 
-  const vendored = JSON.parse(await readFile(join(staging, "node_modules", "@civaapple", "qi-loop", "package.json"), "utf8"));
-  assert.equal(vendored.name, "@civaapple/qi-loop");
+  const vendored = JSON.parse(await readFile(join(staging, "node_modules", "@civaapple", "qi-agent", "package.json"), "utf8"));
+  assert.equal(vendored.name, "@civaapple/qi-agent");
   await readFile(join(staging, "dist", "main.js"), "utf8");
-  await readFile(join(staging, "node_modules", "@civaapple", "qi-coordinator", "dist", "index.js"), "utf8");
+  await readFile(join(staging, "node_modules", "@civaapple", "qi-node", "dist", "index.js"), "utf8");
 
   const packed = await run("npm", ["pack", "--json", "--pack-destination", staging], { cwd: staging });
   assert.equal(packed.code, 0, `${packed.stdout}\n${packed.stderr}`);
@@ -85,7 +85,7 @@ test("CLI package stage bundles runtime packages and packs a runnable bin", asyn
   const tarball = join(staging, meta.filename);
   const entries = await listTarballEntries(tarball);
   assert.ok(entries.some((name) => name.endsWith("/dist/main.js")), entries.join("\n"));
-  assert.ok(entries.some((name) => name.includes("/node_modules/@civaapple/qi-loop/")), entries.join("\n"));
+  assert.ok(entries.some((name) => name.includes("/node_modules/@civaapple/qi-agent/")), entries.join("\n"));
   assert.ok(!entries.some((name) => name.includes("/src/")));
   assert.ok(!entries.some((name) => name.includes(".qi/")));
   assert.ok(!entries.some((name) => name.includes("/apps/")), "tarball must not contain the monorepo apps/ tree");

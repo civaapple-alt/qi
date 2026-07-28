@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
-import { SqliteEventStore } from "@civaapple/qi-session-store";
+import { SqliteEventStore } from "@civaapple/qi-node/storage";
 import { parseWebCliArguments, WEB_CLI_USAGE, WebCliHelp } from "./cli.js";
 import { QiWebServer } from "./server.js";
 

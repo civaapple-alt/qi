@@ -7,9 +7,7 @@
   },
   "references": [
     { "path": "../protocol" },
-    { "path": "../kernel" },
-    { "path": "../tools" },
-    { "path": "../loop" }
+    { "path": "../agent" }
   ],
   "include": ["src/**/*.ts"]
 }

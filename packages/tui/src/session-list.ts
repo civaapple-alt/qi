@@ -1,4 +1,4 @@
-import type { SessionSummary } from "@civaapple/qi-kernel";
+import type { SessionSummary } from "@civaapple/qi-agent/kernel";
 import type { SessionEvent, SessionId } from "@civaapple/qi-protocol";
 
 export const SESSION_PREVIEW_MAX_CHARS = 80;

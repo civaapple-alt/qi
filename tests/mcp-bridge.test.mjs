@@ -3,9 +3,9 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
-import { McpBridge } from "@civaapple/qi-mcp";
-import { AuthorityDeniedError, FileArtifactStore, ToolInputError, ToolRegistry } from "@civaapple/qi-tools";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
+import { McpBridge } from "@civaapple/qi-node/mcp";
+import { AuthorityDeniedError, FileArtifactStore, ToolInputError, ToolRegistry } from "@civaapple/qi-node/tools";
 
 async function fixture(run) {
   const root = await mkdtemp(join(tmpdir(), "qi-mcp-test-"));

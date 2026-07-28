@@ -1,10 +1,10 @@
 import { lstat, mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { InMemoryCapabilityBroker, type CapabilityLease } from "@civaapple/qi-capability";
-import { probeContainerRuntime } from "@civaapple/qi-codeact";
-import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-introspection";
-import type { EventStore, SessionSummary, SessionView } from "@civaapple/qi-kernel";
-import type { ModelPort, ModelRef } from "@civaapple/qi-llm";
+import { InMemoryCapabilityBroker, type CapabilityLease } from "@civaapple/qi-agent/capability";
+import { probeContainerRuntime } from "@civaapple/qi-node/codeact";
+import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-agent/extensions";
+import type { EventStore, SessionSummary, SessionView } from "@civaapple/qi-agent/kernel";
+import type { ModelPort, ModelRef } from "@civaapple/qi-ai";
 import {
   HumanControlService,
   SessionSupervisor,
@@ -13,10 +13,10 @@ import {
   type SessionMode,
   type TurnRequest,
   type TurnResult,
-} from "@civaapple/qi-loop";
+} from "@civaapple/qi-agent/loop";
 import { createId, type RunId, type SessionEvent, type SessionId } from "@civaapple/qi-protocol";
-import { SqliteEventStore } from "@civaapple/qi-session-store";
-import { SkillCatalog, type CatalogSkill, type SkillScope } from "@civaapple/qi-skills";
+import { SqliteEventStore } from "@civaapple/qi-node/storage";
+import { SkillCatalog, type CatalogSkill, type SkillScope } from "@civaapple/qi-node/skills";
 import {
   FileArtifactStore,
   ToolRegistry,
@@ -40,8 +40,8 @@ import {
   type VerificationCandidate,
   type VerificationProfile,
   type WorkspaceMount,
-} from "@civaapple/qi-tools";
-import { SqliteEffectJournal } from "@civaapple/qi-workspace";
+} from "@civaapple/qi-node/tools";
+import { SqliteEffectJournal } from "@civaapple/qi-node/workspace";
 import { createCodeActTool } from "./codeact-tool.js";
 import type { QiCapabilityConfig, QiShellConfig } from "./config.js";
 import { createDelegateTool } from "./delegate-tool.js";
@@ -230,13 +230,14 @@ export class TuiRuntime {
 
   static async create(options: TuiRuntimeOptions): Promise<TuiRuntime> {
     const dataRoot = resolve(options.dataRoot);
+    const stateRoot = resolve(dataRoot, "state");
     const runtimeSessionId = options.sessionId ?? (createId("ses") as SessionId);
-    await mkdir(dataRoot, { recursive: true });
-    const ownedStore = options.eventStore ? undefined : new SqliteEventStore(resolve(dataRoot, "qi.sqlite"));
+    await mkdir(stateRoot, { recursive: true });
+    const ownedStore = options.eventStore ? undefined : new SqliteEventStore(resolve(stateRoot, "qi.sqlite"));
     const eventStore = options.eventStore ?? ownedStore;
     if (!eventStore) throw new Error("EventStore construction failed");
     const artifactStore = new FileArtifactStore(resolve(dataRoot, "artifacts"));
-    const effectJournal = new SqliteEffectJournal(resolve(dataRoot, "effects.sqlite"));
+    const effectJournal = new SqliteEffectJournal(resolve(stateRoot, "effects.sqlite"));
     const broker = new InMemoryCapabilityBroker();
     const subject = options.subject ?? "main-agent";
     // Fire-and-forget: warms the trusted-executable cache for this Workspace's language stack so the

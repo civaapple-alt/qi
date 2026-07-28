@@ -1,7 +1,6 @@
-import type { ActionView, RunView, SessionView, StepView } from "@civaapple/qi-kernel";
+import type { ActionView, RunView, SessionView, StepView } from "@civaapple/qi-agent/kernel";
 import type { SessionEvent } from "@civaapple/qi-protocol";
-import type { RuntimeActivity } from "@civaapple/qi-loop";
-import type { ShellProfileSnapshot } from "@civaapple/qi-tools";
+import type { RuntimeActivity } from "@civaapple/qi-agent/loop";
 import { renderQiMark } from "./brand.js";
 import { commandHelp, type TuiPanel } from "./commands.js";
 import { defaultLocale, t, type Locale } from "./i18n.js";
@@ -9,6 +8,23 @@ import { shortenPath, splitKeepRight, truncateToWidth } from "./layout.js";
 import { renderMarkdown } from "./markdown.js";
 import { formatProviderLabel } from "./provider.js";
 import { renderToolCard, shouldExpandByDefault, statusGlyph, type ToolCardModel } from "./tool-renderers.js";
+
+export interface ShellProfileSnapshot {
+  readonly default: "direct" | "pwsh" | "cmd" | "bash";
+  readonly allowed: readonly ("direct" | "pwsh" | "cmd" | "bash")[];
+  readonly directEnabled: boolean;
+  readonly available: readonly {
+    readonly id: "pwsh" | "cmd" | "bash";
+    readonly executable: string;
+    readonly version?: string;
+    readonly status: "available";
+  }[];
+  readonly unavailable: readonly {
+    readonly id: "direct" | "pwsh" | "cmd" | "bash";
+    readonly status: "unavailable" | "disallowed";
+    readonly reason: string;
+  }[];
+}
 
 /** Marker consumed by InteractiveTui to paint a full-width user message bar. */
 export const USER_MESSAGE_PREFIX = "⟦user⟧";

@@ -4,23 +4,33 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { QiWebServer, listWebProjects } from "@civaapple/qi-web";
-import { EventWriter } from "@civaapple/qi-loop";
-import { SqliteEventStore } from "@civaapple/qi-session-store";
+import { EventWriter } from "@civaapple/qi-agent/loop";
+import { SqliteEventStore } from "@civaapple/qi-node/storage";
 
-test("listWebProjects discovers qi.sqlite under project slugs", async () => {
+test("listWebProjects discovers state/qi.sqlite under project IDs", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-web-projects-"));
   try {
     const newer = join(root, "Z-newer");
     const older = join(root, "A-older");
     await mkdir(newer);
     await mkdir(older);
-    await writeFile(join(older, "qi.sqlite"), "");
+    await mkdir(join(older, "state"));
+    await writeFile(join(older, "project.json"), JSON.stringify({
+      projectId: "A-older",
+      workspaceRoot: join(root, "older-workspace"),
+    }));
+    await writeFile(join(older, "state", "qi.sqlite"), "");
     await new Promise((resolve) => setTimeout(resolve, 20));
-    await writeFile(join(newer, "qi.sqlite"), "");
+    await mkdir(join(newer, "state"));
+    await writeFile(join(newer, "project.json"), JSON.stringify({
+      projectId: "Z-newer",
+      workspaceRoot: join(root, "newer-workspace"),
+    }));
+    await writeFile(join(newer, "state", "qi.sqlite"), "");
     await mkdir(join(root, "empty"));
     const projects = await listWebProjects(root);
     assert.deepEqual(projects.map((item) => item.id), ["Z-newer", "A-older"]);
-    assert.equal(projects[0]?.dbPath, join(newer, "qi.sqlite"));
+    assert.equal(projects[0]?.dbPath, join(newer, "state", "qi.sqlite"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -31,7 +41,12 @@ test("Web workbench projects mode lists projects and switches Sessions", async (
   try {
     const project = join(root, "D-demo-workspace");
     await mkdir(project);
-    const dbPath = join(project, "qi.sqlite");
+    const dbPath = join(project, "state", "qi.sqlite");
+    await mkdir(join(project, "state"));
+    await writeFile(join(project, "project.json"), JSON.stringify({
+      projectId: "D-demo-workspace",
+      workspaceRoot: join(root, "workspace"),
+    }));
     const store = new SqliteEventStore(dbPath);
     const first = "ses_web_project_a";
     const second = "ses_web_project_b";

@@ -5,20 +5,20 @@ import {
   InMemoryCapabilityBroker,
   PLAN_MODE_EXTRA_TOOLS,
   modeAllowsIntent,
-} from "@civaapple/qi-capability";
+} from "@civaapple/qi-agent/capability";
 import {
   InMemoryEventStore,
   KERNEL_ASK_MODE_TOOLS,
   KERNEL_PLAN_MODE_EXTRA_TOOLS,
   StateTransitionError,
   applySessionEvent,
-} from "@civaapple/qi-kernel";
-import { EventWriter, HumanControlService, SessionSupervisor, TurnLoop, toolsForMode } from "@civaapple/qi-loop";
+} from "@civaapple/qi-agent/kernel";
+import { EventWriter, HumanControlService, SessionSupervisor, TurnLoop, toolsForMode } from "@civaapple/qi-agent/loop";
 import { createId } from "@civaapple/qi-protocol";
 import { Type } from "@sinclair/typebox";
-import { FileArtifactStore, ToolRegistry, defineTool } from "@civaapple/qi-tools";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { createQiIntrospectionTool } from "@civaapple/qi-introspection";
+import { FileArtifactStore, ToolRegistry, defineTool } from "@civaapple/qi-node/tools";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { createQiIntrospectionTool } from "@civaapple/qi-agent/extensions";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

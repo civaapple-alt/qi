@@ -1,10 +1,10 @@
-import { Coordinator, runDelegatedTurn } from "@civaapple/qi-coordinator";
-import { GoalEngine } from "@civaapple/qi-eval";
-import type { EventStore } from "@civaapple/qi-kernel";
-import type { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
-import type { ModelRef } from "@civaapple/qi-llm";
-import type { TurnLoop } from "@civaapple/qi-loop";
-import { ToolFailure, defineTool, type ArtifactStore, type ToolRegistry } from "@civaapple/qi-tools";
+import { Coordinator, runDelegatedTurn } from "@civaapple/qi-agent/extensions";
+import { GoalEngine } from "@civaapple/qi-agent/eval";
+import type { EventStore } from "@civaapple/qi-agent/kernel";
+import type { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
+import type { ModelRef } from "@civaapple/qi-ai";
+import type { TurnLoop } from "@civaapple/qi-agent/loop";
+import { ToolFailure, defineTool, type ArtifactStore, type ToolRegistry } from "@civaapple/qi-node/tools";
 import { Type, type Static } from "@sinclair/typebox";
 
 const DelegateInputSchema = Type.Object(

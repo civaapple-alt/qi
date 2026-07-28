@@ -1,0 +1,31 @@
+{
+  "name": "@civaapple/qi-ai",
+  "version": "0.6.0",
+  "description": "Portable Qi model protocol, provider adapters, and context compiler",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./context": {
+      "types": "./dist/context/index.d.ts",
+      "default": "./dist/context/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": { "node": ">=22.19.0" },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.52",
+    "openai": "^6.48.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/civaapple-alt/qi.git",
+    "directory": "packages/ai"
+  },
+  "license": "MIT",
+  "publishConfig": { "access": "public", "provenance": true }
+}

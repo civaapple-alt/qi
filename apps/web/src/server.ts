@@ -1,8 +1,8 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { EventStore } from "@civaapple/qi-kernel";
+import type { EventStore } from "@civaapple/qi-agent/kernel";
 import { SessionIdSchema, assertSchema, type SessionId } from "@civaapple/qi-protocol";
-import { EventStreamService, SessionEventHub, encodeSseEvent } from "@civaapple/qi-stream";
+import { EventStreamService, SessionEventHub, encodeSseEvent } from "@civaapple/qi-node/stream";
 import { css, html, javascript } from "./assets.js";
 import { ProjectEventStoreRegistry } from "./projects.js";
 import { projectWebSession } from "./projection.js";

@@ -3,7 +3,7 @@ import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { SkillCatalog, SkillLoader, loadAgentDefinition } from "@civaapple/qi-skills";
+import { SkillCatalog, SkillLoader, loadAgentDefinition } from "@civaapple/qi-node/skills";
 
 async function temporary(run) {
   const root = await mkdtemp(join(tmpdir(), "qi-skills-test-"));
@@ -71,7 +71,7 @@ test("Skill catalog merges user and Workspace scopes with Workspace precedence",
   });
 });
 
-test("Skill catalog installs a compatible local Skill atomically and omits caches", async () => {
+test("Skill catalog installs a compatible local Skill atomically and omits executable/cache content", async () => {
   await temporary(async (root) => {
     const workspace = join(root, "workspace");
     const userSkills = join(root, "home", ".qi", "skills");
@@ -95,7 +95,7 @@ test("Skill catalog installs a compatible local Skill atomically and omits cache
       { name: installed.name, version: installed.version, scope: installed.scope },
       { name: "skill-creator", version: "unversioned", scope: "user" },
     );
-    assert.equal(await readFile(join(userSkills, "skill-creator", "scripts", "init.py"), "utf8"), "print('init')\n");
+    await assert.rejects(access(join(userSkills, "skill-creator", "scripts", "init.py")));
     assert.equal(await readFile(join(userSkills, "skill-creator", "agents", "openai.yaml"), "utf8"), "name: skill-creator\n");
     await assert.rejects(access(join(userSkills, "skill-creator", "scripts", "__pycache__", "init.pyc")));
     await assert.rejects(catalog.install({ source: "skill-creator" }), /already installed/);

@@ -7,7 +7,12 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
-- Added `prewarmTrustedExecutables()` to `@civaapple/qi-tools`, priming common PATH-resolved executables for the
+- Added declaration-only plugin contracts and `qi install/update/remove/list` for exact npm, pinned Git, and
+  digest-pinned local sources. Installation never runs npm lifecycle scripts and publishes validated content to
+  the shared content-addressed package store.
+- Added the generation-2 `$QI_HOME` layout, canonical realpath-hash project IDs, private `state/` databases,
+  project descriptors, Web discovery, and strict private-root safety checks.
+- Added `prewarmTrustedExecutables()` to `@civaapple/qi-node/tools`, priming common PATH-resolved executables for the
   detected language stack (Node.js, Maven) at CLI startup so the first `search`/`find`/`shell`/`script`/`verify`
   call does not pay PATH-walk latency.
 - Added `outputRef` to `shell`, `verify`, and `script` Tool output: when a run's stdout/stderr is truncated for
@@ -16,18 +21,22 @@ steps and investigation history belong in pull requests, not release notes.
 - Added a `codeact` Tool (under the existing `execute` capability) that runs a short generated program inside a
   network-off, read-only-root container; every nested `api.call` still passes through the normal Tool Registry,
   capability authorization, and Session event lifecycle. It registers only when `probeContainerRuntime()` from
-  `@civaapple/qi-codeact` finds a responding `docker` or `podman` on the host.
+  `@civaapple/qi-node/codeact` finds a responding `docker` or `podman` on the host.
 - Added `ContainerProgramSandbox` support for inline `programSource` (in addition to `programFile`); the sandbox
   owns staging and cleanup for both, so callers never manage an ad hoc temp-file location themselves.
 - Added `allowedTools` to `ControlledToolClient`: nested CodeAct tool calls outside the allowlist fail closed as
   `TOOL_NOT_ALLOWED` before any inspection or Session event.
-- Added a guided `/verify` setup wizard: `scanVerificationCandidates()` (new in `@civaapple/qi-tools`) proposes
+- Added a guided `/verify` setup wizard: `scanVerificationCandidates()` (new in `@civaapple/qi-node/tools`) proposes
   verification commands from `package.json`, `pom.xml`, `AGENTS.md`, and `README.md`; a human confirms the
   selection in a `MultiSelectPanel`, and `writeVerificationManifest()` writes `.qi/qi.verify.json` through the
   same atomic-write and `loadVerificationProfiles()` validation path used by automatic inference.
 
 ### Changed
 
+- Consolidated 21 runtime publication units into the coordinated `qi-protocol`, `qi-ai`, `qi-agent`, `qi-node`,
+  `qi-tui`, and `qi` CLI packages, with controlled subpath exports preserving cohesive module boundaries.
+- Workspace `.qi` is now an allowlisted declaration/lock surface only. User Skills moved to
+  `$QI_HOME/resources/skills`; project machine policy moved to `policy.toml`.
 - `findTrustedExecutable()` now caches PATH resolution per command/Workspace root/PATH triple for the process
   lifetime, including in-flight de-duplication for concurrent lookups of the same executable.
 - `TurnLoop` now authorizes and executes a Step's maximal consecutive runs of `read`-effect Actions concurrently
@@ -38,11 +47,21 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Removed
 
+- Removed the 0.5 public package names and automatic reuse of 0.5 local data roots. Qi does not migrate or delete
+  an old non-empty `$QI_HOME`.
+
 ### Fixed
 
 ### Security
 
+- Declarative package and `.qi` validation rejects secrets, executable/binary file types, path traversal,
+  symlinks/junction escapes, oversize trees, lifecycle scripts, and same-layer resource ambiguity. Package
+  registration never grants a Capability Lease.
+
 ### Documentation
+
+- Documented six-package ownership, state/event responsibility, the generation-2 private layout, `.qi`
+  boundaries, package trust flow, and executable-plugin deferral in the design map and ADRs.
 
 ## [0.5.1] - 2026-07-27
 

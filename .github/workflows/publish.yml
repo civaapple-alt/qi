@@ -76,16 +76,7 @@ jobs:
             npm publish "./packages/${directory}" --access public --provenance
           }
 
-          for directory in capability llm protocol skills workspace; do
-            publish_package "$directory"
-          done
-          for directory in context kernel tools; do
-            publish_package "$directory"
-          done
-          for directory in eval introspection loop mcp memory session-store stream; do
-            publish_package "$directory"
-          done
-          for directory in agent codeact coordinator graph scheduler tui; do
+          for directory in protocol ai agent node tui; do
             publish_package "$directory"
           done
 

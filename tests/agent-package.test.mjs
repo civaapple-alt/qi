@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { QiAgent } from "@civaapple/qi-agent";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { defineTool } from "@civaapple/qi-tools";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { defineTool } from "@civaapple/qi-node/tools";
 import { Type } from "@sinclair/typebox";
 
 const model = { provider: "scripted", model: "agent-package-test" };

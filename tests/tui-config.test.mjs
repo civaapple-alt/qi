@@ -15,7 +15,7 @@ import {
   resolveCapabilities,
   resolveLanguage,
   resolveTheme,
-} from "@civaapple/qi";
+} from "../apps/cli/dist/index.js";
 
 test("user config loads strict provider defaults and persistent capabilities", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-user-config-"));
@@ -344,6 +344,7 @@ execute = true
     assert.doesNotMatch(narrowed.stdout, /\+ network|\+ host execute/);
   } finally {
     await rm(root, { recursive: true, force: true });
+    await rm(`${root}-state`, { recursive: true, force: true });
   }
 });
 
@@ -364,6 +365,7 @@ function launchTui(workspace, config, extraArgs) {
         QI_PROVIDER: "",
         QI_MODEL: "",
         OPENAI_API_KEY: "",
+        QI_HOME: `${workspace}-state`,
       },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,

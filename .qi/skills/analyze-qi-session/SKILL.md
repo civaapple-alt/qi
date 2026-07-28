@@ -15,7 +15,7 @@ Accept either input form:
 - Web URL: `http://127.0.0.1:4317/?session=ses_...` (optional `&project=<slug>` enables local DB fallback)
 - Session and Workspace: `ses_...` plus the Workspace root the TUI was launched against
 
-Run the bundled read-only extractor from this Skill directory (do **not** invent a temporary inspect script).
+Run the repository's read-only `scripts/extract-session.mjs` extractor (do **not** invent a temporary inspect script).
 
 **Argument order matters.** Qi options must come *after* the script path. Node treats flags before the
 script as its own options (`node: bad option: --workspace…`). npm also steals `--workspace` for package
@@ -23,10 +23,10 @@ workspaces — prefer `--workspace-root`, or pass `node …` / `npm exec -- …`
 
 ```text
 # correct
-node scripts/extract-session.mjs --url <url>
-node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root>
-node scripts/extract-session.mjs --session <session-id> --project <slug>
-node scripts/extract-session.mjs --session <session-id> --db <sqlite-path>
+node <qi-repository>/scripts/extract-session.mjs --url <url>
+node <qi-repository>/scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root>
+node <qi-repository>/scripts/extract-session.mjs --session <session-id> --project <project-id>
+node <qi-repository>/scripts/extract-session.mjs --session <session-id> --db <sqlite-path>
 
 # bounded projection queries
 node scripts/extract-session.mjs --session <session-id> --workspace-root <workspace-root> --list-runs
@@ -46,11 +46,11 @@ npm exec extract-session --workspace <workspace-root>
 
 With `--workspace-root`, the extractor resolves `qi.sqlite` in this order (first existing path wins):
 
-1. `$QI_HOME/projects/<workspace-slug>/qi.sqlite` — TUI default (`QI_HOME` or `~/.qi`)
-2. `<workspace>/.qi/qi.sqlite` — legacy / Workspace-local
+1. `$QI_HOME/projects/<project-name>-<path-hash>/state/qi.sqlite` — TUI default (`QI_HOME` or `~/.qi`)
+2. An explicit `--db` path supplied by the human.
 
-`--project <slug>` opens `$QI_HOME/projects/<slug>/qi.sqlite` directly (handy with Web URLs that
-already show `project=D-lab-ws-lab`). Use `--db` only when you already know the exact database path.
+`--project <project-id>` opens `$QI_HOME/projects/<project-id>/state/qi.sqlite` directly. Use `--db`
+only when you already know the exact database path.
 
 The URL path first requests the Web `/workbench` projection; if that fails and the URL includes
 `?project=<slug>`, it falls back to the matching QI_HOME project database. Extracted JSON is bounded and

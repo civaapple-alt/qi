@@ -9,7 +9,7 @@ import {
   loadVerificationProfiles,
   scanVerificationCandidates,
   writeVerificationManifest,
-} from "@civaapple/qi-tools";
+} from "@civaapple/qi-node/tools";
 
 async function withWorkspace(run) {
   const root = await mkdtemp(join(tmpdir(), "qi-verify-scan-test-"));

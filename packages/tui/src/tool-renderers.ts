@@ -1,4 +1,4 @@
-import type { ActionStatus } from "@civaapple/qi-kernel";
+import type { ActionStatus } from "@civaapple/qi-agent/kernel";
 import { theme } from "./theme/index.js";
 
 export interface ToolCardModel {

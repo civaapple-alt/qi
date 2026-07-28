@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { parseTuiCliArguments, qiCliVersion, refreshLaunchCapabilities } from "../apps/cli/dist/cli.js";
-import { defaultSessionDataRoot, workspaceProjectSlug } from "../apps/cli/dist/paths.js";
+import { defaultSessionDataRoot, workspaceProjectId } from "../apps/cli/dist/paths.js";
 
 test("CLI help and version are credential-free", async () => {
   const help = await parseTuiCliArguments(["--help"], {
@@ -77,7 +77,7 @@ test("CLI treats --data as the exact data directory", async () => {
   }
 });
 
-test("CLI defaults data to QI_HOME/projects/<workspace-slug> and honors --safe", async () => {
+test("CLI defaults data to QI_HOME/projects/<project-id> and honors --safe", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-cli-safe-"));
   try {
     const workspace = join(root, "project");
@@ -113,9 +113,9 @@ test("CLI max_steps precedence is flag over project over user over default and e
     const userConfig = join(root, "user.toml");
     await mkdir(workspace);
     await writeFile(userConfig, "version = 1\nmax_steps = 16\n");
-    const projectDir = join(qiHome, "projects", workspaceProjectSlug(workspace));
+    const projectDir = join(qiHome, "projects", workspaceProjectId(workspace));
     await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, "config.toml"), "version = 1\nmax_steps = 24\n");
+    await writeFile(join(projectDir, "policy.toml"), "version = 1\nmax_steps = 24\n");
     const environment = { OPENAI_API_KEY: "test-key", QI_HOME: qiHome };
 
     const project = await parseTuiCliArguments(
@@ -132,7 +132,7 @@ test("CLI max_steps precedence is flag over project over user over default and e
     assert.equal(flag.kind, "run");
     assert.equal(flag.options.maxSteps, 40);
 
-    await rm(join(projectDir, "config.toml"));
+    await rm(join(projectDir, "policy.toml"));
     const user = await parseTuiCliArguments(
       ["--workspace", workspace, "--config", userConfig],
       { cwd: root, environment },
@@ -152,9 +152,12 @@ test("CLI max_steps precedence is flag over project over user over default and e
   }
 });
 
-test("workspace project slug matches Cursor-style path encoding", () => {
-  assert.equal(workspaceProjectSlug("D:\\ai-project\\adk-agent"), "D-ai-project-adk-agent");
-  assert.equal(workspaceProjectSlug("/home/alwar/work/fastai"), "home-alwar-work-fastai");
+test("workspace project ID includes a readable basename and path hash", () => {
+  assert.match(workspaceProjectId("D:\\ai-project\\adk-agent"), /^adk-agent-[0-9a-f]{12}$/);
+  assert.notEqual(
+    workspaceProjectId("D:\\ai-project\\adk-agent"),
+    workspaceProjectId("E:\\ai-project\\adk-agent"),
+  );
 });
 
 test("CLI rejects conflicting capability flags", async () => {
@@ -180,10 +183,10 @@ test("CLI loads project mounts and --add-dir; project capabilities overlay globa
     const qiHome = join(root, "home");
     await mkdir(workspace);
     await mkdir(other);
-    const slug = workspaceProjectSlug(workspace);
-    const projectDir = join(qiHome, "projects", slug);
+    const projectId = workspaceProjectId(workspace);
+    const projectDir = join(qiHome, "projects", projectId);
     await mkdir(projectDir, { recursive: true });
-    await writeFile(join(projectDir, "config.toml"), [
+    await writeFile(join(projectDir, "policy.toml"), [
       "version = 1",
       "",
       "[capabilities]",

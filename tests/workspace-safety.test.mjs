@@ -7,12 +7,12 @@ import { Type } from "@sinclair/typebox";
 import {
   InMemoryCapabilityBroker,
   InMemoryCredentialBroker,
-} from "@civaapple/qi-capability";
+} from "@civaapple/qi-agent/capability";
 import {
   EffectReplayBlockedError,
   ToolRegistry,
   defineTool,
-} from "@civaapple/qi-tools";
+} from "@civaapple/qi-node/tools";
 import {
   ContainerWorkspaceAdapter,
   GitWorktreeAdapter,
@@ -22,7 +22,7 @@ import {
   effectIntentHash,
   hostProcessRunner,
   runHostProcess,
-} from "@civaapple/qi-workspace";
+} from "@civaapple/qi-node/workspace";
 
 test("runHostProcess captures full output beyond outputLimitBytes only when captureLimitBytes opts in", async () => {
   const node = process.execPath;

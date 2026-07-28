@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
-import { GraphGovernor } from "@civaapple/qi-graph";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { EventWriter } from "@civaapple/qi-loop";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
+import { GraphGovernor } from "@civaapple/qi-agent/extensions";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { EventWriter } from "@civaapple/qi-agent/loop";
 
 function definition(version = 1) {
   return {

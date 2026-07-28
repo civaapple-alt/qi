@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { loadProjectConfig, TuiRuntime } from "@civaapple/qi";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { loadProjectConfig, TuiRuntime } from "../apps/cli/dist/index.js";
 
 test("TUI applyCapabilities enables write tools mid-session and persists project config", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-caps-write-"));

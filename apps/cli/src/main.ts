@@ -2,8 +2,9 @@
 import { execFile } from "node:child_process";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
-import type { RuntimeActivity } from "@civaapple/qi-loop";
+import type { RuntimeActivity } from "@civaapple/qi-agent/loop";
 import type { SessionEvent } from "@civaapple/qi-protocol";
+import { ensureProjectLayout, projectPaths } from "@civaapple/qi-node/paths";
 import { AuthSession, parseLoginCommand } from "./auth.js";
 import { AuthBackedModelPort } from "./auth-model-port.js";
 import { defaultUserConfigPath, findCompatibleEndpoint, loadUserConfig, removeCompatibleEndpoint } from "./config.js";
@@ -23,16 +24,22 @@ import {
   TUI_MAX_ACTIONS_PER_STEP,
   TuiRuntime,
 } from "./runtime.js";
+import { runPackageCliCommand } from "./package-command.js";
 
 const execFileAsync = promisify(execFile);
 
 async function main(): Promise<void> {
+  if (await runPackageCliCommand(process.argv.slice(2))) return;
   const parsed = await parseTuiCliArguments(process.argv.slice(2));
   if (parsed.kind === "help" || parsed.kind === "version") {
     process.stdout.write(parsed.text);
     return;
   }
   const options = parsed.options;
+  await ensureProjectLayout(projectPaths({
+    workspaceRoot: options.workspaceRoot,
+    dataRoot: options.dataRoot,
+  }));
   const rich = process.stdin.isTTY === true && process.stdout.isTTY === true && process.env.TERM !== "dumb";
   let runtime: TuiRuntime | undefined;
   let presenter: TuiPresenter | undefined;

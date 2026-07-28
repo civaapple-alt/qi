@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import {
   AuthorityDeniedError,
   FileArtifactStore,
@@ -31,7 +31,7 @@ import {
   shellTool,
   treeTool,
   writeTool,
-} from "@civaapple/qi-tools";
+} from "@civaapple/qi-node/tools";
 
 const execFileAsync = promisify(execFile);
 

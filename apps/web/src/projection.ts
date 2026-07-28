@@ -1,4 +1,4 @@
-import type { ActionStatus, RunStatus, SessionView } from "@civaapple/qi-kernel";
+import type { ActionStatus, RunStatus, SessionView } from "@civaapple/qi-agent/kernel";
 import type { SessionEvent } from "@civaapple/qi-protocol";
 
 export interface WebActionMilestones {

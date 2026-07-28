@@ -7,13 +7,7 @@
   },
   "references": [
     { "path": "../protocol" },
-    { "path": "../kernel" },
-    { "path": "../llm" },
-    { "path": "../context" },
-    { "path": "../capability" },
-    { "path": "../tools" },
-    { "path": "../workspace" },
-    { "path": "../loop" }
+    { "path": "../ai" }
   ],
   "include": ["src/**/*.ts"]
 }

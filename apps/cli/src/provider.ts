@@ -4,7 +4,7 @@ import {
   listProviderProfiles,
   requireProviderProfile,
   type ProviderProfile,
-} from "@civaapple/qi-llm";
+} from "@civaapple/qi-ai";
 
 export type QiProvider = string;
 

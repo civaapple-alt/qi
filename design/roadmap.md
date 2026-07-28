@@ -1,8 +1,8 @@
 # Roadmap
 
-Qi 0.5.1 has a working local Runtime, CLI, reusable packages, deterministic tests, and local package
-installation evidence. The roadmap now focuses on making those surfaces honestly usable by external
-contributors and consumers.
+Qi 0.6 has a working local Runtime, a six-package public graph, generationed private storage, declaration-only
+package installation, deterministic tests, and local package installation evidence. The roadmap now focuses on
+making those surfaces honestly usable by external contributors and consumers.
 
 This is not an implementation diary. Completed details belong in the changelog; current architecture belongs in
 [system-design.md](system-design.md), and the product north star belongs in
@@ -31,8 +31,8 @@ stable.
 
 ### npm packages
 
-- `@civaapple/qi` and each `@civaapple/qi-*` package must pass manifest, dependency-graph, tarball, and isolated
-  consumer checks.
+- The coordinated `qi-protocol`, `qi-ai`, `qi-agent`, `qi-node`, `qi-tui`, and `qi` CLI packages must pass
+  manifest, dependency-graph, tarball, and isolated consumer checks.
 - Public exports must be intentional and documented.
 - Registry identity and provenance configuration must be rechecked immediately before publication.
 - Publication always requires an explicit maintainer action; readiness scripts never publish.

@@ -1,15 +1,20 @@
 {
   "name": "@civaapple/qi-agent",
-  "version": "0.5.1",
-  "description": "Default-deny Agent composition facade for the Qi event-sourced runtime",
+  "version": "0.6.0",
+  "description": "Qi Agent state machine, lifecycle, authority, tools, effects, memory, and extension contracts",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./kernel": { "types": "./dist/kernel/index.d.ts", "default": "./dist/kernel/index.js" },
+    "./loop": { "types": "./dist/loop/index.d.ts", "default": "./dist/loop/index.js" },
+    "./capability": { "types": "./dist/capability/index.d.ts", "default": "./dist/capability/index.js" },
+    "./tools": { "types": "./dist/tools/index.d.ts", "default": "./dist/tools/index.js" },
+    "./effects": { "types": "./dist/effects/index.d.ts", "default": "./dist/effects/index.js" },
+    "./eval": { "types": "./dist/eval/index.d.ts", "default": "./dist/eval/index.js" },
+    "./memory": { "types": "./dist/memory/index.d.ts", "default": "./dist/memory/index.js" },
+    "./extensions": { "types": "./dist/extensions/index.d.ts", "default": "./dist/extensions/index.js" }
   },
   "files": [
     "dist",
@@ -20,14 +25,8 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-capability": "0.5.1",
-    "@civaapple/qi-context": "0.5.1",
-    "@civaapple/qi-kernel": "0.5.1",
-    "@civaapple/qi-llm": "0.5.1",
-    "@civaapple/qi-loop": "0.5.1",
-    "@civaapple/qi-protocol": "0.5.1",
-    "@civaapple/qi-tools": "0.5.1",
-    "@civaapple/qi-workspace": "0.5.1",
+    "@civaapple/qi-ai": "0.6.0",
+    "@civaapple/qi-protocol": "0.6.0",
     "@sinclair/typebox": "0.34.52"
   },
   "repository": {

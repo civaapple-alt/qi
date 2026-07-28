@@ -44,7 +44,7 @@ before it can enter the Tool Registry.
 
 ## ADR-0004: discover Skills progressively and install them through a bounded service
 
-- User Skills live under `~/.qi/skills`; Workspace Skills under `.qi/skills` shadow equal names.
+- User Skills live under `$QI_HOME/resources/skills`; Workspace Skills under `.qi/skills` shadow equal names.
 - Only validated metadata enters normal context. Instructions and declared resources load on demand.
 - Skills contribute knowledge, never authority.
 - Bare-name installation resolves only from explicit local compatibility roots; it does not search the network.
@@ -126,13 +126,15 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 
 ## ADR-0015: separate project policy from Session mount facts
 
-- Effective launch authority resolves as CLI flags over project TOML over user TOML.
+- Effective launch authority resolves as CLI flags over `$QI_HOME/projects/<project-id>/policy.toml` over
+  `$QI_HOME/config.toml` over built-ins.
 - Extra directories are read-only mounts addressed as `mount:<id>/...`; writes stay in the primary Workspace.
 - Mounts are human-granted, reject filesystem roots and unsafe aliases, and never imply shell authority.
 - Project policy determines future access. Session mount events record what a Session could see; they do not grant
   access when replayed.
 - Persistent changes settle policy first and audit events second; startup reconciles any interrupted settlement.
 - External TOML edits take effect on launch/relaunch, not silently during an active Runtime.
+- Workspace `.qi` declarations never participate in capability precedence and cannot widen project policy.
 
 ## ADR-0016: keep execution local and Web read-only
 
@@ -163,14 +165,15 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 - `@civaapple/qi-tui` contains reusable Qi-specific terminal projections; `apps/cli` owns application
   composition.
 - CLI package: `@civaapple/qi`; installed executable: `qi`.
-- Runtime packages: `@civaapple/qi-<workspace>`; Web application: private `@civaapple/qi-web`.
+- Coordinated public packages are `qi-protocol`, `qi-ai`, `qi-agent`, `qi-node`, `qi-tui`, and the `qi` CLI.
+  Cohesive modules use controlled subpath exports rather than additional publication units.
 - Canonical repository: `https://github.com/civaapple-alt/qi`; license: MIT.
 - Initial versions are coordinated and public API changes require isolated JavaScript/TypeScript consumer evidence.
 - Registry identity, source openness, and authorization to publish are separate gates.
 
 ## ADR-0019: make self-understanding read-only and governed
 
-- `@civaapple/qi-introspection` owns a versioned self model for identity, packages, invariants, decisions,
+- `@civaapple/qi-agent/extensions` owns a versioned self model for identity, packages, invariants, decisions,
   verification, and known gaps.
 - The model links to canonical sources and is checked against the workspace graph.
 - Introspection contributes bounded context only; it cannot grant authority, alter policy, publish, or promote
@@ -184,14 +187,14 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 
 - The product name is `Qi / 栖`; user-facing output and public TypeScript identifiers use `Qi`.
 - Environment variables use the `QI_*` prefix.
-- User configuration and project data live under `~/.qi`; Workspace-private Skills and verification manifests
-  live under `.qi`.
+- Machine-private configuration, credentials, packages, resources, and project state live under `$QI_HOME`
+  (default `~/.qi`). Workspace `.qi` contains only allowlisted, versionable declarations and package locks.
 - The Session database is `qi.sqlite` and the verification manifest is `qi.verify.json`.
 - Runtime actor IDs, resource names, MIME vendor identifiers, introspection tools, and machine-readable evidence
   use the `qi` namespace.
 - The private monorepo package is `qi-monorepo`; application scripts use the `qi:*` prefix.
-- This pre-release rename provides no legacy environment-variable or path fallback. Existing local data must be
-  moved and renamed explicitly before reuse.
+- Qi 0.6 uses layout generation 2 and provides no automatic 0.5 data migration. Unsupported non-empty layouts
+  fail without deletion and instruct the user to back up/clear the directory or choose a new `QI_HOME`.
 - Event schema generation remains unchanged. Previously written actor/source strings are historical data and are
   never rewritten during replay; all new facts use the Qi identity.
 
@@ -216,6 +219,33 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 - The wizard writes through the same manifest schema, atomic write, and `loadVerificationProfiles` validation as
   the pre-existing automatic inference path, so a hand-picked manifest is exactly as trustworthy as an inferred
   one and the live `verify` tool is re-registered from the same code path either way.
+
+## ADR-0022: centralize machine-private state under a generationed QI_HOME layout
+
+- `@civaapple/qi-node/paths` is the only `$QI_HOME`, project identity, `--data`, database, and Web discovery
+  implementation.
+- Project IDs combine a readable Workspace basename with a SHA-256 prefix of the canonical realpath. Moving a
+  Workspace creates a new identity unless `--data` explicitly redirects its private root.
+- `$QI_HOME` and project-private roots cannot be filesystem roots, Workspace descendants, symlinks, junction
+  traversals, or path-traversal targets.
+- Project databases live in `state/`; credentials live only in `credentials/`; package content is immutable and
+  content-addressed. Cache, staging, and tmp are rebuildable and never truth.
+- Layout generation 2 is a clean 0.6 boundary. Qi neither migrates nor deletes a non-empty older layout.
+
+## ADR-0023: allow declaration-only packages without granting authority
+
+- `@civaapple/qi-agent/extensions` owns the manifest and contribution contract.
+  `@civaapple/qi-node/extensions` owns acquisition, integrity, validation, content storage, and activation.
+- npm sources require an exact version and registry integrity; Git requires an exact commit; local sources are
+  content-digested. npm lifecycle scripts never execute.
+- Workspace `.qi` permits only declarations and locks. Executable files, binary payloads, secrets, databases,
+  Artifacts, caches, and unpacked third-party packages are rejected.
+- Resource precedence is project-direct, project-packages, user-direct, user-packages, built-ins. Duplicate
+  `(kind,id)` values in one layer fail instead of relying on directory order.
+- Package registration never grants authority, accepts MCP bindings, expands a parent lease, bypasses Coordinator
+  depth, or treats catalog metadata as trust.
+- Qi 0.6 supports declaration-only packages. Executable plugins require a separate ADR for process isolation,
+  restricted Host API, lifecycle, and crash settlement.
 
 ## Changing a decision
 

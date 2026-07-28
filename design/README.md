@@ -18,15 +18,15 @@ changelog.
 Qi is an event-sourced Agent Runtime:
 
 - the Session event stream is durable truth;
-- the Kernel validates transitions and rebuilds projections;
-- the Loop coordinates model turns and Tool phases;
+- `agent/kernel` validates transitions and rebuilds projections;
+- `agent/loop` coordinates model turns and Tool phases;
 - capability policy decides whether an Action may execute;
 - Workspace and Effect Journal boundaries observe and settle world changes;
 - verified completion requires matching evidence;
 - Skills, MCP, graphs, delegation, scheduling, memory, and introspection cannot bypass those controls.
 
-`apps/cli` is the local execution composition. `apps/web` is read-only. Public `packages/*` workspaces expose
-replaceable boundaries and a thin default-deny Agent façade.
+`apps/cli` is the local execution composition. `apps/web` is read-only. Five runtime packages plus the CLI form
+the six coordinated public packages.
 
 ## Reading paths
 
@@ -34,30 +34,30 @@ replaceable boundaries and a thin default-deny Agent façade.
 
 1. [system-design §3](system-design.md#3-session-lifecycle-and-durable-truth)
 2. `packages/protocol/README.md`
-3. `packages/kernel/docs/state-machine.md`
-4. `packages/session-store/README.md`
+3. `packages/agent/docs/kernel/state-machine.md`
+4. `packages/node/docs/storage/atomicity-and-recovery.md`
 5. replay and SQLite tests
 
 ### Tool, authority, or effect safety
 
 1. [system-design §4](system-design.md#4-workspace-authority-and-effects)
 2. [decisions: precise mutation](decisions.md#adr-0003-use-freshness-checked-precise-file-mutation)
-3. `packages/capability/README.md`
-4. `packages/tools/docs/execution-contract.md`
-5. `packages/workspace/docs/effect-journal.md`
+3. `packages/agent/docs/capability/README.md`
+4. `packages/agent/docs/tools/execution-contract.md`
+5. `packages/node/docs/workspace/effect-journal.md`
 
 ### Models, context, or memory
 
 1. [system-design §5](system-design.md#5-context-models-and-memory)
-2. `packages/llm/README.md`
-3. `packages/context/README.md`
-4. `packages/memory/README.md`
+2. `packages/ai/README.md`
+3. `packages/ai/docs/context/compiler.md`
+4. `packages/agent/docs/memory/README.md`
 
 ### Goals and completion
 
 1. [system-design §6](system-design.md#6-goals-evidence-and-completion)
-2. `packages/eval/README.md`
-3. `packages/eval/docs/evidence-completion.md`
+2. `packages/agent/docs/eval/README.md`
+3. `packages/agent/docs/eval/evidence-completion.md`
 4. goal/evaluator tests
 
 ### Session modes or UI
@@ -71,7 +71,7 @@ replaceable boundaries and a thin default-deny Agent façade.
 ### Extensions
 
 1. [system-design §8](system-design.md#8-extensions-skills-mcp-codeact-graph-delegation-scheduling-and-introspection)
-2. the owning package README
+2. `packages/agent/docs/` for portable contracts or `packages/node/docs/` for Node adapters
 3. the matching section in [decisions.md](decisions.md)
 4. the package's focused tests
 

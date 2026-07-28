@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ConcurrencyError, StateTransitionError, replaySession } from "@civaapple/qi-kernel";
+import { ConcurrencyError, StateTransitionError, replaySession } from "@civaapple/qi-agent/kernel";
 import { parseSessionEvent } from "@civaapple/qi-protocol";
-import { SqliteEventStore } from "@civaapple/qi-session-store";
+import { SqliteEventStore } from "@civaapple/qi-node/storage";
 
 const fixtureUrl = new URL("../fixtures/golden/authority-denied.json", import.meta.url);
 const fixture = JSON.parse(await readFile(fixtureUrl, "utf8")).map(parseSessionEvent);

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
  * Stage the self-contained `@civaapple/qi` preview package under `.cli-package/`.
- * Until the public package release gate passes, internal `@civaapple/qi-*` packages are
- * vendored into the CLI preview via bundledDependencies.
+ * Internal Qi runtime packages are vendored into the CLI preview via bundledDependencies.
  */
 import { randomBytes } from "node:crypto";
 import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -17,19 +16,9 @@ const version = cliManifest.version;
 
 const bundledPackages = [
   "protocol",
-  "kernel",
-  "session-store",
-  "llm",
-  "context",
-  "capability",
-  "codeact",
-  "tools",
-  "workspace",
-  "loop",
-  "skills",
-  "eval",
-  "coordinator",
-  "introspection",
+  "ai",
+  "agent",
+  "node",
   "tui",
 ];
 
@@ -39,6 +28,7 @@ const publicDependencies = {
   diff: "9.0.0",
   openai: "^6.48.0",
   "smol-toml": "1.7.0",
+  tar: "^7.5.22",
   yaml: "2.9.0",
 };
 

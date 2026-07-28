@@ -3,8 +3,8 @@ import {
   SkillStaleError,
   SkillUpdateIndeterminateError,
   type SkillCatalog,
-} from "@civaapple/qi-skills";
-import { ToolFailure, defineTool } from "@civaapple/qi-tools";
+} from "@civaapple/qi-node/skills";
+import { ToolFailure, defineTool } from "@civaapple/qi-node/tools";
 import { Type, type Static } from "@sinclair/typebox";
 
 const SkillNameSchema = Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,63}$" });

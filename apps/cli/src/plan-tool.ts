@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { HumanControlService } from "@civaapple/qi-loop";
+import type { HumanControlService } from "@civaapple/qi-agent/loop";
 import { createId, type PlanId, type PlanItemId, type RunId } from "@civaapple/qi-protocol";
-import { ToolFailure, defineTool, type ArtifactStore } from "@civaapple/qi-tools";
+import { ToolFailure, defineTool, type ArtifactStore } from "@civaapple/qi-node/tools";
 import { Type, type Static } from "@sinclair/typebox";
 
 const PlanDocumentInputSchema = Type.Object(

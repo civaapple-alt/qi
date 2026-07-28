@@ -3,11 +3,11 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InMemoryCapabilityBroker, redactSensitiveText, redactSensitiveValue } from "@civaapple/qi-capability";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { EventWriter, TurnLoop } from "@civaapple/qi-loop";
-import { FileArtifactStore, ToolRegistry, readTool } from "@civaapple/qi-tools";
+import { InMemoryCapabilityBroker, redactSensitiveText, redactSensitiveValue } from "@civaapple/qi-agent/capability";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { EventWriter, TurnLoop } from "@civaapple/qi-agent/loop";
+import { FileArtifactStore, ToolRegistry, readTool } from "@civaapple/qi-node/tools";
 
 const secret = "fixture-password-9274";
 

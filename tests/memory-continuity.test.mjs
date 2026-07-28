@@ -3,9 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InMemoryEventStore, StateTransitionError } from "@civaapple/qi-kernel";
-import { EventWriter } from "@civaapple/qi-loop";
-import { ContinuityController, MemoryController, SqliteMemoryIndex } from "@civaapple/qi-memory";
+import { InMemoryEventStore, StateTransitionError } from "@civaapple/qi-agent/kernel";
+import { EventWriter } from "@civaapple/qi-agent/loop";
+import { ContinuityController, MemoryController } from "@civaapple/qi-agent/memory";
+import { SqliteMemoryIndex } from "@civaapple/qi-node/storage";
 
 function createSession(store, sessionId) {
   const writer = new EventWriter(store, sessionId);

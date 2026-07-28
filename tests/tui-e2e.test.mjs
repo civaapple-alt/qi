@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { SqliteEventStore } from "@civaapple/qi-session-store";
-import { renderEvent, renderStatus, TuiRuntime } from "@civaapple/qi";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { SqliteEventStore } from "@civaapple/qi-node/storage";
+import { renderEvent, renderStatus, TuiRuntime } from "../apps/cli/dist/index.js";
 
 test("TUI declared verification generates a private manifest from package scripts", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-generated-verify-"));
@@ -222,7 +222,7 @@ test("basic TUI completes a code task with durable action and diff evidence", as
     runtime.close();
   }
 
-  const reopened = new SqliteEventStore(join(dataRoot, "qi.sqlite"));
+  const reopened = new SqliteEventStore(join(dataRoot, "state", "qi.sqlite"));
   try {
     const recovered = reopened.load(sessionId);
     assert.equal(recovered.currentRunId, recovered.runOrder[0]);

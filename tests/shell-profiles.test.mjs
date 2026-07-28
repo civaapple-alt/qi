@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import {
   AuthorityDeniedError,
   FileArtifactStore,
@@ -13,7 +13,7 @@ import {
   resolveShellConfig,
   shellProfileResource,
   shellTool,
-} from "@civaapple/qi-tools";
+} from "@civaapple/qi-node/tools";
 
 async function withWorkspace(run) {
   const root = await mkdtemp(join(tmpdir(), "qi-shell-profile-"));

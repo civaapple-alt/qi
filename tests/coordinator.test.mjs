@@ -3,12 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
-import { Coordinator, MultiAgentBaselineGate, runDelegatedTurn } from "@civaapple/qi-coordinator";
-import { GoalEngine } from "@civaapple/qi-eval";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { EventWriter, SessionSupervisor, TurnLoop } from "@civaapple/qi-loop";
-import { FileArtifactStore, ToolRegistry, builtinTools } from "@civaapple/qi-tools";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
+import { Coordinator, MultiAgentBaselineGate, runDelegatedTurn } from "@civaapple/qi-agent/extensions";
+import { GoalEngine } from "@civaapple/qi-agent/eval";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { EventWriter, SessionSupervisor, TurnLoop } from "@civaapple/qi-agent/loop";
+import { FileArtifactStore, ToolRegistry, builtinTools } from "@civaapple/qi-node/tools";
 import { Type } from "@sinclair/typebox";
 
 const CONTEXT_REF = `artifact://${"a".repeat(64)}`;

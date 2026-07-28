@@ -1,7 +1,7 @@
-import type { EventStore } from "@civaapple/qi-kernel";
-import { CodeActRunner, ContainerProgramSandbox, ControlledToolClient } from "@civaapple/qi-codeact";
+import type { EventStore } from "@civaapple/qi-agent/kernel";
+import { CodeActRunner, ContainerProgramSandbox, ControlledToolClient } from "@civaapple/qi-node/codeact";
 import type { RunId, SessionId, StepId } from "@civaapple/qi-protocol";
-import { ToolFailure, defineTool, type ArtifactStore, type ToolRegistry } from "@civaapple/qi-tools";
+import { ToolFailure, defineTool, type ArtifactStore, type ToolRegistry } from "@civaapple/qi-node/tools";
 import { Type, type Static } from "@sinclair/typebox";
 
 const CodeActInputSchema = Type.Object(

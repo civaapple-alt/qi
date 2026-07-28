@@ -1,18 +1,18 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { redactSensitiveText } from "@civaapple/qi-capability";
-import { EventWriter, type RuntimeActivity } from "@civaapple/qi-loop";
+import { redactSensitiveText } from "@civaapple/qi-agent/capability";
+import { EventWriter, type RuntimeActivity } from "@civaapple/qi-agent/loop";
 import { createId, type SessionId, type TaskId } from "@civaapple/qi-protocol";
-import type { EventStore, ProcessTaskView } from "@civaapple/qi-kernel";
+import type { EventStore, ProcessTaskView } from "@civaapple/qi-agent/kernel";
 import {
   defineTool,
   resolveShellExecutable,
   resolveWorkspacePath,
   windowsCommandInvocation,
   type ToolDefinition,
-} from "@civaapple/qi-tools";
-import { scrubCredentialEnvironment, terminateProcessTree } from "@civaapple/qi-workspace";
+} from "@civaapple/qi-node/tools";
+import { scrubCredentialEnvironment, terminateProcessTree } from "@civaapple/qi-node/workspace";
 import { Type, type TSchema } from "@sinclair/typebox";
 
 const defaultLifetimeMs = 2 * 60 * 60 * 1_000;

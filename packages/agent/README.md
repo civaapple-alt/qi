@@ -1,67 +1,54 @@
-# `@civaapple/qi-agent`
+# @civaapple/qi-agent
 
-Version **0.5.1**. Package maturity: **internal public-package preview**.
+Portable Qi Agent behavior and control boundaries.
 
-`@civaapple/qi-agent` is the small embedding façade for Qi's event-sourced, evidence-first Agent Runtime. It
-composes the existing `TurnLoop`, EventStore, ModelPort, Tool Registry, Capability Broker, and ArtifactStore; it
-does not introduce another lifecycle or authority path.
+The package owns:
 
-## Purpose
+- `./kernel`: Session transition validation, replay, projections, and EventStore port;
+- `./loop`: TurnLoop, EventWriter, safe boundaries, human control, and recovery;
+- `./capability`: default-deny leases, delegation narrowing, credential handles, and redaction;
+- `./tools`: typed Tool registry, phase separation, errors, and execution context ports;
+- `./effects`: EffectJournal port and deterministic intent/idempotency identities;
+- `./eval`: evidence-backed goals, evaluator calibration, and convergence;
+- `./memory`: provenance-backed memory policy and the MemoryIndex port;
+- `./extensions`: Graph/Coordinator/introspection plus declaration-only plugin contracts.
 
-- Give application authors one class for prompting and continuing a Qi Session.
-- Provide safe in-memory defaults for examples and tests.
-- Expose committed Session events, the current `SessionView`, tool registration, steering, and bounded activity.
-- Preserve default-deny authority and every durable Action boundary.
-
-## Non-goals
-
-- Registering a Tool does not authorize it.
-- The façade does not auto-grant write, execute, publish, spend, or delegation.
-- It does not auto-retry indeterminate effects or turn a model response into verified completion.
-- In-memory defaults are not durable crash recovery.
-
-## Quick start
+The root exports the small `QiAgent` embedding façade. Registering a Tool or plugin contribution never creates
+a Capability Lease.
 
 ```sh
-npm install @civaapple/qi-agent @civaapple/qi-llm
+npm install @civaapple/qi-agent @civaapple/qi-ai @civaapple/qi-protocol
 ```
+
+## State and event ownership
+
+`@civaapple/qi-protocol` defines durable event facts. `agent/kernel` validates transitions and rebuilds
+projections. `agent/loop` produces events and persists authority plus `ActionStarted` before executor entry.
+Concrete SQLite storage and SSE transport belong to `@civaapple/qi-node`.
+
+`qi-agent` does not depend on `qi-node`, `qi-tui`, or an application. Node filesystem, process, database,
+credential-file, network, and package-acquisition implementations stay behind ports.
 
 ```ts
 import { QiAgent } from "@civaapple/qi-agent";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-
-const modelPort = new ScriptedModelPort([[
-  { type: "text.delta", delta: "Hello from Qi." },
-  { type: "completed", finishReason: "stop" },
-]]);
+import { defineTool } from "@civaapple/qi-agent/tools";
+import { Type } from "@sinclair/typebox";
 
 const agent = new QiAgent({
   modelPort,
-  model: { provider: "scripted", model: "example" },
+  model: { provider: "example", model: "model" },
 });
 
-const result = await agent.prompt("Say hello.");
-console.log(result.text);
-console.log(agent.view?.runOrder);
+agent.registerTool("lookup", defineTool({
+  description: "Read a bounded value",
+  input: Type.Object({ key: Type.String() }),
+  output: Type.Object({ value: Type.String() }),
+  effect: () => "read",
+  resources: ({ key }) => [`lookup:${key}`],
+  execute: async ({ key }) => ({ value: await lookup(key) }),
+}));
 ```
 
-Use `agent.registerTool()` to advertise a typed Tool, then separately call `agent.grant()` when using the default
-in-memory broker. A registered Tool without a matching lease is denied before its executor starts. Production
-applications should supply approval-capable and durable adapters.
+Execution remains denied until the application grants a matching, intent-scoped lease.
 
-## Public API
-
-- `QiAgent`
-- `QiAgentOptions`
-- `QiPromptOptions`
-- `InMemoryArtifactStore`
-
-## Change guidance
-
-Keep this package thin. New behavior belongs in the owning lower-level package and is composed here only after
-its protocol, failure, authority, recovery, and evidence semantics exist.
-
-## Verification
-
-`tests/agent-package.test.mjs` proves response, explicit authorized Tool, default denial, event subscription, and
-Session projection paths.
+Long-form contracts live under [`docs/`](docs/).

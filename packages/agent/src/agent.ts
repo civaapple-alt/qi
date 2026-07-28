@@ -2,25 +2,25 @@ import {
   InMemoryCapabilityBroker,
   type CapabilityBroker,
   type CapabilityLease,
-} from "@civaapple/qi-capability";
-import type { ContextBlock } from "@civaapple/qi-context";
+} from "@civaapple/qi-agent/capability";
+import type { ContextBlock } from "@civaapple/qi-ai/context";
 import {
   InMemoryEventStore,
   type EventStore,
   type RunPlanBinding,
   type SessionMode,
   type SessionView,
-} from "@civaapple/qi-kernel";
-import type { ModelPort, ModelRef } from "@civaapple/qi-llm";
-import { TurnLoop, type RuntimeActivity, type TurnResult } from "@civaapple/qi-loop";
+} from "@civaapple/qi-agent/kernel";
+import type { ModelPort, ModelRef } from "@civaapple/qi-ai";
+import { TurnLoop, type RuntimeActivity, type TurnResult } from "@civaapple/qi-agent/loop";
 import { createId, type RunId, type SessionEvent, type SessionId } from "@civaapple/qi-protocol";
 import {
   ToolRegistry,
   type ArtifactStore,
   type RegistrationHandle,
   type ToolDefinition,
-} from "@civaapple/qi-tools";
-import type { EffectJournal } from "@civaapple/qi-workspace";
+} from "@civaapple/qi-agent/tools";
+import type { EffectJournal } from "@civaapple/qi-agent/effects";
 import type { TSchema } from "@sinclair/typebox";
 import { InMemoryArtifactStore } from "./memory-artifact-store.js";
 

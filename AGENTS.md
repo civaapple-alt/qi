@@ -46,21 +46,21 @@ issue that must be made explicit.
 ## Package boundaries
 
 - `protocol` owns wire-level IDs and Session event schemas; it contains no orchestration.
-- `agent` is a thin public composition façade; it must not bypass lower-level lifecycle, authority, effect, or
-  evidence boundaries.
-- `kernel` validates transitions and projects events; it does not execute effects.
-- `session-store` persists event streams atomically; it does not invent domain transitions.
-- `loop` coordinates model turns and tool phases; it uses, rather than bypasses, lower-level policies.
-- `capability`, `workspace`, `tools`, and `eval` are independent control boundaries.
-- `llm` exposes a portable model protocol; provider-specific state must not leak into Session truth.
-- `context`, `memory`, `skills`, and `mcp` contribute bounded context or capabilities without silently expanding authority.
-- `introspection` contributes versioned self knowledge only; it cannot grant authority, publish, or self-certify
-  semantic completion.
+- `ai` owns the portable model protocol, provider adapters, and deterministic Context Compiler; provider state
+  must not leak into Session truth.
+- `agent` owns Kernel transition validation, TurnLoop/EventWriter orchestration, capability policy, portable
+  Tool/Effect ports, evaluation, memory policy, Coordinator/Graph behavior, introspection, and declarative
+  extension contracts. It never depends on `node`, `tui`, or `apps/*`.
+- `node` owns Node-specific paths, SQLite stores, Workspace/process adapters, built-in Tools, Skills, MCP,
+  CodeAct, Scheduler, stream/SSE, encrypted credentials, memory indexes, and declarative package installation.
+- State/event ownership remains explicit: `protocol` defines facts; `agent/kernel` validates and projects;
+  `agent/loop` produces events; `node/storage` persists them; `node/stream` transports committed facts.
 - `tui` owns reusable terminal projections and local component state; it does not own auth, policy, persistence,
   Tool construction, effects, or process lifecycle.
-- `graph`, `coordinator`, and `scheduler` narrow or extend execution modes while preserving kernel invariants.
 - `apps/cli` is the `@civaapple/qi` execution composition; other `apps/*` are control and understanding surfaces,
   not alternate package-level runtimes.
+- `$QI_HOME` holds machine-private state. Workspace `.qi` holds only allowlisted declarations and locks; ordinary
+  Agent file tools cannot access it.
 
 See [design/README.md](design/README.md) for the full package map and change-oriented reading paths.
 

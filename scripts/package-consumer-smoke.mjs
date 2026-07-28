@@ -16,26 +16,10 @@ const rootManifest = JSON.parse(await readFile(join(root, "package.json"), "utf8
 const keep = process.argv.includes("--keep");
 const packageDirectories = [
   "protocol",
-  "kernel",
-  "session-store",
-  "capability",
-  "llm",
-  "context",
-  "workspace",
-  "tools",
-  "loop",
-  "stream",
-  "eval",
-  "memory",
-  "skills",
-  "mcp",
-  "codeact",
-  "graph",
-  "coordinator",
-  "scheduler",
-  "tui",
+  "ai",
   "agent",
-  "introspection",
+  "node",
+  "tui",
 ];
 const temporaryRoot = await mkdtemp(join(tmpdir(), "qi-package-consumer-"));
 const archiveRoot = join(temporaryRoot, "archives");
@@ -181,26 +165,25 @@ function createSmokeSource() {
   return String.raw`
 import assert from "node:assert/strict";
 import { QiAgent } from "@civaapple/qi-agent";
-import { InMemoryCapabilityBroker } from "@civaapple/qi-capability";
-import { buildContainerInvocation } from "@civaapple/qi-codeact";
-import { MultiAgentBaselineGate } from "@civaapple/qi-coordinator";
-import { compileContext } from "@civaapple/qi-context";
-import { failureFingerprint } from "@civaapple/qi-eval";
-import { validateGraph } from "@civaapple/qi-graph";
-import { qiSelfModel, queryQiSelfModel } from "@civaapple/qi-introspection";
-import { InMemoryEventStore } from "@civaapple/qi-kernel";
-import { ScriptedModelPort } from "@civaapple/qi-llm";
-import { TurnLoop } from "@civaapple/qi-loop";
-import { SqliteMemoryIndex } from "@civaapple/qi-memory";
-import { McpBridge } from "@civaapple/qi-mcp";
+import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
+import { buildContainerInvocation } from "@civaapple/qi-node/codeact";
+import { MultiAgentBaselineGate } from "@civaapple/qi-agent/extensions";
+import { compileContext } from "@civaapple/qi-ai/context";
+import { failureFingerprint } from "@civaapple/qi-agent/eval";
+import { validateGraph } from "@civaapple/qi-agent/extensions";
+import { qiSelfModel, queryQiSelfModel } from "@civaapple/qi-agent/extensions";
+import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
+import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { TurnLoop } from "@civaapple/qi-agent/loop";
+import { McpBridge } from "@civaapple/qi-node/mcp";
 import { createId } from "@civaapple/qi-protocol";
-import { SqliteWatcherScheduler } from "@civaapple/qi-scheduler";
-import { SqliteEventStore } from "@civaapple/qi-session-store";
-import { parseFrontmatter } from "@civaapple/qi-skills";
-import { SessionEventHub } from "@civaapple/qi-stream";
-import { ToolRegistry } from "@civaapple/qi-tools";
+import { SqliteWatcherScheduler } from "@civaapple/qi-node/scheduler";
+import { SqliteEventStore, SqliteMemoryIndex } from "@civaapple/qi-node/storage";
+import { parseFrontmatter } from "@civaapple/qi-node/skills";
+import { SessionEventHub } from "@civaapple/qi-node/stream";
+import { ToolRegistry } from "@civaapple/qi-node/tools";
 import * as qiTui from "@civaapple/qi-tui";
-import { LocalWorkspace } from "@civaapple/qi-workspace";
+import { LocalWorkspace } from "@civaapple/qi-node/workspace";
 
 assert.equal(typeof QiAgent, "function");
 assert.equal(typeof InMemoryCapabilityBroker, "function");
@@ -249,7 +232,7 @@ const scheduler = new SqliteWatcherScheduler(":memory:", {
 assert.equal(scheduler.get("missing"), undefined);
 scheduler.close();
 assert.match(createId("ses"), /^ses_/);
-assert.equal(qiSelfModel.release, "0.5.1");
+assert.equal(qiSelfModel.release, "0.6.0");
 assert.ok(Array.isArray(queryQiSelfModel("packages")));
 
 const port = new ScriptedModelPort([[
