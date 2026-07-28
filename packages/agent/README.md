@@ -26,6 +26,11 @@ npm install @civaapple/qi-agent @civaapple/qi-ai @civaapple/qi-protocol
 projections. `agent/loop` produces events and persists authority plus `ActionStarted` before executor entry.
 Concrete SQLite storage and SSE transport belong to `@civaapple/qi-node`.
 
+Formal Plans, Work Plans, and Questions are separate state machines. A Formal Plan is immutable reviewed
+Markdown; acceptance starts one whole-plan Agent Run. `update_plan` snapshots are optional implementation Todo
+navigation and never completion evidence. `run.question.*` can suspend and resume a read/control Action inside
+the same Plan Run, while legacy `control.question.*` remains the between-Run compatibility path.
+
 `qi-agent` does not depend on `qi-node`, `qi-tui`, or an application. Node filesystem, process, database,
 credential-file, network, and package-acquisition implementations stay behind ports.
 

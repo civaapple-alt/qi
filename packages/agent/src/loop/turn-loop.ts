@@ -65,6 +65,8 @@ export interface TurnRequest {
   maxActionsPerStep?: number;
   /** When set, only these tool names are advertised to the model for this Turn. */
   toolAllowlist?: readonly string[];
+  /** A drafting Run may not complete until this tool has successfully committed its document. */
+  requiredCompletionTool?: { toolName: string; correction: string; parkReason: "review" };
   /** Session mode frozen onto run.triggered when creating a new Run. */
   mode?: SessionMode;
   planBinding?: RunPlanBinding;
@@ -542,6 +544,35 @@ export class TurnLoop {
             { kind: "runtime", id: "qi" },
           );
           return this.#result(writer, request.sessionId, runId, "parked", finalText);
+        }
+        if (
+          request.requiredCompletionTool
+          && !Object.values(writer.view?.runs[runId]?.actions ?? {}).some(
+            (action) =>
+              action.toolName === request.requiredCompletionTool!.toolName
+              && action.status === "completed",
+          )
+        ) {
+          const finalActionStep = request.reserveFinalHandoff === true
+            ? request.maxSteps - 1
+            : request.maxSteps;
+          if (stepNumber >= finalActionStep) {
+            writer.append(
+              "run.parked",
+              {
+                runId,
+                reason: request.requiredCompletionTool.parkReason,
+                detail: `Required ${request.requiredCompletionTool.toolName} was not completed`,
+              },
+              { kind: "runtime", id: "completion_guard" },
+            );
+            return this.#result(writer, request.sessionId, runId, "parked", finalText);
+          }
+          conversation.push({
+            role: "user",
+            content: [{ type: "text", text: request.requiredCompletionTool.correction }],
+          });
+          continue;
         }
         if (this.#consumeSteering(writer, request.sessionId, runId, conversation) > 0) {
           continue;

@@ -26,6 +26,7 @@ test("@civaapple/qi-tui public runtime exports are reviewed explicitly", () => {
     "MultiSelectPanel",
     "NEW_SESSION_ID",
     "PanelHost",
+    "QuestionPanel",
     "SESSION_PREVIEW_MAX_CHARS",
     "ScrollPanel",
     "SessionsPanel",

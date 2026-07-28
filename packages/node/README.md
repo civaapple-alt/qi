@@ -44,7 +44,7 @@ $QI_HOME/
     project.json
     policy.toml
     state/{qi.sqlite,effects.sqlite,memory.sqlite,scheduler.sqlite}
-    artifacts/ plans/ tasks/ packages/activation.json cache/ tmp/
+    artifacts/ plans/<plan-id>/<sha256>.md tasks/ packages/activation.json cache/ tmp/
 ```
 
 `projectPaths()`, `ensureQiLayout()`, and `ensureProjectLayout()` are the only path/layout implementation used
@@ -54,6 +54,9 @@ filesystem roots, Workspace descendants, symlinks, junction traversals, or path 
 Workspace `.qi` is separate: it contains only allowlisted declarations and package locks. Ordinary Agent file
 tools still deny `.qi`; dedicated services validate types, size, secrets, executables, and symlinks before
 atomic writes.
+
+Formal Plan revisions are stored at immutable content-hash paths under the machine-private project root.
+Ordinary file tools cannot read or edit that directory; `plan_document read/edit` is the bounded access path.
 
 ## Declaration-only packages
 

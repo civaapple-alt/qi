@@ -13,6 +13,7 @@ import {
   InteractiveTui,
   ListPanel,
   MultiSelectPanel,
+  QuestionPanel,
   loadProjectConfig,
   openTasksHubPanel,
   parseMountsCommand,
@@ -30,6 +31,7 @@ import {
   TuiPresenter,
   TuiRuntime,
 } from "../apps/cli/dist/index.js";
+import { validateFormalPlan } from "../apps/cli/dist/plan-tool.js";
 
 test("TUI command catalog separates inspection, navigation, and control", () => {
   assert.deepEqual(parseTuiCommand("/actions"), { name: "actions", argument: "" });
@@ -206,6 +208,25 @@ test("terminal Markdown renderer covers headings, lists, tables, code, and check
   assert.match(rendered, /const y = 2;/);
 });
 
+test("Formal Plan validation requires document structure and rejects Todo or secrets", () => {
+  assert.deepEqual(
+    validateFormalPlan("# Release plan\n\nShip the reviewed change.\n\n## Steps\n\n1. Implement it."),
+    { title: "Release plan", overview: "Ship the reviewed change." },
+  );
+  assert.throws(
+    () => validateFormalPlan("# Bad\n\nDo this.\n\n- [ ] hidden Todo"),
+    /task-list checkboxes/,
+  );
+  assert.throws(
+    () => validateFormalPlan("# Bad\n\napi_key=sk-abcdefghijklmnopqrstuvwxyz"),
+    /detected secret/,
+  );
+  assert.throws(
+    () => validateFormalPlan("## Missing H1\n\nSummary."),
+    /unique H1/,
+  );
+});
+
 test("wide Markdown tables wrap every column instead of truncating the right side", () => {
   const rendered = renderMarkdown([
     "| Action | Status | Evidence | Next step |",
@@ -260,20 +281,8 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
         callId: "call_plan",
         name: "plan_document",
         input: {
-          title: "Feature plan",
-          overview: "Ship a small feature with verification.",
-          items: [
-            {
-              planItemId: "pit_inspect001",
-              title: "Inspect",
-              description: "Inspect the workspace before editing.",
-            },
-            {
-              planItemId: "pit_implement01",
-              title: "Implement",
-              description: "Write feature.js and verify with a short script.",
-            },
-          ],
+          operation: "create",
+          markdown: "# Feature plan\n\nShip a small feature with verification.\n\n## Implementation\n\n1. Inspect the workspace before editing.\n2. Write feature.js and verify with a short script.\n\n## Verification\n\nRun the focused script.",
         },
       },
       { type: "completed", finishReason: "actions" },
@@ -333,8 +342,16 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
     const accepted = runtime.acceptPlan();
     const result = await runtime.runTriggered(accepted.runId, accepted.input);
     assert.equal(result.status, "completed");
+    const executorPrompt = model.requests[2].messages
+      .flatMap((message) => message.content)
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+    assert.match(executorPrompt, /<accepted-plan/);
+    assert.match(executorPrompt, /Write feature\.js/);
+    assert.doesNotMatch(executorPrompt, /Draft a plan for the feature/);
     assert.equal(await readFile(join(root, "feature.js"), "utf8"), "export const ready = true;\n");
-    assert.equal(runtime.view()?.pendingQuestion?.kind, "next_run");
+    assert.equal(runtime.view()?.pendingQuestion, undefined);
 
     const presenter = new TuiPresenter({
       workspaceRoot: root,
@@ -359,12 +376,8 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
     assert.match(overview, /Ctrl\+O to expand|verified|exit /);
     assert.match(overview, /Edited feature\.js \+1/);
     assert.match(overview, /▎ \+export const ready = true/);
-    assert.match(overview, /Next Run pending/);
-    assert.match(overview, /choice panel|\/next/);
-    assert.doesNotMatch(overview, /1 \/next continue/);
-    assert.match(overview, /Todo\s+/);
-    assert.match(overview, /1\/2 complete|Working on 2/);
-    assert.match(overview, /[✔◐○].*Inspect|[✔◐○].*Implement/);
+    assert.doesNotMatch(overview, /Next Run pending/);
+    assert.doesNotMatch(overview, /Todo\s+/);
     assert.doesNotMatch(overview, /── Handoff ──/);
     assert.doesNotMatch(overview, /Session timeline/);
     assert.doesNotMatch(overview, /╭ Run /);
@@ -2299,6 +2312,109 @@ test("MultiSelectPanel Space toggles and Enter applies selected capability ids",
   assert.equal(closed, false);
   panel.handleInput("\u001b");
   assert.equal(closed, true);
+});
+
+test("QuestionPanel answers multiple/text questions and persists Esc as skip", () => {
+  let submitted;
+  const panel = new QuestionPanel({
+    questions: [
+      {
+        id: "targets",
+        header: "Targets",
+        prompt: "Choose targets",
+        selection: "multiple",
+        options: [{ id: "a", label: "A" }, { id: "b", label: "B" }],
+        allowText: false,
+      },
+      {
+        id: "detail",
+        header: "Detail",
+        prompt: "Describe it",
+        selection: "text",
+        options: [],
+        allowText: true,
+      },
+      {
+        id: "optional",
+        header: "Optional",
+        prompt: "Choose or skip",
+        selection: "single",
+        options: [{ id: "yes", label: "Yes" }],
+        allowText: false,
+      },
+    ],
+    onSubmit: (answers) => { submitted = answers; },
+  });
+  panel.handleInput(" ");
+  panel.handleInput("\u001b[B");
+  panel.handleInput(" ");
+  panel.handleInput("\r");
+  panel.handleInput("custom detail");
+  panel.handleInput("\r");
+  panel.handleInput("\u001b");
+  assert.deepEqual(submitted, [
+    { questionId: "targets", selectedOptionIds: ["a", "b"], skipped: false },
+    { questionId: "detail", selectedOptionIds: [], text: "custom detail", skipped: false },
+    { questionId: "optional", selectedOptionIds: [], skipped: true },
+  ]);
+});
+
+test("Agent update_plan records a stable Work Plan snapshot and renders it in the timeline", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-work-plan-"));
+  const runtime = await TuiRuntime.create({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    modelPort: new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call_work_plan",
+          name: "update_plan",
+          input: {
+            explanation: "Track the cross-package change.",
+            plan: [
+              { step: "Extend protocol", status: "completed" },
+              { step: "Wire runtime", status: "in_progress" },
+              { step: "Verify behavior", status: "pending" },
+            ],
+          },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [{ type: "text.delta", delta: "Implementation is underway." }, { type: "completed", finishReason: "stop" }],
+    ]),
+    model: { provider: "fake", model: "work-plan-v1" },
+  });
+  try {
+    const result = await runtime.run("Implement a cross-package change.");
+    assert.equal(result.status, "completed");
+    const view = runtime.view();
+    const workPlan = view?.currentWorkPlanId ? view.workPlans[view.currentWorkPlanId] : undefined;
+    assert.equal(workPlan?.latestRevision, 1);
+    assert.equal(workPlan?.revisions[1].items[1].status, "in_progress");
+    const action = Object.values(view.runs[result.runId].actions)[0];
+    const event = runtime.events().find((candidate) => candidate.type === "action.completed");
+    assert.ok(action);
+    assert.ok(event);
+    const card = renderToolCard({
+      actionId: action.actionId,
+      toolName: "update_plan",
+      status: "completed",
+      input: {
+        explanation: "Track the cross-package change.",
+        plan: workPlan.revisions[1].items,
+      },
+      output: {
+        explanation: "Track the cross-package change.",
+        plan: workPlan.revisions[1].items,
+      },
+    });
+    assert.match(card.join("\n"), /To-do · Working on Wire runtime/);
+    assert.match(card.join("\n"), /1\/3 done/);
+  } finally {
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("history run list selects observational Run via Enter", () => {

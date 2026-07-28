@@ -16,6 +16,8 @@ import {
   SessionIdSchema,
   StepIdSchema,
   TaskIdSchema,
+  WorkItemIdSchema,
+  WorkPlanIdSchema,
 } from "./ids.js";
 
 const isoTimestampPattern = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$";
@@ -103,8 +105,49 @@ const PlanBindingSchema = Type.Object(
   {
     planId: PlanIdSchema,
     revision: Type.Integer({ minimum: 1 }),
-    planItemId: PlanItemIdSchema,
+    planItemId: Type.Optional(PlanItemIdSchema),
     continuationOf: Type.Optional(RunIdSchema),
+  },
+  { additionalProperties: false },
+);
+
+const RunQuestionSchema = Type.Object(
+  {
+    id: Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }),
+    header: Type.String({ minLength: 1, maxLength: 32 }),
+    prompt: Type.String({ minLength: 1, maxLength: 2_000 }),
+    selection: Type.Union([
+      Type.Literal("single"),
+      Type.Literal("multiple"),
+      Type.Literal("text"),
+    ]),
+    options: Type.Array(
+      Type.Object(
+        {
+          id: Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }),
+          label: Type.String({ minLength: 1, maxLength: 200 }),
+          description: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 8 },
+    ),
+    allowText: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+
+const RunQuestionAnswerSchema = Type.Object(
+  {
+    questionId: Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }),
+    selectedOptionIds: Type.Optional(
+      Type.Array(Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }), {
+        maxItems: 8,
+        uniqueItems: true,
+      }),
+    ),
+    text: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000 })),
+    skipped: Type.Boolean(),
   },
   { additionalProperties: false },
 );
@@ -169,7 +212,9 @@ export const SessionEventSchema = Type.Union([
         artifactRef: Type.String({ pattern: "^artifact://[a-f0-9]{64}$" }),
         sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
         path: Type.String({ minLength: 1, maxLength: 500 }),
-        items: Type.Array(PlanItemSchema, { minItems: 1, maxItems: 64 }),
+        format: Type.Optional(Type.Literal("formal_markdown")),
+        markdown: Type.Optional(Type.String({ minLength: 1, maxLength: 65_536 })),
+        items: Type.Optional(Type.Array(PlanItemSchema, { minItems: 1, maxItems: 64 })),
         sourceRunId: Type.Optional(RunIdSchema),
       },
       { additionalProperties: false },
@@ -242,6 +287,83 @@ export const SessionEventSchema = Type.Union([
       {
         questionId: QuestionIdSchema,
         reason: Type.String({ minLength: 1, maxLength: 500 }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "run.question.asked",
+    Type.Object(
+      {
+        runId: RunIdSchema,
+        stepId: StepIdSchema,
+        actionId: ActionIdSchema,
+        questionSetId: QuestionIdSchema,
+        questions: Type.Array(RunQuestionSchema, { minItems: 1, maxItems: 3 }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "run.question.answered",
+    Type.Object(
+      {
+        runId: RunIdSchema,
+        stepId: StepIdSchema,
+        actionId: ActionIdSchema,
+        questionSetId: QuestionIdSchema,
+        answers: Type.Array(RunQuestionAnswerSchema, { minItems: 1, maxItems: 3 }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "run.question.cancelled",
+    Type.Object(
+      {
+        runId: RunIdSchema,
+        stepId: StepIdSchema,
+        actionId: ActionIdSchema,
+        questionSetId: QuestionIdSchema,
+        reason: Type.String({ minLength: 1, maxLength: 500 }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "work.plan.updated",
+    Type.Object(
+      {
+        workPlanId: WorkPlanIdSchema,
+        revision: Type.Integer({ minimum: 1 }),
+        runId: RunIdSchema,
+        stepId: StepIdSchema,
+        actionId: ActionIdSchema,
+        explanation: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
+        sourcePlan: Type.Optional(
+          Type.Object(
+            {
+              planId: PlanIdSchema,
+              revision: Type.Integer({ minimum: 1 }),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+        items: Type.Array(
+          Type.Object(
+            {
+              workItemId: WorkItemIdSchema,
+              step: Type.String({ minLength: 1, maxLength: 500 }),
+              status: Type.Union([
+                Type.Literal("pending"),
+                Type.Literal("in_progress"),
+                Type.Literal("completed"),
+              ]),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 1, maxItems: 32 },
+        ),
       },
       { additionalProperties: false },
     ),

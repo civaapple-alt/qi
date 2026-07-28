@@ -26,17 +26,19 @@ denser engineering detail.
 | Mode | Behavior |
 | --- | --- |
 | `Ask` | Read-only Q&A and exploration; no Workspace writes, shell/script/verify, background tasks, or Subagents |
-| `Plan` | Read exploration, optional depth-1 read-only Subagents, and `plan_document` only; no ordinary file mutation |
-| `Agent` | Full tools granted at launch (never `plan_document`) |
+| `Plan` | Dedicated Planner: read exploration, optional read-only delegation, rich-TTY `ask_question`, and managed `plan_document`; no implementation |
+| `Agent` | Granted implementation tools plus optional `update_plan` Work Todo (never `plan_document` or `ask_question`) |
 
-New Sessions default to `Agent`. Switch with `/mode ask|plan|agent` or `Shift+Tab` when idle and no Plan review
-or next-Run Question is pending. Accepting a Plan Review atomically enters Agent and starts the first incomplete
-item Run; after that Run ends, a Next Run panel (`继续下一项` / `先停在这里` / `回到 Plan`) asks whether to
-continue — ↑↓ / Enter confirms. After stop, `/next` re-asks; after return-to-Plan, revise → review →
-`开始实现` ([ADR 0011](../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)).
-These Runtime-owned choice gates are not a general model-callable `askQuestion` tool. `FormPanel` can collect
-text for CLI workflows such as login, but arbitrary model questions and free-text answers do not yet have a
-durable waiting/answer protocol.
+New Sessions default to `Agent`. A new Formal Plan is self-contained Markdown, not Todo. Accepting its review
+atomically enters Agent and starts one whole-plan implementation Run whose conversation history contains only
+the accepted document; Workspace instructions, permissions, and tools are still compiled normally. Complex
+implementation may use Agent-only `update_plan`; its snapshots appear in the timeline and do not prove
+completion. Legacy item plans keep their item-per-Run `/next` behavior.
+
+In a rich TTY, Plan mode advertises `ask_question`. Its blocking panel supports single choice (Enter), multiple
+choice (Space then Enter), custom/free text, Esc to persist a skipped question, and Ctrl+C to cancel the Run.
+Non-TTY Plan mode does not advertise the tool, so the Planner prints all missing-information questions for the
+next user turn.
 
 Frequently used commands (default `/help` and autocomplete; aliases remain callable):
 

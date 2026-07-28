@@ -52,6 +52,7 @@ import {
   openTasksHubPanel,
   openVerifySetupPanel,
   PanelHost,
+  QuestionPanel,
   ScrollPanel,
   type PanelFlowContext,
 } from "./panels/index.js";
@@ -93,6 +94,7 @@ export class InteractiveTui {
   #planReviewKey: string | undefined;
   /** Last next-Run Question id offered as a panel; Esc dismisses until it changes. */
   #nextRunKey: string | undefined;
+  #runQuestionKey: string | undefined;
   /** Pending PATH_GRANT_REQUIRED directories awaiting a human allow/deny panel. */
   #pendingPathGrants: string[] = [];
   #pathGrantKey: string | undefined;
@@ -153,6 +155,17 @@ export class InteractiveTui {
       if (this.#panels.open) {
         // Inspect/choice panels must never cancel an active Run (incl. in-flight Subagents).
         if (matchesKey(data, "ctrl+c")) {
+          if (this.#runQuestionKey) {
+            const questionSetId = this.#runQuestionKey as import("@civaapple/qi-protocol").QuestionId;
+            this.#runQuestionKey = undefined;
+            this.#panels.closeAll();
+            try {
+              this.#runtime.cancelRunQuestion(questionSetId, "Cancelled by user");
+            } finally {
+              this.#runtime.cancel("Cancelled by user while answering a Plan Question");
+            }
+            return { consume: true };
+          }
           this.#panels.closeAll();
           return { consume: true };
         }
@@ -249,6 +262,7 @@ export class InteractiveTui {
       if (path) this.#queuePathGrant(path);
     }
     this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+    if (event.type === "run.question.asked") this.#maybeOfferRunQuestion();
     this.#maybeOfferPathGrant();
     // Authority / safety / context.compiled update Working strip only — keep the transcript cached.
     if (eventAffectsTranscript(event)) this.#render();
@@ -429,6 +443,10 @@ export class InteractiveTui {
     this.#startTurn(() => this.#runtime.run(input));
   }
 
+  #startPlanDraft(input: string): void {
+    this.#startTurn(() => this.#runtime.runPlanDraft(input));
+  }
+
   #startTriggeredRun(runId: import("@civaapple/qi-protocol").RunId, input: string): void {
     this.#startTurn(() => this.#runtime.runTriggered(runId, input));
   }
@@ -481,6 +499,7 @@ export class InteractiveTui {
   }
 
   #maybeOfferPendingGates(): void {
+    this.#maybeOfferRunQuestion();
     this.#maybeOfferPlanReview();
     this.#maybeOfferNextRun();
     this.#maybeOfferPathGrant();
@@ -771,9 +790,9 @@ export class InteractiveTui {
           this.#planReviewKey = undefined;
           this.#panels.closeAll();
           const prompt = feedback?.trim()
-            || "请根据审阅反馈更新 plan_document：保持稳定的 planItemId，写完后再次请求 Plan 审阅。";
+            || "请根据审阅反馈读取并增量编辑正式计划；使用 plan_document edit，完成后重新请求审阅。";
           this.#presenter.setNotice("Revising Plan · updating plan_document…");
-          this.#startUserRun(prompt);
+          this.#startPlanDraft(prompt);
           return;
         }
         this.#runtime.rejectPlan(feedback);
@@ -826,7 +845,7 @@ export class InteractiveTui {
         this.#presenter.update(this.#runtime.events(), this.#runtime.view());
       }
       this.#presenter.setNotice("Planning…");
-      this.#startUserRun(prompt);
+      this.#startPlanDraft(prompt);
     } catch (error) {
       this.#presenter.setNotice(message(error));
       this.#render();
@@ -1150,6 +1169,34 @@ export class InteractiveTui {
       ? this.#runtime.configureContextWindow(status.contextWindowTokens)
       : this.#runtime.syncModelContextWindow(status.contextWindowTokens);
     this.#presenter.patchAuthLaunch({ ...status, ...context });
+  }
+
+  #maybeOfferRunQuestion(): void {
+    const view = this.#runtime.view();
+    const run = view?.currentRunId ? view.runs[view.currentRunId] : undefined;
+    const questionSetId = run?.pendingQuestionSetId;
+    const questionSet = questionSetId ? run?.questions[questionSetId] : undefined;
+    if (!questionSetId || !questionSet || questionSet.status !== "pending") {
+      this.#runQuestionKey = undefined;
+      return;
+    }
+    if (this.#runQuestionKey === questionSetId || this.#panels.open) return;
+    this.#runQuestionKey = questionSetId;
+    this.#panels.push(new QuestionPanel({
+      questions: questionSet.questions,
+      onSubmit: (answers) => {
+        this.#panels.closeAll();
+        this.#runQuestionKey = undefined;
+        try {
+          this.#runtime.answerRunQuestion(questionSetId, answers);
+          this.#presenter.setNotice("Plan Question answered · resuming this Run");
+        } catch (error) {
+          this.#presenter.setNotice(message(error));
+        }
+        this.#render();
+      },
+    }));
+    this.#render();
   }
 
   async #persistLoginDefaults(status: AuthSessionStatus): Promise<string> {

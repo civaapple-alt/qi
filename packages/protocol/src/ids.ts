@@ -23,6 +23,8 @@ export const TaskIdSchema = idSchema("tsk");
 export const PlanIdSchema = idSchema("pln");
 export const PlanItemIdSchema = idSchema("pit");
 export const QuestionIdSchema = idSchema("qst");
+export const WorkPlanIdSchema = idSchema("wpl");
+export const WorkItemIdSchema = idSchema("wit");
 
 export type SessionId = Static<typeof SessionIdSchema>;
 export type RunId = Static<typeof RunIdSchema>;
@@ -39,6 +41,8 @@ export type TaskId = Static<typeof TaskIdSchema>;
 export type PlanId = Static<typeof PlanIdSchema>;
 export type PlanItemId = Static<typeof PlanItemIdSchema>;
 export type QuestionId = Static<typeof QuestionIdSchema>;
+export type WorkPlanId = Static<typeof WorkPlanIdSchema>;
+export type WorkItemId = Static<typeof WorkItemIdSchema>;
 
 export type IdPrefix =
   | "ses"
@@ -55,7 +59,9 @@ export type IdPrefix =
   | "tsk"
   | "pln"
   | "pit"
-  | "qst";
+  | "qst"
+  | "wpl"
+  | "wit";
 
 export function createId(prefix: IdPrefix): string {
   return `${prefix}_${randomUUID()}`;

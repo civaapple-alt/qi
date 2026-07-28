@@ -13,6 +13,8 @@ import type {
   SessionId,
   StepId,
   TaskId,
+  WorkItemId,
+  WorkPlanId,
 } from "@civaapple/qi-protocol";
 import { parseSessionEvent } from "@civaapple/qi-protocol";
 import { StateTransitionError } from "./errors.js";
@@ -192,11 +194,13 @@ export interface PlanItemView {
 
 export interface PlanRevisionView {
   revision: number;
+  format: "legacy_items" | "formal_markdown";
   title: string;
   overview: string;
   artifactRef: string;
   sha256: string;
   path: string;
+  markdown?: string;
   items: PlanItemView[];
   sourceRunId?: RunId;
   recordedAt: string;
@@ -232,8 +236,49 @@ export interface ControlQuestionView {
 export interface RunPlanBinding {
   planId: PlanId;
   revision: number;
-  planItemId: PlanItemId;
+  planItemId?: PlanItemId;
   continuationOf?: RunId;
+}
+
+export interface RunQuestionView {
+  questionSetId: QuestionId;
+  actionId: ActionId;
+  stepId: StepId;
+  questions: Array<{
+    id: string;
+    header: string;
+    prompt: string;
+    selection: "single" | "multiple" | "text";
+    options: Array<{ id: string; label: string; description?: string }>;
+    allowText: boolean;
+  }>;
+  status: "pending" | "answered" | "cancelled";
+  answers?: Array<{
+    questionId: string;
+    selectedOptionIds: string[];
+    text?: string;
+    skipped: boolean;
+  }>;
+  reason?: string;
+}
+
+export interface WorkPlanView {
+  workPlanId: WorkPlanId;
+  latestRevision: number;
+  revisions: Record<number, {
+    revision: number;
+    runId: RunId;
+    stepId: StepId;
+    actionId: ActionId;
+    explanation?: string;
+    sourcePlan?: { planId: PlanId; revision: number };
+    items: Array<{
+      workItemId: WorkItemId;
+      step: string;
+      status: "pending" | "in_progress" | "completed";
+    }>;
+    updatedAt: string;
+  }>;
 }
 
 export interface RunView {
@@ -246,6 +291,9 @@ export interface RunView {
   steps: Record<string, StepView>;
   stepOrder: StepId[];
   actions: Record<string, ActionView>;
+  questions: Record<string, RunQuestionView>;
+  questionOrder: QuestionId[];
+  pendingQuestionSetId?: QuestionId;
   evaluations: Record<string, EvaluationView>;
   steering: Array<{ message: string; actorId: string }>;
   graph?: {
@@ -313,6 +361,9 @@ export interface SessionView {
   plans: Record<string, PlanView>;
   planOrder: PlanId[];
   currentPlanId?: PlanId;
+  workPlans: Record<string, WorkPlanView>;
+  workPlanOrder: WorkPlanId[];
+  currentWorkPlanId?: WorkPlanId;
   pendingReview?: PlanReviewView;
   pendingQuestion?: ControlQuestionView;
   presence: { state: "active" | "waiting" | "watching" | "sleeping" | "blocked"; reason: string; wakeAt?: string };
@@ -378,6 +429,9 @@ function requireRunSettled(run: RunView): void {
   if (unsettled) fail("ACTION_UNSETTLED", `Action ${unsettled.actionId} is still ${unsettled.status}`);
   const delegated = Object.values(run.delegations).find((delegation) => delegation.status === "running");
   if (delegated) fail("DELEGATION_UNSETTLED", `Delegation ${delegated.delegationId} is still running`);
+  if (run.pendingQuestionSetId) {
+    fail("RUN_QUESTION_PENDING", `Question set ${run.pendingQuestionSetId} is still pending`);
+  }
 }
 
 function hasActiveTopLevelRun(view: SessionView): boolean {
@@ -405,14 +459,17 @@ export const KERNEL_ASK_MODE_TOOLS = [
 ] as const;
 
 /** Plan-only tools beyond {@link KERNEL_ASK_MODE_TOOLS}. */
-export const KERNEL_PLAN_MODE_EXTRA_TOOLS = ["plan_document", "delegate"] as const;
+export const KERNEL_PLAN_MODE_EXTRA_TOOLS = ["plan_document", "ask_question", "delegate"] as const;
 
 const askTools = new Set<string>(KERNEL_ASK_MODE_TOOLS);
 const planOnlyTools = new Set<string>(KERNEL_PLAN_MODE_EXTRA_TOOLS);
 
 function assertActionAllowedForMode(run: RunView, toolName: string, effect: ActionView["effect"]): void {
-  if (toolName === "plan_document" && run.mode !== "plan") {
-    fail("MODE_TOOL_DENIED", "plan_document is only available in Plan mode");
+  if ((toolName === "plan_document" || toolName === "ask_question") && run.mode !== "plan") {
+    fail("MODE_TOOL_DENIED", `${toolName} is only available in Plan mode`);
+  }
+  if (toolName === "update_plan" && run.mode !== "agent") {
+    fail("MODE_TOOL_DENIED", "update_plan is only available in Agent mode");
   }
   if (run.mode === "agent") return;
   if (run.mode === "ask") {
@@ -422,8 +479,11 @@ function assertActionAllowedForMode(run: RunView, toolName: string, effect: Acti
   }
   // plan
   if (planOnlyTools.has(toolName)) {
-    if (toolName === "plan_document" && effect !== "write") {
-      fail("MODE_EFFECT_DENIED", "plan_document must declare write effect");
+    if (toolName === "plan_document" && effect !== "read" && effect !== "write") {
+      fail("MODE_EFFECT_DENIED", "plan_document must declare read or write effect");
+    }
+    if (toolName === "ask_question" && effect !== "read") {
+      fail("MODE_EFFECT_DENIED", "ask_question must declare read effect");
     }
     if (toolName === "delegate" && effect !== "read") {
       fail("MODE_EFFECT_DENIED", "delegate must declare read effect");
@@ -443,8 +503,14 @@ function assertPlanBindingLegal(view: SessionView, binding: RunPlanBinding, mode
   }
   const revision = plan.revisions[binding.revision];
   if (!revision) fail("PLAN_REVISION_NOT_FOUND", `Plan revision ${binding.revision} does not exist`);
-  if (!revision.items.some((item) => item.planItemId === binding.planItemId)) {
-    fail("PLAN_ITEM_NOT_FOUND", `Plan item ${binding.planItemId} is not in revision ${binding.revision}`);
+  if (revision.format === "formal_markdown") {
+    if (binding.planItemId !== undefined) {
+      fail("FORMAL_PLAN_ITEM_BINDING", "Formal Plan Runs bind the whole revision, not a Plan item");
+    }
+  } else {
+    if (!binding.planItemId || !revision.items.some((item) => item.planItemId === binding.planItemId)) {
+      fail("PLAN_ITEM_NOT_FOUND", `Plan item ${binding.planItemId ?? "(missing)"} is not in revision ${binding.revision}`);
+    }
   }
   const alreadyBound = view.runOrder.some((runId) => {
     const run = view.runs[runId];
@@ -551,6 +617,8 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       taskOrder: [],
       plans: {},
       planOrder: [],
+      workPlans: {},
+      workPlanOrder: [],
       presence: { state: "sleeping", reason: "Session created" },
     };
   }
@@ -611,6 +679,14 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
     }
     case "plan.revision.recorded": {
       if (view.mode !== "plan") fail("PLAN_REVISION_MODE", "Plan revisions may only be recorded in Plan mode");
+      const format = event.data.format ?? "legacy_items";
+      if (format === "formal_markdown") {
+        if (!event.data.markdown) fail("FORMAL_PLAN_MARKDOWN_REQUIRED", "Formal Plan revision requires Markdown");
+        if (event.data.items !== undefined) fail("FORMAL_PLAN_ITEMS_FORBIDDEN", "Formal Plan revision cannot carry Todo items");
+      } else {
+        if (!event.data.items?.length) fail("LEGACY_PLAN_ITEMS_REQUIRED", "Legacy Plan revision requires items");
+        if (event.data.markdown !== undefined) fail("LEGACY_PLAN_MARKDOWN_FORBIDDEN", "Legacy Plan revision cannot carry Markdown");
+      }
       let plan = view.plans[event.data.planId];
       if (!plan) {
         plan = { planId: event.data.planId, revisions: {}, latestRevision: 0 };
@@ -622,23 +698,25 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
         fail("PLAN_REVISION_GAP", `Expected plan revision ${expected}, received ${event.data.revision}`);
       }
       const itemIds = new Set<string>();
-      for (const item of event.data.items) {
+      for (const item of event.data.items ?? []) {
         if (itemIds.has(item.planItemId)) fail("PLAN_ITEM_DUPLICATE", `Duplicate plan item ${item.planItemId}`);
         itemIds.add(item.planItemId);
       }
-      for (const item of event.data.items) {
+      for (const item of event.data.items ?? []) {
         for (const dep of item.dependsOn ?? []) {
           if (!itemIds.has(dep)) fail("PLAN_ITEM_DEP_UNKNOWN", `Unknown dependency ${dep}`);
         }
       }
       plan.revisions[event.data.revision] = {
         revision: event.data.revision,
+        format,
         title: event.data.title,
         overview: event.data.overview,
         artifactRef: event.data.artifactRef,
         sha256: event.data.sha256,
         path: event.data.path,
-        items: event.data.items.map((item) => ({
+        ...(event.data.markdown === undefined ? {} : { markdown: event.data.markdown }),
+        items: (event.data.items ?? []).map((item) => ({
           planItemId: item.planItemId,
           title: item.title,
           description: item.description,
@@ -747,6 +825,168 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       if (view.presence.state === "waiting" && view.presence.reason === "Awaiting control Question answer") {
         view.presence = { state: "sleeping", reason: "Control Question cancelled" };
       }
+      break;
+    }
+    case "run.question.asked": {
+      const run = getRun(view, event.data.runId);
+      requireActive(run);
+      const action = getAction(run, event.data.actionId, event.data.stepId);
+      requireActionStatus(action, "running", "QUESTION_ACTION_NOT_RUNNING");
+      if (action.toolName !== "ask_question") {
+        fail("QUESTION_ACTION_TOOL", "Run Questions must belong to ask_question");
+      }
+      if (run.pendingQuestionSetId) {
+        fail("RUN_QUESTION_ALREADY_PENDING", `Question set ${run.pendingQuestionSetId} is already pending`);
+      }
+      if (run.questions[event.data.questionSetId]) {
+        fail("RUN_QUESTION_DUPLICATE", `Question set ${event.data.questionSetId} already exists`);
+      }
+      const questionIds = new Set<string>();
+      for (const question of event.data.questions) {
+        if (questionIds.has(question.id)) fail("RUN_QUESTION_ID_DUPLICATE", `Duplicate Question id ${question.id}`);
+        questionIds.add(question.id);
+        const optionIds = new Set(question.options.map((option) => option.id));
+        if (optionIds.size !== question.options.length) {
+          fail("RUN_QUESTION_OPTION_DUPLICATE", `Question ${question.id} has duplicate options`);
+        }
+        const allowText = question.allowText === true || question.selection === "text";
+        if (question.selection === "text" && question.options.length > 0) {
+          fail("RUN_QUESTION_TEXT_OPTIONS", `Text Question ${question.id} cannot declare options`);
+        }
+        if (question.selection !== "text" && question.options.length === 0 && !allowText) {
+          fail("RUN_QUESTION_NO_INPUT", `Question ${question.id} has no answer input`);
+        }
+      }
+      run.questions[event.data.questionSetId] = {
+        questionSetId: event.data.questionSetId,
+        actionId: event.data.actionId,
+        stepId: event.data.stepId,
+        questions: event.data.questions.map((question) => ({
+          id: question.id,
+          header: question.header,
+          prompt: question.prompt,
+          selection: question.selection,
+          options: question.options.map((option) => ({ ...option })),
+          allowText: question.allowText === true || question.selection === "text",
+        })),
+        status: "pending",
+      };
+      run.questionOrder.push(event.data.questionSetId);
+      run.pendingQuestionSetId = event.data.questionSetId;
+      view.presence = { state: "waiting", reason: "Awaiting Plan Question answers" };
+      break;
+    }
+    case "run.question.answered": {
+      const run = getRun(view, event.data.runId);
+      requireActive(run);
+      if (event.actor.kind !== "user") fail("RUN_QUESTION_ANSWER_ACTOR", "Run Question answers require a user");
+      if (run.pendingQuestionSetId !== event.data.questionSetId) {
+        fail("RUN_QUESTION_NOT_PENDING", `Question set ${event.data.questionSetId} is not pending`);
+      }
+      const questionSet = run.questions[event.data.questionSetId];
+      if (!questionSet || questionSet.actionId !== event.data.actionId || questionSet.stepId !== event.data.stepId) {
+        fail("RUN_QUESTION_MISMATCH", "Answered Question set does not match its Action");
+      }
+      const answers = new Map(event.data.answers.map((answer) => [answer.questionId, answer]));
+      if (answers.size !== event.data.answers.length || answers.size !== questionSet.questions.length) {
+        fail("RUN_QUESTION_ANSWER_COUNT", "Answers must cover every Question exactly once");
+      }
+      for (const question of questionSet.questions) {
+        const answer = answers.get(question.id);
+        if (!answer) fail("RUN_QUESTION_ANSWER_MISSING", `Question ${question.id} has no answer`);
+        const selected = answer.selectedOptionIds ?? [];
+        if (answer.skipped) {
+          if (selected.length > 0 || answer.text !== undefined) {
+            fail("RUN_QUESTION_SKIPPED_VALUE", `Skipped Question ${question.id} cannot carry an answer`);
+          }
+          continue;
+        }
+        const options = new Set(question.options.map((option) => option.id));
+        if (selected.some((id) => !options.has(id))) {
+          fail("RUN_QUESTION_OPTION_UNKNOWN", `Question ${question.id} selected an unknown option`);
+        }
+        if (question.selection === "single" && selected.length > 1) {
+          fail("RUN_QUESTION_SINGLE_MULTIPLE", `Question ${question.id} allows one option`);
+        }
+        if (question.selection === "text" && selected.length > 0) {
+          fail("RUN_QUESTION_TEXT_SELECTION", `Text Question ${question.id} cannot select options`);
+        }
+        if (answer.text !== undefined && !question.allowText) {
+          fail("RUN_QUESTION_TEXT_FORBIDDEN", `Question ${question.id} does not allow text`);
+        }
+        if (selected.length === 0 && answer.text === undefined) {
+          fail("RUN_QUESTION_ANSWER_EMPTY", `Question ${question.id} answer is empty`);
+        }
+      }
+      questionSet.status = "answered";
+      questionSet.answers = questionSet.questions.map((question) => {
+        const answer = answers.get(question.id)!;
+        return {
+          questionId: answer.questionId,
+          selectedOptionIds: [...(answer.selectedOptionIds ?? [])],
+          ...(answer.text === undefined ? {} : { text: answer.text }),
+          skipped: answer.skipped,
+        };
+      });
+      delete run.pendingQuestionSetId;
+      view.presence = { state: "active", reason: "Plan Question answered" };
+      break;
+    }
+    case "run.question.cancelled": {
+      const run = getRun(view, event.data.runId);
+      requireActive(run);
+      if (run.pendingQuestionSetId !== event.data.questionSetId) {
+        fail("RUN_QUESTION_NOT_PENDING", `Question set ${event.data.questionSetId} is not pending`);
+      }
+      const questionSet = run.questions[event.data.questionSetId];
+      if (!questionSet || questionSet.actionId !== event.data.actionId || questionSet.stepId !== event.data.stepId) {
+        fail("RUN_QUESTION_MISMATCH", "Cancelled Question set does not match its Action");
+      }
+      questionSet.status = "cancelled";
+      questionSet.reason = event.data.reason;
+      delete run.pendingQuestionSetId;
+      view.presence = { state: "active", reason: "Plan Question cancelled" };
+      break;
+    }
+    case "work.plan.updated": {
+      const run = getRun(view, event.data.runId);
+      requireActive(run);
+      const action = getAction(run, event.data.actionId, event.data.stepId);
+      requireActionStatus(action, "running", "WORK_PLAN_ACTION_NOT_RUNNING");
+      if (action.toolName !== "update_plan") fail("WORK_PLAN_ACTION_TOOL", "Work Plan updates require update_plan");
+      const itemIds = new Set(event.data.items.map((item) => item.workItemId));
+      const steps = new Set(event.data.items.map((item) => item.step));
+      if (itemIds.size !== event.data.items.length) fail("WORK_ITEM_DUPLICATE", "Work item ids must be unique");
+      if (steps.size !== event.data.items.length) fail("WORK_STEP_DUPLICATE", "Work item steps must be unique");
+      if (event.data.items.filter((item) => item.status === "in_progress").length > 1) {
+        fail("WORK_PLAN_MULTIPLE_ACTIVE", "At most one Work item may be in progress");
+      }
+      if (event.data.sourcePlan) {
+        const source = view.plans[event.data.sourcePlan.planId]?.revisions[event.data.sourcePlan.revision];
+        if (!source) fail("WORK_SOURCE_PLAN_NOT_FOUND", "Work Plan source Formal Plan does not exist");
+      }
+      let workPlan = view.workPlans[event.data.workPlanId];
+      if (!workPlan) {
+        if (event.data.revision !== 1) fail("WORK_PLAN_REVISION_GAP", "A new Work Plan starts at revision 1");
+        workPlan = { workPlanId: event.data.workPlanId, latestRevision: 0, revisions: {} };
+        view.workPlans[event.data.workPlanId] = workPlan;
+        view.workPlanOrder.push(event.data.workPlanId);
+      }
+      if (event.data.revision !== workPlan.latestRevision + 1) {
+        fail("WORK_PLAN_REVISION_GAP", `Expected Work Plan revision ${workPlan.latestRevision + 1}`);
+      }
+      workPlan.revisions[event.data.revision] = {
+        revision: event.data.revision,
+        runId: event.data.runId,
+        stepId: event.data.stepId,
+        actionId: event.data.actionId,
+        ...(event.data.explanation === undefined ? {} : { explanation: event.data.explanation }),
+        ...(event.data.sourcePlan === undefined ? {} : { sourcePlan: { ...event.data.sourcePlan } }),
+        items: event.data.items.map((item) => ({ ...item })),
+        updatedAt: event.occurredAt,
+      };
+      workPlan.latestRevision = event.data.revision;
+      view.currentWorkPlanId = event.data.workPlanId;
       break;
     }
     case "memory.candidate.created": {
@@ -987,7 +1227,9 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
               planBinding: {
                 planId: event.data.planBinding.planId,
                 revision: event.data.planBinding.revision,
-                planItemId: event.data.planBinding.planItemId,
+                ...(event.data.planBinding.planItemId === undefined
+                  ? {}
+                  : { planItemId: event.data.planBinding.planItemId }),
                 ...(event.data.planBinding.continuationOf === undefined
                   ? {}
                   : { continuationOf: event.data.planBinding.continuationOf }),
@@ -997,6 +1239,8 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
         steps: {},
         stepOrder: [],
         actions: {},
+        questions: {},
+        questionOrder: [],
         evaluations: {},
         steering: [],
         delegations: {},
@@ -1334,6 +1578,12 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       const run = getRun(view, event.data.runId);
       requireActive(run);
       const action = getAction(run, event.data.actionId, event.data.stepId);
+      const pendingRunQuestion = run.pendingQuestionSetId
+        ? run.questions[run.pendingQuestionSetId]
+        : undefined;
+      if (pendingRunQuestion?.actionId === action.actionId) {
+        fail("RUN_QUESTION_PENDING", `Question set ${pendingRunQuestion.questionSetId} must settle before its Action`);
+      }
       if (event.type === "action.cancelled" && action.status === "granted") {
         // A persisted grant can be cancelled during recovery when executor entry was
         // never durably recorded. Other terminal outcomes still require running.

@@ -64,7 +64,9 @@ implement the `pi-tui` `Component`/`Focusable` contracts can be mounted in an ex
 - `TuiPresenter` and projection/render helpers;
 - `ComposerComponent`, `FollowUpQueue`, and `FollowUpsComponent`;
 - `ListPanel`, `MultiSelectPanel`, `FormPanel` (text, secret, and terminal-dropdown fields with optional custom
-  input), `ScrollPanel`, `SessionsPanel`, and `PanelHost`;
+  input), `QuestionPanel`, `ScrollPanel`, `SessionsPanel`, and `PanelHost`;
+- Codex-style `update_plan` Todo snapshots in the Action timeline; legacy Plan-item Todo projection remains
+  replay-only for legacy plans.
 - command parsing/autocomplete and localization helpers;
 - Markdown, layout, theme, Action-card, Session-list, and repaint helpers.
 

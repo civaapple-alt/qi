@@ -833,6 +833,7 @@ export class TuiPresenter {
     const plan = view.plans[view.currentPlanId];
     if (!plan?.acceptedRevision) return false;
     const revision = plan.acceptedRevision;
+    if (plan.revisions[revision]?.format === "formal_markdown") return false;
     return view.runOrder.some((runId) => {
       const run = view.runs[runId];
       return (
@@ -1091,10 +1092,16 @@ export class TuiPresenter {
       `  ${oneLine(revision.title, 100)}`,
       `  ${oneLine(revision.overview, 120)}`,
       `  path ${revision.path}`,
-      "",
-      "Items",
-      ...revision.items.map((item, index) => `  ${index + 1}. ${item.title} · ${short(item.planItemId)}`),
     ];
+    if (revision.format === "formal_markdown" && revision.markdown) {
+      lines.push("", ...revision.markdown.split(/\r?\n/).slice(0, 400));
+    } else {
+      lines.push(
+        "",
+        "Items",
+        ...revision.items.map((item, index) => `  ${index + 1}. ${item.title} · ${short(item.planItemId)}`),
+      );
+    }
     const delegationStats = revision.sourceRunId
       ? summarizeDelegations(view?.runs[revision.sourceRunId])
       : undefined;
@@ -1385,7 +1392,7 @@ export class TuiPresenter {
     const plan = view.plans[view.currentPlanId];
     if (!plan?.acceptedRevision) return undefined;
     const revision = plan.revisions[plan.acceptedRevision];
-    if (!revision) return undefined;
+    if (!revision || revision.format === "formal_markdown") return undefined;
     const remaining: string[] = [];
     const items: Array<{ title: string; state: TodoItemState }> = [];
     let done = 0;

@@ -10,11 +10,12 @@ import {
   SessionSupervisor,
   TurnLoop,
   type RuntimeActivity,
+  type RunQuestionAnswer,
   type SessionMode,
   type TurnRequest,
   type TurnResult,
 } from "@civaapple/qi-agent/loop";
-import { createId, type RunId, type SessionEvent, type SessionId } from "@civaapple/qi-protocol";
+import { createId, type QuestionId, type RunId, type SessionEvent, type SessionId } from "@civaapple/qi-protocol";
 import { SqliteEventStore } from "@civaapple/qi-node/storage";
 import { SkillCatalog, type CatalogSkill, type SkillScope } from "@civaapple/qi-node/skills";
 import {
@@ -43,6 +44,7 @@ import {
 } from "@civaapple/qi-node/tools";
 import { SqliteEffectJournal } from "@civaapple/qi-node/workspace";
 import { createCodeActTool } from "./codeact-tool.js";
+import { createAskQuestionTool, RunQuestionCoordinator } from "./ask-question-tool.js";
 import type { QiCapabilityConfig, QiShellConfig } from "./config.js";
 import { createDelegateTool } from "./delegate-tool.js";
 import { defaultProjectConfigPath } from "./paths.js";
@@ -54,6 +56,7 @@ import {
   type QiProjectConfig,
 } from "./project-config.js";
 import { createPlanDocumentTool } from "./plan-tool.js";
+import { createUpdatePlanTool } from "./update-plan-tool.js";
 import { createTuiSkillTool } from "./skill-tool.js";
 import { ProcessTaskManager } from "./process-tasks.js";
 
@@ -106,6 +109,7 @@ export interface TuiRuntimeOptions {
   mounts?: readonly RuntimeMount[];
   onEvent?: (event: SessionEvent) => void;
   onActivity?: (activity: RuntimeActivity) => void;
+  interactiveQuestions?: boolean;
 }
 
 export interface TuiVerificationManifest {
@@ -147,6 +151,7 @@ export class TuiRuntime {
   readonly #loop: TurnLoop;
   readonly #supervisor: SessionSupervisor;
   readonly #humanControl: HumanControlService;
+  readonly #runQuestions: RunQuestionCoordinator;
   readonly #skills: SkillCatalog;
   readonly #processTasks: ProcessTaskManager;
   readonly #dataRoot: string;
@@ -179,6 +184,7 @@ export class TuiRuntime {
     loop: TurnLoop,
     supervisor: SessionSupervisor,
     humanControl: HumanControlService,
+    runQuestions: RunQuestionCoordinator,
     skills: SkillCatalog,
     skillSnapshot: readonly CatalogSkill[],
     processTasks: ProcessTaskManager,
@@ -214,6 +220,7 @@ export class TuiRuntime {
     this.#loop = loop;
     this.#supervisor = supervisor;
     this.#humanControl = humanControl;
+    this.#runQuestions = runQuestions;
     this.#skills = skills;
     this.#skillSnapshot = Object.freeze([...skillSnapshot]);
     this.#processTasks = processTasks;
@@ -330,11 +337,16 @@ export class TuiRuntime {
       eventStore,
       ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
     });
+    const runQuestions = new RunQuestionCoordinator(humanControl);
     registry.register("plan_document", createPlanDocumentTool({
       dataRoot,
       artifactStore,
       humanControl,
     }));
+    registry.register("update_plan", createUpdatePlanTool(humanControl));
+    if (options.interactiveQuestions === true) {
+      registry.register("ask_question", createAskQuestionTool(runQuestions));
+    }
     const loop = new TurnLoop({
       eventStore,
       modelPort: options.modelPort,
@@ -363,6 +375,7 @@ export class TuiRuntime {
       loop,
       supervisor,
       humanControl,
+      runQuestions,
       skills,
       skillSnapshot,
       processTasks,
@@ -643,10 +656,10 @@ export class TuiRuntime {
     return this.#humanControl.changeMode(this.sessionId, to, reason);
   }
 
-  acceptPlan(): { runId: RunId; input: string } {
+  acceptPlan(): { runId: RunId; input: string; formal: boolean } {
     if (this.active) throw new Error("Cannot accept a Plan while a Run is active");
     const accepted = this.#humanControl.acceptPlanAndStartFirstRun(this.sessionId);
-    return { runId: accepted.runId, input: accepted.input };
+    return { runId: accepted.runId, input: accepted.input, formal: accepted.formal };
   }
 
   revisePlan(feedback?: string): SessionView {
@@ -663,6 +676,14 @@ export class TuiRuntime {
     if (this.active) throw new Error("Cannot answer while a Run is active");
     const answered = this.#humanControl.answerNextRunQuestion(this.sessionId, choiceId);
     return { ...(answered.runId === undefined ? {} : { runId: answered.runId }), ...(answered.input === undefined ? {} : { input: answered.input }) };
+  }
+
+  answerRunQuestion(questionSetId: QuestionId, answers: readonly RunQuestionAnswer[]): void {
+    this.#runQuestions.answer(questionSetId, answers);
+  }
+
+  cancelRunQuestion(questionSetId: QuestionId, reason = "Question cancelled by user"): void {
+    this.#runQuestions.cancel(questionSetId, reason);
   }
 
   /** After stop, re-ask a next-Run Question when incomplete Plan items remain. */
@@ -767,12 +788,39 @@ export class TuiRuntime {
     return this.#executeTurn({ input });
   }
 
-  /** Execute a Run that HumanControlService already triggered (Plan accept / next-run continue). */
-  async runTriggered(runId: RunId, input: string): Promise<TurnResult> {
-    return this.#executeTurn({ input, existingRunId: runId });
+  async runPlanDraft(input: string): Promise<TurnResult> {
+    if (this.mode() !== "plan") throw new Error("Formal Plan drafting requires Plan mode");
+    return this.#executeTurn({
+      input,
+      requiredCompletionTool: {
+        toolName: "plan_document",
+        parkReason: "review",
+        correction:
+          "This drafting Run is not complete. If information is missing, ask the user with ask_question when available. " +
+          "Otherwise call plan_document create/edit with the complete self-contained Formal Plan Markdown now.",
+      },
+    });
   }
 
-  async #executeTurn(options: { input: string; existingRunId?: RunId }): Promise<TurnResult> {
+  /** Execute a Run that HumanControlService already triggered (Plan accept / next-run continue). */
+  async runTriggered(runId: RunId, input: string): Promise<TurnResult> {
+    const run = this.view()?.runs[runId];
+    const revision = run?.planBinding === undefined
+      ? undefined
+      : this.view()?.plans[run.planBinding.planId]?.revisions[run.planBinding.revision];
+    return this.#executeTurn({
+      input,
+      existingRunId: runId,
+      ...(revision?.format === "formal_markdown" ? { historyBudgetTokens: 0 } : {}),
+    });
+  }
+
+  async #executeTurn(options: {
+    input: string;
+    existingRunId?: RunId;
+    historyBudgetTokens?: number;
+    requiredCompletionTool?: TurnRequest["requiredCompletionTool"];
+  }): Promise<TurnResult> {
     if (!options.input.trim()) throw new TypeError("Input must not be empty");
     if (this.#activeController) throw new Error("A Run is already active");
     const controller = new AbortController();
@@ -806,10 +854,13 @@ export class TuiRuntime {
         contextBlocks,
         contextBudgetTokens: this.#contextBudgetTokens,
         maxOutputTokens: this.#outputReserveTokens,
-        historyBudgetTokens: TUI_HISTORY_BUDGET_TOKENS,
+        historyBudgetTokens: options.historyBudgetTokens ?? TUI_HISTORY_BUDGET_TOKENS,
         maxSteps: this.#maxSteps,
         reserveFinalHandoff: true,
         maxActionsPerStep: TUI_MAX_ACTIONS_PER_STEP,
+        ...(options.requiredCompletionTool === undefined
+          ? {}
+          : { requiredCompletionTool: options.requiredCompletionTool }),
         mode,
         ...(options.existingRunId === undefined ? {} : { existingRunId: options.existingRunId }),
         workspaceRoot: this.#workspaceRoot,
@@ -924,8 +975,24 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
       leaseId: "lea_tui_plan",
       subject,
       tools: ["plan_document"],
-      effects: ["write"],
-      resources: ["plan:document"],
+      effects: ["read", "write"],
+      resources: ["plan:document:**"],
+      expiresAt,
+    },
+    {
+      leaseId: "lea_tui_work_plan",
+      subject,
+      tools: ["update_plan"],
+      effects: ["read"],
+      resources: ["work-plan:**"],
+      expiresAt,
+    },
+    {
+      leaseId: "lea_tui_run_question",
+      subject,
+      tools: ["ask_question"],
+      effects: ["read"],
+      resources: ["run-question:user"],
       expiresAt,
     },
   ] satisfies CapabilityLease[]) {
@@ -1167,18 +1234,26 @@ function modeGuidance(mode: SessionMode, allowDelegate: boolean): string {
   }
   if (mode === "plan") {
     return (
-      "Session mode is Plan. Explore with read-only tools" +
+      "Session mode is Plan: act as a dedicated Planner, not an Executor. First check clarity, feasibility, " +
+      "dependencies, interface impact, validation, assumptions, and missing tools. Discover knowable facts with read-only tools" +
       (allowDelegate
         ? ", and use delegate for serial depth-1 read-only Subagents when exploration would bloat the parent context"
         : "") +
-      ". Resolve conflicts yourself, then call plan_document once with the consolidated Plan " +
-      "(stable planItemId values when revising). Do not edit Workspace business files, run shell/script/verify/task, " +
-      "or claim execution started — the human must accept the Plan review before Agent Runs begin."
+      ". Ask only material questions; use ask_question when it is advertised, otherwise output the complete question list " +
+      "for the user's next turn. When information is sufficient, call plan_document create with one self-contained Formal " +
+      "Plan Markdown document, or read then edit an existing plan using its latest SHA. It must include executor background, " +
+      "numbered implementation steps, dependencies, conditional branches, interface impact, verification, and necessary " +
+      "assumptions. Numbered steps are design instructions, not Todo: never use task-list checkboxes or statuses. Do not edit " +
+      "Workspace business files, run shell/script/verify/task, or claim execution started. The human must accept review; the " +
+      "Executor will receive the accepted plan but none of this planning conversation."
     );
   }
   return (
     "Session mode is Agent. Use the tools granted at launch to execute the user request. " +
-    "Do not call plan_document; switch to Plan mode when a new Plan revision is needed."
+    "For cross-package work, three or more meaningful implementation steps, phased migrations, or multi-round validation, " +
+    "use update_plan as a Work Plan/Todo and keep it current with at most one in_progress item. Skip update_plan for simple " +
+    "tasks. A Work Plan is navigation, not completion evidence. Do not call plan_document; switch to Plan mode when a new " +
+    "Formal Plan revision is needed."
   );
 }
 

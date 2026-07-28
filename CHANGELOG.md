@@ -7,6 +7,8 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+- Added Formal Markdown Plan revisions, immutable SHA-addressed Plan documents, Agent-only `update_plan` Work
+  Plans, and Plan-only in-Run AskQuestion with single/multiple/text/custom/skip interaction.
 - Added declaration-only plugin contracts and `qi install/update/remove/list` for exact npm, pinned Git, and
   digest-pinned local sources. Installation never runs npm lifecycle scripts and publishes validated content to
   the shared content-addressed package store.
@@ -40,6 +42,11 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Changed
 
+- Accepting a new Formal Plan now atomically starts one whole-plan Agent Run with zero planning-history budget;
+  Formal Plans no longer generate Todo items or `/next` gates. Legacy item plans keep their replay and `/next`
+  behavior.
+- `plan_document` is now a discriminated `create`/`read`/`edit` document tool with SHA freshness, atomic unique
+  text patches, a 64 KiB limit, and rejection of detected secrets and Markdown task-list checkboxes.
 - Consolidated 21 runtime publication units into the coordinated `qi-protocol`, `qi-ai`, `qi-agent`, `qi-node`,
   `qi-tui`, and `qi` CLI packages, with controlled subpath exports preserving cohesive module boundaries.
 - Workspace `.qi` is now an allowlisted declaration/lock surface only. User Skills moved to

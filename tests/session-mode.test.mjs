@@ -592,11 +592,59 @@ test("next-run stop can re-ask and continue later; return_to_plan switches to Pl
   assert.equal(returned.view.pendingQuestion, undefined);
 });
 
+test("Formal Plan acceptance starts one whole-plan Run and never creates a next-run gate", () => {
+  const sessionId = createId("ses");
+  const store = new InMemoryEventStore();
+  const control = new HumanControlService({ eventStore: store });
+  control.ensureSession(sessionId, "formal", "plan");
+  const planId = createId("pln");
+  const markdown = "# Formal implementation\n\nImplement the accepted design.\n\n## Steps\n\n1. Change the protocol.\n2. Verify the runtime.";
+  control.recordPlanRevision(sessionId, {
+    planId,
+    format: "formal_markdown",
+    title: "Formal implementation",
+    overview: "Implement the accepted design.",
+    markdown,
+    artifactRef: "artifact://cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    path: "/tmp/formal.md",
+  });
+  const accepted = control.acceptPlanAndStartFirstRun(sessionId);
+  assert.equal(accepted.formal, true);
+  assert.equal(accepted.planItemId, undefined);
+  assert.equal(accepted.view.runs[accepted.runId].planBinding.planItemId, undefined);
+  assert.match(accepted.input, /<accepted-plan/);
+  assert.match(accepted.input, /Change the protocol/);
+
+  const writer = new EventWriter(store, sessionId);
+  writer.append("run.started", { runId: accepted.runId }, { kind: "runtime", id: "test" });
+  writer.append("step.started", { runId: accepted.runId, stepId: "stp_formal_001" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "step.completed",
+    { runId: accepted.runId, stepId: "stp_formal_001", finishReason: "response" },
+    { kind: "runtime", id: "test" },
+  );
+  writer.append(
+    "run.completed",
+    { runId: accepted.runId, completionKind: "response", evaluationIds: [] },
+    { kind: "runtime", id: "test" },
+  );
+  assert.equal(control.askNextRunQuestion(sessionId, accepted.runId), undefined);
+  assert.equal(store.load(sessionId)?.pendingQuestion, undefined);
+  assert.equal(store.load(sessionId)?.runOrder.length, 1);
+});
+
 test("toolsForMode never advertises plan_document outside Plan", () => {
-  const registered = ["read", "write", "plan_document", "delegate", "shell"];
+  const registered = ["read", "write", "plan_document", "ask_question", "update_plan", "delegate", "shell"];
   assert.deepEqual(toolsForMode("ask", registered), ["read"]);
-  assert.deepEqual(toolsForMode("plan", registered).sort(), ["delegate", "plan_document", "read"].sort());
-  assert.deepEqual(toolsForMode("agent", registered).sort(), ["delegate", "read", "shell", "write"].sort());
+  assert.deepEqual(
+    toolsForMode("plan", registered).sort(),
+    ["ask_question", "delegate", "plan_document", "read"].sort(),
+  );
+  assert.deepEqual(
+    toolsForMode("agent", registered).sort(),
+    ["delegate", "read", "shell", "update_plan", "write"].sort(),
+  );
 });
 
 test("capability broker denies tools that the frozen Run mode forbids", async () => {

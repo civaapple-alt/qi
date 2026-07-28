@@ -42,6 +42,7 @@ const renderers: Record<string, Renderer> = {
   task: renderTask,
   delegate: renderDelegate,
   plan_document: renderPlanDocument,
+  update_plan: renderWorkPlan,
 };
 
 export function renderToolCard(model: ToolCardModel, options: ToolCardOptions = {}): string[] {
@@ -296,10 +297,15 @@ function renderDelegate(model: ToolCardModel, options: ToolCardOptions): string[
 function renderPlanDocument(model: ToolCardModel, options: ToolCardOptions): string[] {
   const input = record(model.input);
   const output = model.output;
-  const title = String(input?.title ?? "Plan");
+  const title = String(output?.title ?? input?.title ?? "Formal Plan");
+  const operation = typeof input?.operation === "string" ? input.operation : undefined;
   const items = Array.isArray(input?.items) ? input.items : [];
   const result = output
-    ? `rev ${String(output.revision)} · ${String(output.itemCount)} items`
+    ? [
+        operation,
+        `rev ${String(output.revision)}`,
+        output.itemCount === undefined ? undefined : `${String(output.itemCount)} items`,
+      ].filter(Boolean).join(" · ")
     : model.errorCode ?? (items.length > 0 ? `${items.length} items` : undefined);
   if (options.summaryOnly) return [header(model, title, result)];
   const lines = [header(model, title, result)];
@@ -318,6 +324,32 @@ function renderPlanDocument(model: ToolCardModel, options: ToolCardOptions): str
     lines.push(`  ${items.length} items · Ctrl+O to expand · /plan`);
   }
   if (typeof output?.path === "string") lines.push(`  ${output.path}`);
+  return lines;
+}
+
+function renderWorkPlan(model: ToolCardModel, options: ToolCardOptions): string[] {
+  const input = record(model.input);
+  const output = model.output;
+  const items = Array.isArray(output?.plan)
+    ? output.plan
+    : Array.isArray(input?.plan) ? input.plan : [];
+  const completed = items.filter((item) => record(item)?.status === "completed").length;
+  const active = items.find((item) => record(item)?.status === "in_progress");
+  const activeStep = active ? String(record(active)?.step ?? "") : "";
+  const title = activeStep ? `To-do · Working on ${oneLine(activeStep, 72)}` : "To-do";
+  const lines = [header(model, title, `${completed}/${items.length} done`)];
+  if (options.summaryOnly) return lines;
+  const explanation = String(output?.explanation ?? input?.explanation ?? "").trim();
+  if (explanation) lines.push(`  ${oneLine(explanation, 110)}`);
+  const limit = options.expanded ? (options.outputLines ?? 32) : Math.min(8, options.outputLines ?? 8);
+  for (const item of items.slice(0, limit)) {
+    const value = record(item);
+    if (!value) continue;
+    const status = value.status;
+    const glyph = status === "completed" ? "✓" : status === "in_progress" ? "→" : "○";
+    lines.push(`  ${glyph} ${oneLine(String(value.step ?? ""), 108)}`);
+  }
+  if (items.length > limit) lines.push(`  … ${items.length - limit} more`);
   return lines;
 }
 

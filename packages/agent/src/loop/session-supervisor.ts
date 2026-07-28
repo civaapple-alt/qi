@@ -120,18 +120,47 @@ export class SessionSupervisor {
           );
           break;
         case "running":
-          indeterminate = true;
-          writer.append(
-            "action.indeterminate",
-            {
-              runId: run.runId,
-              stepId: action.stepId,
-              actionId: action.actionId,
-              reason: "Process restarted after executor entry but before settlement",
-              reconciliationHint: "Inspect the Workspace and Effect Journal before retrying",
-            },
-            { kind: "runtime", id: "session_supervisor" },
-          );
+          if (action.effect === "read") {
+            const pendingQuestion = run.pendingQuestionSetId
+              ? run.questions[run.pendingQuestionSetId]
+              : undefined;
+            if (pendingQuestion?.actionId === action.actionId && pendingQuestion.status === "pending") {
+              writer.append(
+                "run.question.cancelled",
+                {
+                  runId: run.runId,
+                  stepId: action.stepId,
+                  actionId: action.actionId,
+                  questionSetId: pendingQuestion.questionSetId,
+                  reason: "Process restarted while user input was pending",
+                },
+                { kind: "runtime", id: "session_supervisor" },
+              );
+            }
+            writer.append(
+              "action.cancelled",
+              {
+                runId: run.runId,
+                stepId: action.stepId,
+                actionId: action.actionId,
+                reason: "Process restarted during a read/control Action",
+              },
+              { kind: "runtime", id: "session_supervisor" },
+            );
+          } else {
+            indeterminate = true;
+            writer.append(
+              "action.indeterminate",
+              {
+                runId: run.runId,
+                stepId: action.stepId,
+                actionId: action.actionId,
+                reason: "Process restarted after executor entry but before settlement",
+                reconciliationHint: "Inspect the Workspace and Effect Journal before retrying",
+              },
+              { kind: "runtime", id: "session_supervisor" },
+            );
+          }
           break;
         default:
           break;

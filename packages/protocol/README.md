@@ -15,7 +15,8 @@ runtime parsers. Producers and consumers must agree here before a new fact can e
 
 ## Core model
 
-`SessionId`, `RunId`, `StepId`, `ActionId`, `TaskId`, `PlanId`, `PlanItemId`, `QuestionId`, and related identifiers
+`SessionId`, `RunId`, `StepId`, `ActionId`, `TaskId`, `PlanId`, `PlanItemId`, `WorkPlanId`, `WorkItemId`,
+`QuestionId`, and related identifiers
 carry distinct prefixes. Every durable event has a discriminated `type`, identity links, actor metadata, sequence,
 and timestamp. Mode, Plan revision/review, and control Question events are first-class Session facts
 ([ADR 0011](../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)). Read-only Workspace mounts use
@@ -34,8 +35,14 @@ for untrusted serialized input.
   the audit fact itself.
 - ProcessTask start, stop request, exit, and lost ownership are explicit facts; transient stdout/stderr is not a
   Session event and cannot serve as settlement evidence.
-- `run.triggered` may freeze `mode` and an optional Plan-item binding; legacy events without `mode` replay as
-  Agent.
+- `plan.revision.recorded` without `format` replays as `legacy_items`; `formal_markdown` revisions carry the
+  complete document and do not require items.
+- `run.triggered` may freeze `mode` and a Plan binding. Formal Plan bindings omit `planItemId`; legacy bindings
+  retain it.
+- `work.plan.updated` records implementation navigation independently from Formal Plan review and completion
+  evidence.
+- `run.question.*` settles a blocking Question inside one Run and remains distinct from between-Run
+  `control.question.*`.
 - `step.completed.finishReason = handoff` explicitly marks a budget continuation summary. Older Sessions without
   this additive value keep their prior history behavior.
 - `action.freshness.rebased` records the original and effective whole-file digests when the Loop safely chains a

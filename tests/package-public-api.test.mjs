@@ -60,7 +60,7 @@ const expectedRuntimeExports = {
     "GoalIdSchema", "LeaseIdSchema", "MemoryIdSchema", "PlanIdSchema",
     "PlanItemIdSchema", "QuestionIdSchema", "ReceiptIdSchema", "RunIdSchema",
     "SessionEventSchema", "SessionIdSchema", "SessionModeSchema", "StepIdSchema",
-    "TaskIdSchema", "assertSchema", "createId", "parseSessionEvent",
+    "TaskIdSchema", "WorkItemIdSchema", "WorkPlanIdSchema", "assertSchema", "createId", "parseSessionEvent",
   ],
   "@civaapple/qi-node/scheduler": ["SessionEventTriggerSink", "SqliteWatcherScheduler"],
   "@civaapple/qi-node/storage": [
@@ -97,7 +97,7 @@ const expectedRuntimeExports = {
   ],
   "@civaapple/qi-tui": [
     "ComposerComponent", "FollowUpQueue", "FollowUpsComponent", "FormPanel",
-    "LineInputBatcher", "ListPanel", "MultiSelectPanel", "NEW_SESSION_ID", "PanelHost",
+    "LineInputBatcher", "ListPanel", "MultiSelectPanel", "NEW_SESSION_ID", "PanelHost", "QuestionPanel",
     "SESSION_PREVIEW_MAX_CHARS", "ScrollPanel", "SessionsPanel", "Theme", "TuiPresenter",
     "USER_MESSAGE_PREFIX", "applyTheme", "autocompleteSlashCommands", "buildSessionEntries",
     "collapsePreviewText", "commandHelp", "currentMark", "darkColors", "defaultLocale",

@@ -106,21 +106,18 @@ these hubs follows `language` in `~/.qi/config.toml` (`zh` default, or `en`).
 focused Action card, long paste, or Markdown code block. Focus and expansion are observational; they do not hide
 committed history.
 
-Session mode is durable (`ask` / `plan` / `agent`). Plan mode records managed `plan_document` revisions. When a
-review is pending, the TUI opens a Plan Review panel (`开始实现` / `修改计划` / `拒绝计划`, ↑↓ / Enter, Esc to
-chat). Ordinary messages while review is pending remain Plan-mode discussion; only `开始实现` or `/plan accept`
-settles the review, switches to Agent, and starts exactly one item Run ([ADR 0011](../../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)).
-`修改计划` (or reject with feedback) collects requirements, settles as revise, and runs a Plan turn to update
-`plan_document`. After an item Run ends, a Next Run panel opens (`继续下一项` / `先停在这里` / `回到 Plan`,
-↑↓ / Enter, Esc to chat). No composer digit shortcuts. After **先停在这里**, `/next` (or `/next continue`)
-re-asks the Question when incomplete items remain. After **回到 Plan**, revise via chat/`plan_document`,
-take a new Plan Review, then `开始实现` (starts the first incomplete item). If you did not change the plan,
-`/mode agent` then `/next` reopens the gate. `/providers` projects real launch auth/profile data; `/coord`,
-`/work`, `/gate`, and `/extensions` stay explicit empty states until their backends exist.
+Session mode is durable (`ask` / `plan` / `agent`). Plan mode records managed Formal Markdown
+`plan_document` revisions; a Formal Plan is not a Todo. Review offers `开始实现` / `修改计划` / `拒绝计划`.
+Accept settles review, switches to Agent, and starts one whole-plan Run
+([ADR 0011](../../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)). The
+Executor receives the accepted document plus ID/revision/SHA but none of the planning conversation.
+Revision reads the latest document and uses SHA-checked `plan_document edit`; each edit creates an immutable
+revision and reopens review.
 
-Plan Review and Next Run are Runtime-owned control gates, not a general model-callable `askQuestion` Tool.
-`FormPanel` supports text/secret/dropdown input for CLI-owned workflows, but arbitrary model questions do not
-yet have a durable asked/waiting/answered protocol.
+Rich TTY Plan Runs may block on `ask_question`. Its panel supports single/multiple/text/custom answers, Esc skip
+per question, and Ctrl+C Run cancellation; the answer resumes the same Action and Run. Non-TTY omits this tool,
+so the Planner emits a normal next-turn question list. Legacy item plans alone retain the Next Run panel and
+`/next`. `/work` and `/todo` are intentionally absent; Work Todo snapshots live in the conversation timeline.
 
 ## Tool rendering
 
@@ -138,10 +135,10 @@ every column useful, the renderer switches to a per-row vertical field layout so
   change lines with nearby context, and omits `---`/`+++`/`@@` chrome. Long patches collapse surplus middle as
   `… truncated (N more lines) · Ctrl+O`; short patches are never stats-only. Full unified diffs remain on the
   durable Action card / Artifact reference.
-- `plan_document`: compact card for title/overview/item count; expansion lists item titles; durable Plan truth
-  remains under `/plan` and `plan.revision.recorded`.
-- Plan: durable `plan.revision.recorded` items drive Todo progress and `/plan`. Managed Markdown under
-  `dataRoot/plans/` is written only by `plan_document`; ordinary Workspace writes do not create Plan authority.
+- `plan_document`: create/read/edit card for a complete Formal Plan; SHA-checked edits publish immutable
+  `plans/<planId>/<sha256>.md` revisions. Durable truth remains under `/plan`.
+- `update_plan`: Codex-style Todo snapshot with stable Work item IDs and at most one `in_progress`. It is
+  implementation navigation, not completion evidence.
 - Discovery Actions (read/list/search/…) each keep their own compact card in the transcript; they are not folded
   into an explore summary.
 - Delegate: parent timeline shows a Subagents progress block (`Running` / `Finished` per depth-1 delegation) with
@@ -150,8 +147,8 @@ every column useful, the renderer switches to a per-row vertical field layout so
   (`runtime.childView` / `/agents`). Inspect panels (`/help`, …) dismiss with Esc and must not cancel the parent
   Run or in-flight Subagents. The UI never invents parallel fan-out beyond durable running delegations
   (Plan Subagents remain serial).
-- Plan Todo: after accept/`开始实现`, the transcript projects accepted Plan items; parked/failed items are never
-  counted as complete. Pending review before start does not show Todo.
+- Legacy Plan Todo: historical item revisions still project progress and `/next`; Formal Plans never derive Todo
+  from Markdown sections.
 - Network, Skill, Artifact, and ProcessTask Actions use separate compact card grammars. One card changes lifecycle
   state instead of emitting unrelated start/completed rows.
 

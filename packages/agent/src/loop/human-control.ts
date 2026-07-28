@@ -1,23 +1,36 @@
-import type { EventStore, PlanItemView, SessionMode, SessionView } from "@civaapple/qi-agent/kernel";
+import type {
+  EventStore,
+  PlanItemView,
+  PlanRevisionView,
+  SessionMode,
+  SessionView,
+} from "@civaapple/qi-agent/kernel";
 import {
   createId,
+  type ActionId,
   type PlanId,
   type PlanItemId,
   type QuestionId,
   type RunId,
   type SessionEvent,
   type SessionId,
+  type StepId,
+  type WorkItemId,
+  type WorkPlanId,
 } from "@civaapple/qi-protocol";
 import { EventWriter, type EventActor, type EventBatchEntry } from "./event-writer.js";
 
 export interface PlanRevisionInput {
   planId: PlanId;
+  /** Missing on historical callers and fixtures; defaults to legacy_items. */
+  format?: "legacy_items" | "formal_markdown";
   title: string;
   overview: string;
   artifactRef: string;
   sha256: string;
   path: string;
-  items: readonly PlanItemView[];
+  markdown?: string;
+  items?: readonly PlanItemView[];
   sourceRunId?: RunId;
 }
 
@@ -37,6 +50,10 @@ export class HumanControlService {
     this.#store = options.eventStore;
     this.#clock = options.clock ?? (() => new Date());
     this.#onEvent = options.onEvent;
+  }
+
+  view(sessionId: SessionId): SessionView | undefined {
+    return this.#store.load(sessionId);
   }
 
   ensureSession(sessionId: SessionId, title?: string, mode: SessionMode = "agent"): SessionView {
@@ -117,24 +134,32 @@ export class HumanControlService {
     const view = requireView(writer.view);
     const plan = view.plans[input.planId];
     const revision = (plan?.latestRevision ?? 0) + 1;
+    const format = input.format ?? "legacy_items";
     writer.appendBatch([
       {
         type: "plan.revision.recorded",
         data: {
           planId: input.planId,
           revision,
+          ...(format === "formal_markdown"
+            ? { format: "formal_markdown" as const, markdown: requireFormalMarkdown(input) }
+            : {}),
           title: input.title,
           overview: input.overview,
           artifactRef: input.artifactRef,
           sha256: input.sha256,
           path: input.path,
-          items: input.items.map((item) => ({
-            planItemId: item.planItemId,
-            title: item.title,
-            description: item.description,
-            ...(item.verification === undefined ? {} : { verification: item.verification }),
-            ...(item.dependsOn.length === 0 ? {} : { dependsOn: [...item.dependsOn] }),
-          })),
+          ...(format === "legacy_items"
+            ? {
+                items: (input.items ?? []).map((item) => ({
+                  planItemId: item.planItemId,
+                  title: item.title,
+                  description: item.description,
+                  ...(item.verification === undefined ? {} : { verification: item.verification }),
+                  ...(item.dependsOn.length === 0 ? {} : { dependsOn: [...item.dependsOn] }),
+                })),
+              }
+            : {}),
           ...(input.sourceRunId === undefined ? {} : { sourceRunId: input.sourceRunId }),
         },
         actor,
@@ -148,11 +173,110 @@ export class HumanControlService {
     return requireView(writer.view);
   }
 
-  /** Accept Plan review, switch to Agent, and trigger exactly one Run for the first incomplete item. */
+  recordWorkPlanUpdate(
+    sessionId: SessionId,
+    refs: { runId: RunId; stepId: StepId; actionId: ActionId },
+    input: WorkPlanUpdateInput,
+  ): SessionView {
+    const writer = this.#writer(sessionId);
+    const view = requireView(writer.view);
+    const workPlanId = input.workPlanId ?? (createId("wpl") as WorkPlanId);
+    const prior = view.workPlans[workPlanId];
+    if (input.workPlanId && !prior) throw new Error(`Work Plan ${workPlanId} does not exist`);
+    const priorIds = new Set(
+      prior?.revisions[prior.latestRevision]?.items.map((item) => item.workItemId) ?? [],
+    );
+    const items = input.plan.map((item) => {
+      if (item.workItemId && !priorIds.has(item.workItemId)) {
+        throw new Error(`Work item ${item.workItemId} does not exist in ${workPlanId}`);
+      }
+      return {
+        workItemId: item.workItemId ?? (createId("wit") as WorkItemId),
+        step: item.step,
+        status: item.status,
+      };
+    });
+    const run = view.runs[refs.runId];
+    const sourcePlan = run?.planBinding === undefined
+      ? undefined
+      : { planId: run.planBinding.planId, revision: run.planBinding.revision };
+    writer.append("work.plan.updated", {
+      workPlanId,
+      revision: (prior?.latestRevision ?? 0) + 1,
+      runId: refs.runId,
+      stepId: refs.stepId,
+      actionId: refs.actionId,
+      ...(input.explanation === undefined ? {} : { explanation: input.explanation }),
+      ...(sourcePlan === undefined ? {} : { sourcePlan }),
+      items,
+    }, { kind: "agent", id: "update_plan" });
+    return requireView(writer.view);
+  }
+
+  askRunQuestion(
+    sessionId: SessionId,
+    refs: { runId: RunId; stepId: StepId; actionId: ActionId },
+    questions: readonly RunQuestionInput[],
+  ): { view: SessionView; questionSetId: QuestionId } {
+    const writer = this.#writer(sessionId);
+    requireView(writer.view);
+    const questionSetId = createId("qst") as QuestionId;
+    writer.append("run.question.asked", {
+      ...refs,
+      questionSetId,
+      questions: questions.map((question) => ({
+        id: question.id,
+        header: question.header,
+        prompt: question.prompt,
+        selection: question.selection,
+        options: question.options.map((option) => ({ ...option })),
+        ...(question.allowText === undefined ? {} : { allowText: question.allowText }),
+      })),
+    }, { kind: "agent", id: "ask_question" });
+    return { view: requireView(writer.view), questionSetId };
+  }
+
+  answerRunQuestion(
+    sessionId: SessionId,
+    refs: { runId: RunId; stepId: StepId; actionId: ActionId; questionSetId: QuestionId },
+    answers: readonly RunQuestionAnswer[],
+  ): SessionView {
+    const writer = this.#writer(sessionId);
+    requireView(writer.view);
+    writer.append("run.question.answered", {
+      ...refs,
+      answers: answers.map((answer) => ({
+        questionId: answer.questionId,
+        ...(answer.selectedOptionIds === undefined
+          ? {}
+          : { selectedOptionIds: [...answer.selectedOptionIds] }),
+        ...(answer.text === undefined ? {} : { text: answer.text }),
+        skipped: answer.skipped,
+      })),
+    }, { kind: "user", id: "user" });
+    return requireView(writer.view);
+  }
+
+  cancelRunQuestion(
+    sessionId: SessionId,
+    refs: { runId: RunId; stepId: StepId; actionId: ActionId; questionSetId: QuestionId },
+    reason: string,
+  ): SessionView {
+    const writer = this.#writer(sessionId);
+    requireView(writer.view);
+    writer.append(
+      "run.question.cancelled",
+      { ...refs, reason },
+      { kind: "runtime", id: "question_control" },
+    );
+    return requireView(writer.view);
+  }
+
+  /** Accept Plan review, switch to Agent, and trigger its implementation Run atomically. */
   acceptPlanAndStartFirstRun(
     sessionId: SessionId,
     actor: EventActor = { kind: "user", id: "user" },
-  ): { view: SessionView; runId: RunId; planItemId: PlanItemId; input: string } {
+  ): { view: SessionView; runId: RunId; planItemId?: PlanItemId; input: string; formal: boolean } {
     const writer = this.#writer(sessionId);
     const view = requireView(writer.view);
     const pending = view.pendingReview;
@@ -162,10 +286,13 @@ export class HumanControlService {
     const plan = view.plans[pending.planId];
     const revision = plan?.revisions[pending.revision];
     if (!plan || !revision) throw new Error("Pending Plan revision is missing");
-    const first = firstIncompleteItem(view, pending.planId, pending.revision);
-    if (!first) throw new Error("Plan has no incomplete items to execute");
+    const formal = revision.format === "formal_markdown";
+    const first = formal ? undefined : firstIncompleteItem(view, pending.planId, pending.revision);
+    if (!formal && !first) throw new Error("Plan has no incomplete items to execute");
     const runId = createId("run") as RunId;
-    const input = formatPlanItemInput(revision.title, first);
+    const input = formal
+      ? formatAcceptedPlanInput(pending.planId, revision)
+      : formatPlanItemInput(revision.title, first!);
     writer.appendBatch([
       {
         type: "plan.review.settled",
@@ -191,7 +318,7 @@ export class HumanControlService {
           planBinding: {
             planId: pending.planId,
             revision: pending.revision,
-            planItemId: first.planItemId,
+            ...(first === undefined ? {} : { planItemId: first.planItemId }),
           },
         },
         actor,
@@ -200,8 +327,9 @@ export class HumanControlService {
     return {
       view: requireView(writer.view),
       runId,
-      planItemId: first.planItemId,
+      ...(first === undefined ? {} : { planItemId: first.planItemId }),
       input,
+      formal,
     };
   }
 
@@ -237,6 +365,8 @@ export class HumanControlService {
     if (view.pendingReview?.status === "pending") return view;
     const run = view.runs[completedRunId];
     if (!run?.planBinding || !run.terminal) return undefined;
+    const revision = view.plans[run.planBinding.planId]?.revisions[run.planBinding.revision];
+    if (revision?.format === "formal_markdown") return undefined;
     const next = firstIncompleteItem(view, run.planBinding.planId, run.planBinding.revision);
     if (!next) return undefined;
     const questionId = createId("qst") as QuestionId;
@@ -273,8 +403,10 @@ export class HumanControlService {
     const planId = view.currentPlanId;
     if (!planId) return undefined;
     const plan = view.plans[planId];
+    if (!plan) return undefined;
     const revision = plan?.acceptedRevision;
     if (revision === undefined) return undefined;
+    if (plan.revisions[revision]?.format === "formal_markdown") return undefined;
     if (!firstIncompleteItem(view, planId, revision)) return undefined;
     const completedRunId = latestTerminalPlanBoundRun(view, planId, revision);
     if (!completedRunId) return undefined;
@@ -378,7 +510,7 @@ export function firstIncompleteItem(
 ): PlanItemView | undefined {
   const plan = view.plans[planId];
   const rev = plan?.revisions[revision];
-  if (!rev) return undefined;
+  if (!rev || rev.format === "formal_markdown") return undefined;
   for (const item of rev.items) {
     const bound = view.runOrder.some((runId) => {
       const run = view.runs[runId];
@@ -418,6 +550,49 @@ export function latestTerminalPlanBoundRun(
   return undefined;
 }
 
+export interface WorkPlanUpdateInput {
+  workPlanId?: WorkPlanId;
+  explanation?: string;
+  plan: ReadonlyArray<{
+    workItemId?: WorkItemId;
+    step: string;
+    status: "pending" | "in_progress" | "completed";
+  }>;
+}
+
+export interface RunQuestionInput {
+  id: string;
+  header: string;
+  prompt: string;
+  selection: "single" | "multiple" | "text";
+  options: ReadonlyArray<{ id: string; label: string; description?: string }>;
+  allowText?: boolean;
+}
+
+export interface RunQuestionAnswer {
+  questionId: string;
+  selectedOptionIds?: readonly string[];
+  text?: string;
+  skipped: boolean;
+}
+
+function formatAcceptedPlanInput(
+  planId: PlanId,
+  revision: PlanRevisionView,
+): string {
+  if (revision.format !== "formal_markdown" || !revision.markdown) {
+    throw new Error("Accepted Formal Plan Markdown is missing");
+  }
+
+  return [
+    `<accepted-plan id="${planId}" revision="${revision.revision}" sha256="${revision.sha256}">`,
+    revision.markdown.trim(),
+    "</accepted-plan>",
+    "",
+    "Implement the accepted plan. Use update_plan only when the implementation is complex enough to benefit from a work Todo.",
+  ].join("\n");
+}
+
 export function formatPlanItemInput(planTitle: string, item: PlanItemView): string {
   const lines = [
     `Execute Plan item from "${planTitle}":`,
@@ -434,4 +609,9 @@ export function formatPlanItemInput(planTitle: string, item: PlanItemView): stri
 function requireView(view: SessionView | undefined): SessionView {
   if (!view) throw new Error("Session does not exist");
   return view;
+}
+
+function requireFormalMarkdown(input: PlanRevisionInput): string {
+  if (!input.markdown) throw new Error("Formal Plan Markdown is required");
+  return input.markdown;
 }

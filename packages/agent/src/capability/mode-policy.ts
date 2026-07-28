@@ -14,7 +14,7 @@ const askTools = new Set([
   "qi_introspect",
   "qi_session_inspect",
 ]);
-const planExtraTools = new Set(["plan_document", "delegate"]);
+const planExtraTools = new Set(["plan_document", "ask_question", "delegate"]);
 
 /** Tools Ask mode may advertise (registry intersection still applies). */
 export const ASK_MODE_TOOLS: readonly string[] = [...askTools];
@@ -28,11 +28,14 @@ export function toolsForMode(mode: SessionMode, registered: readonly string[]): 
   if (mode === "plan") {
     return [...ASK_MODE_TOOLS, ...PLAN_MODE_EXTRA_TOOLS].filter((name) => available.has(name));
   }
-  return registered.filter((name) => name !== "plan_document" && available.has(name));
+  return registered.filter(
+    (name) => name !== "plan_document" && name !== "ask_question" && available.has(name),
+  );
 }
 
 export function isToolAllowedInMode(mode: SessionMode, toolName: string): boolean {
-  if (toolName === "plan_document") return mode === "plan";
+  if (toolName === "plan_document" || toolName === "ask_question") return mode === "plan";
+  if (toolName === "update_plan") return mode === "agent";
   if (mode === "agent") return true;
   if (askTools.has(toolName)) return true;
   return mode === "plan" && planExtraTools.has(toolName);
@@ -45,8 +48,8 @@ export function modeAllowsIntent(
   effect: Effect,
 ): { ok: true } | { ok: false; reason: string } {
   if (mode === undefined || mode === "agent") {
-    if (tool === "plan_document") {
-      return { ok: false, reason: "plan_document is only available in Plan mode" };
+    if (tool === "plan_document" || tool === "ask_question") {
+      return { ok: false, reason: `${tool} is only available in Plan mode` };
     }
     return { ok: true };
   }
@@ -57,8 +60,11 @@ export function modeAllowsIntent(
     return { ok: false, reason: `Ask mode denies ${effect} effects` };
   }
   if (mode === "plan") {
-    if (tool === "plan_document" && effect !== "write") {
-      return { ok: false, reason: "plan_document must declare write effect" };
+    if (tool === "plan_document" && effect !== "read" && effect !== "write") {
+      return { ok: false, reason: "plan_document must declare read or write effect" };
+    }
+    if (tool === "ask_question" && effect !== "read") {
+      return { ok: false, reason: "ask_question must declare read effect" };
     }
     if (tool === "delegate" && effect !== "read") {
       return { ok: false, reason: "delegate must declare read effect" };

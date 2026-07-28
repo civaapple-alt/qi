@@ -108,9 +108,16 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 - Ask is read-oriented. Plan adds managed Plan revisions and read-only depth-1 research delegation. Agent uses the
   granted launch upper bound.
 - Mode narrows authority; it never creates authority.
-- Questions, approval outcomes, Plan review, and next-Run choices are durable facts.
-- Plan acceptance atomically switches to Agent and starts exactly one Run for the first incomplete item.
-- Later items require a durable `continue | stop | return_to_plan` choice; terminal Runs are never resumed.
+- A Formal Plan is a self-contained, immutable-revision Markdown design for a fresh Executor. It is not a Todo
+  list and carries no mutable implementation status.
+- Plan-mode clarification Questions, approval outcomes, Plan review, and legacy next-Run choices are durable
+  facts. An active-Run Question is linked to its Run/Step/Action and must settle before that Action or Run.
+- Accepting a Formal Plan atomically switches to Agent and starts exactly one implementation Run whose
+  conversation history is the accepted document, not the planning discussion.
+- Complex Agent work may create a separate Work Plan through `update_plan`. Work Plan status is navigation only,
+  never completion evidence, and does not schedule Runs.
+- Pre-Formal-Plan item revisions retain their historical item-per-Run behavior: later items require a durable
+  `continue | stop | return_to_plan` choice. Terminal Runs are never resumed.
 - At most one top-level Run is non-terminal.
 
 ## ADR-0013: keep interaction, activation, and product language separate

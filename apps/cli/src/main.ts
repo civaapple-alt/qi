@@ -101,6 +101,7 @@ async function main(): Promise<void> {
         ...(sessionId === undefined ? {} : { sessionId }),
         projectConfigPath: policy.projectConfigPath,
         mounts: options.mounts,
+        interactiveQuestions: true,
         onEvent: (event) => eventConsumer(event),
         onActivity: (activity) => activityConsumer(activity),
       });
@@ -400,8 +401,8 @@ async function main(): Promise<void> {
           presenter?.update(runtime.events(), runtime.view());
           process.stdout.write("Plan review marked for revise.\n");
           const prompt = feedback?.trim()
-            || "请根据审阅反馈更新 plan_document：保持稳定的 planItemId，写完后再次请求 Plan 审阅。";
-          const task = runtime.run(prompt)
+            || "请根据审阅反馈读取并增量编辑正式计划；使用 plan_document edit，完成后重新请求审阅。";
+          const task = runtime.runPlanDraft(prompt)
             .then((result) => {
               presenter?.update(runtime.events(), result.view);
               process.stdout.write(`${renderStatus(result.view)}\n`);
@@ -432,7 +433,7 @@ async function main(): Promise<void> {
           presenter?.update(runtime.events(), runtime.view());
         }
         process.stdout.write("Planning…\n");
-        const task = runtime.run(trimmed)
+        const task = runtime.runPlanDraft(trimmed)
           .then((result) => {
             presenter?.update(runtime.events(), result.view);
             process.stdout.write(`${renderStatus(result.view)}\n`);
