@@ -60,7 +60,7 @@ export class ProcessTaskManager {
 
   tool(): ToolDefinition<TSchema, TSchema> {
     return defineTool({
-      description: "Start a bounded long-lived process as a visible Qi ProcessTask. Use this only for servers, watchers, and other commands expected to remain alive; use shell for finite commands. Tasks expire automatically and the user can inspect or stop them with /tasks and /task stop.",
+      description: "Start a bounded long-lived process as a visible Qi ProcessTask. Use this only for servers, watchers, and other commands expected to remain alive; use shell for finite commands. Tasks expire automatically and the user can select and stop a running task with /tasks or use /tasks stop.",
       input: Type.Object({
         command: Type.String({ minLength: 1 }),
         args: Type.Array(Type.String(), { maxItems: 200 }),
@@ -113,7 +113,7 @@ export class ProcessTaskManager {
     if (!owned) {
       const writer = new EventWriter(this.#eventStore, sessionId, undefined, this.#onEvent);
       writer.append("task.lost", { taskId: task.taskId, reason: "Process is not owned by this runtime" }, { kind: "runtime", id: "process-task-manager" });
-      return;
+      throw new Error(`ProcessTask ${task.taskId} is not owned by this runtime; exit cannot be confirmed`);
     }
     if (!owned.stopped) {
       owned.stopped = true;
@@ -124,12 +124,17 @@ export class ProcessTaskManager {
       );
     }
     await terminateProcessTree(owned.child);
-    const exited = await waitForChildExit(owned.child);
+    let exited = await waitForChildExit(owned.child);
+    if (!exited) {
+      await forceTerminateProcessTree(owned.child);
+      exited = await waitForChildExit(owned.child, 2_000);
+    }
     if (!exited && !owned.terminal) {
       owned.terminal = true;
       clearTimeout(owned.expiryTimer);
       owned.writer.append("task.lost", { taskId: owned.taskId, reason: "Process did not confirm exit after termination" }, { kind: "runtime", id: "process-task-manager" });
       this.#owned.delete(owned.taskId);
+      throw new Error(`ProcessTask ${owned.taskId} did not confirm exit after forced termination`);
     }
   }
 
@@ -143,7 +148,7 @@ export class ProcessTaskManager {
     context: { sessionId: string; runId: string; stepId: string; actionId: string },
   ): Promise<{ taskId: string; pid: number; status: "running"; expiresAt: string; logRef: string }> {
     const cwd = await resolveWorkspacePath(this.#workspaceRoot, request.workdir ?? ".");
-    const executable = await resolveShellExecutable(request.command, this.#workspaceRoot);
+    const executable = await resolveShellExecutable(request.command, this.#workspaceRoot, cwd);
     const invocation = await windowsCommandInvocation(executable, request.args, this.#workspaceRoot, "UNSAFE_SHELL_ARGUMENT");
     await mkdir(this.#tasksRoot, { recursive: true });
     const taskId = createId("tsk") as TaskId;
@@ -236,10 +241,38 @@ function waitForSpawn(child: ChildProcess): Promise<void> {
 function waitForChildExit(child: ChildProcess, timeoutMs = 3_000): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
   return new Promise((resolveExit) => {
-    const timer = setTimeout(() => resolveExit(false), timeoutMs);
-    child.once("exit", () => {
+    const onExit = () => {
       clearTimeout(timer);
       resolveExit(true);
-    });
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolveExit(false);
+    }, timeoutMs);
+    child.once("exit", onExit);
   });
+}
+
+async function forceTerminateProcessTree(child: ChildProcess): Promise<void> {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    await new Promise<void>((resolveExit) => {
+      killer.once("exit", () => resolveExit());
+      killer.once("error", () => resolveExit());
+    });
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The process may have exited between the bounded graceful wait and escalation.
+    }
+  }
 }

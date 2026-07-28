@@ -87,6 +87,8 @@ export class InteractiveTui {
   #resolveClosed: ((exit: InteractiveExit) => void) | undefined;
   #activityTimer: ReturnType<typeof setTimeout> | undefined;
   #workingTimer: ReturnType<typeof setInterval> | undefined;
+  #noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  #noticeTimerExpiresAt: number | undefined;
   /** Last Plan review key offered as a panel; Esc dismisses until the revision changes. */
   #planReviewKey: string | undefined;
   /** Last next-Run Question id offered as a panel; Esc dismisses until it changes. */
@@ -278,6 +280,7 @@ export class InteractiveTui {
 
   async run(): Promise<InteractiveExit> {
     this.#terminal.setTitle(`Qi · ${this.#presenter.launch.workspaceRoot}`);
+    this.#syncNoticeTimer();
     this.#tui.start();
     this.#maybeOfferPendingGates();
     return await new Promise<InteractiveExit>((resolve) => { this.#resolveClosed = resolve; });
@@ -290,6 +293,7 @@ export class InteractiveTui {
     this.#runtime.cancel("TUI closed");
     if (this.#activityTimer) clearTimeout(this.#activityTimer);
     if (this.#workingTimer) clearInterval(this.#workingTimer);
+    if (this.#noticeTimer) clearTimeout(this.#noticeTimer);
     await Promise.allSettled(this.#active);
     this.#tui.stop();
     this.#resolveClosed?.(this.#exit);
@@ -300,6 +304,9 @@ export class InteractiveTui {
     if (!input) return;
     this.#editor.addToHistory(raw);
     this.#editor.setText("");
+    // A notice describes the interaction that just finished. Retire it as soon as
+    // the operator begins the next one; that interaction may publish a fresh notice.
+    this.#presenter.setNotice(undefined);
     if (this.#followUps.editing) {
       this.#followUps.commitEdit(input);
       this.#followUps.clearSelection();
@@ -977,7 +984,7 @@ export class InteractiveTui {
     }
   }
 
-  #stopTaskFromArgument(argument: string): void {
+  #stopTaskFromArgument(argument: string, reopenTaskPicker = false): void {
     try {
       const token = parseTaskStopCommand(argument);
       const tasks = this.#runtime.tasks();
@@ -986,8 +993,9 @@ export class InteractiveTui {
       this.#startManagementTask(async () => {
         await this.#runtime.stopTask(taskId);
         this.#presenter.update(this.#runtime.events(), this.#runtime.view());
-        this.#presenter.setNotice(`Stop requested for ${taskId}.`);
-        this.#openInspectPanel("tasks", "/tasks");
+        this.#presenter.setNotice(t(this.#presenter.locale(), "tasks.stop.success", { taskId }));
+        if (reopenTaskPicker) openTasksHubPanel(this.#panelFlow());
+        else this.#openInspectPanel("tasks", "/tasks");
       }, "ProcessTask");
     } catch (error) {
       this.#presenter.setNotice(message(error));
@@ -1119,10 +1127,8 @@ export class InteractiveTui {
       saveCapabilities: (capabilities) => this.#saveCapabilities(capabilities),
       applyVerificationSetup: (selected) => this.#applyVerificationSetup(selected),
       installSkill: (source, scope) => this.#installSkill(source, scope),
-      promptTaskStop: () => {
-        this.#presenter.setNotice(t(this.#presenter.locale(), "tasks.stop.usage"));
-        this.#render();
-      },
+      listTasks: () => this.#runtime.tasks(),
+      stopTask: (taskId) => this.#stopTaskFromArgument(`stop ${taskId}`, true),
       listSessions: () => buildSessionEntries(this.#runtime.listSessions(), {
         workspaceRoot: this.#presenter.launch.workspaceRoot,
         readEvents: (sessionId) => this.#runtime.readSessionEvents(sessionId),
@@ -1548,6 +1554,7 @@ export class InteractiveTui {
   /** Full paint: transcript + chrome (Session events, expand, panels, …). */
   #render(): void {
     this.#syncWorkingTick();
+    this.#syncNoticeTimer();
     this.#dashboard.invalidate();
     this.#working.invalidate();
     this.#composer.invalidate();
@@ -1558,10 +1565,27 @@ export class InteractiveTui {
   /** Composer / Working / footer only — keeps large transcripts off the keystroke and spinner path. */
   #renderChrome(): void {
     this.#syncWorkingTick();
+    this.#syncNoticeTimer();
     this.#working.invalidate();
     this.#composer.invalidate();
     this.#footer.invalidate();
     this.#tui.requestRender();
+  }
+
+  #syncNoticeTimer(): void {
+    const expiresAt = this.#presenter.noticeExpiresAt();
+    if (expiresAt === this.#noticeTimerExpiresAt) return;
+    if (this.#noticeTimer) clearTimeout(this.#noticeTimer);
+    this.#noticeTimer = undefined;
+    this.#noticeTimerExpiresAt = expiresAt;
+    if (expiresAt === undefined) return;
+    const delay = Math.max(0, expiresAt - Date.now());
+    this.#noticeTimer = setTimeout(() => {
+      this.#noticeTimer = undefined;
+      this.#noticeTimerExpiresAt = undefined;
+      this.#presenter.notice();
+      this.#renderChrome();
+    }, delay);
   }
 
   /** Cursor-style empty composer: → Add … hint, static caret on A, ctrl+c on the right. */

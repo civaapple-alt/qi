@@ -4,6 +4,7 @@ import {
   type ProviderProfile,
 } from "@civaapple/qi-ai";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
+import type { ProcessTaskView } from "@civaapple/qi-agent/kernel";
 import type { AuthSession } from "../auth.js";
 import {
   defaultUserConfigPath,
@@ -89,7 +90,8 @@ export interface PanelFlowContext {
   readonly saveCapabilities: (capabilities: QiCapabilityConfig) => void;
   readonly applyVerificationSetup: (selected: readonly VerificationCandidate[]) => void;
   readonly installSkill: (source: string, scope: "user" | "workspace") => void;
-  readonly promptTaskStop: () => void;
+  readonly listTasks: () => ProcessTaskView[];
+  readonly stopTask: (taskId: string) => void;
   readonly listSessions: () => SessionEntry[];
   readonly currentSessionId: () => string;
   readonly workspaceRoot: () => string;
@@ -733,21 +735,30 @@ function openSkillInstallForm(ctx: PanelFlowContext, scope: "user" | "workspace"
 
 export function openTasksHubPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
+  const tasks = ctx.listTasks().sort((left, right) => {
+    const leftActive = left.status === "running" ? 0 : left.status === "stopping" ? 1 : 2;
+    const rightActive = right.status === "running" ? 0 : right.status === "stopping" ? 1 : 2;
+    return leftActive - rightActive || right.startedAt.localeCompare(left.startedAt);
+  });
+  if (tasks.length === 0) {
+    ctx.presenter.setNotice(t(locale, "tasks.empty"));
+    ctx.render();
+    return;
+  }
   ctx.panels.push(new ListPanel({
     title: t(locale, "tasks.title"),
     hints: t(locale, "tasks.hints"),
-    items: [
-      { id: "list", label: t(locale, "tasks.list"), description: "/tasks" },
-      { id: "stop", label: t(locale, "tasks.stop"), description: t(locale, "tasks.stop.desc") },
-    ],
+    items: tasks.map((task) => ({
+      id: task.taskId,
+      label: `${task.status === "running" ? "●" : task.status === "stopping" ? "◐" : "○"} ${[task.command, ...task.args].join(" ")}`,
+      description: `${task.status} · pid ${task.pid} · cwd ${task.workdir}${task.terminalReason ? ` · ${task.terminalReason}` : ""}`,
+      disabled: task.status !== "running",
+    })),
+    maxVisible: maxVisible(ctx.terminalRows),
     onClose: ctx.panels.dismiss,
     onSelect: (item) => {
-      if (item.id === "list") {
-        ctx.openInspect("tasks", "/tasks");
-        return;
-      }
       ctx.panels.closeAll();
-      ctx.promptTaskStop();
+      ctx.stopTask(item.id);
     },
   }));
 }

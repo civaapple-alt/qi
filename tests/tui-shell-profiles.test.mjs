@@ -23,9 +23,21 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
     });
     await directRuntime.run("Inspect tools");
     const directTools = directModel.requests[0].tools.map((tool) => tool.name);
+    const directPrompt = directModel.requests[0].messages
+      .flatMap((message) => message.content)
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n");
     assert.equal(directTools.includes("shell"), true);
     assert.equal(directTools.includes("script"), false);
     assert.equal(directRuntime.shellProfiles.directEnabled, true);
+    assert.match(directPrompt, new RegExp(`platform=.*${process.platform}`));
+    assert.match(directPrompt, /bash=disallowed/);
+    assert.match(directPrompt, /does not interpret pipes/);
+    assert.match(directPrompt, /do not repeat the same unsupported assumption/);
+    if (process.platform === "win32") {
+      assert.match(directPrompt, /Do not attempt POSIX-only bash, lsof, xargs/);
+    }
     await directRuntime.close();
     directRuntime = undefined;
 

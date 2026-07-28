@@ -141,25 +141,90 @@ function renderFence(fence: readonly string[], width: number, maxCodeLines: numb
 
 function renderTable(rows: string[], width: number): string[] {
   const parsed = rows
-    .map((row) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim()))
+    .map((row) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => inline(cell.trim())))
     .filter((cells) => cells.some((cell) => !/^[-:]+$/.test(cell)));
   if (parsed.length === 0) return rows.map((row) => truncate(row, width));
   const columns = Math.max(...parsed.map((row) => row.length));
-  const widths = Array.from({ length: columns }, (_, index) =>
-    Math.min(28, Math.max(3, ...parsed.map((row) => visibleWidth(row[index] ?? "")))),
+  const frameWidth = (3 * columns) + 1;
+  const contentBudget = width - frameWidth;
+  if (contentBudget < columns * 10) return renderStackedTable(parsed, columns, width);
+  const naturalWidths = Array.from({ length: columns }, (_, index) =>
+    Math.max(3, ...parsed.map((row) => visibleWidth(row[index] ?? ""))),
   );
+  const widths = allocateTableWidths(naturalWidths, contentBudget);
   const out: string[] = [];
   for (const [rowIndex, row] of parsed.entries()) {
     const cells = Array.from({ length: columns }, (_, index) =>
-      pad(truncate(row[index] ?? "", widths[index]!), widths[index]!),
+      wrapCell(row[index] ?? "", widths[index]!),
     );
-    out.push(truncate(`│ ${cells.join(" │ ")} │`, width));
+    const height = Math.max(...cells.map((cell) => cell.length));
+    for (let lineIndex = 0; lineIndex < height; lineIndex += 1) {
+      const line = cells.map((cell, index) =>
+        pad(cell[lineIndex] ?? "", widths[index]!)
+      );
+      out.push(`│ ${line.join(" │ ")} │`);
+    }
     if (rowIndex === 0) {
-      out.push(truncate(`├─${widths.map((size) => "─".repeat(size)).join("─┼─")}─┤`, width));
+      out.push(`├─${widths.map((size) => "─".repeat(size)).join("─┼─")}─┤`);
     }
   }
   out.push("");
   return out;
+}
+
+function allocateTableWidths(naturalWidths: readonly number[], budget: number): number[] {
+  if (naturalWidths.reduce((sum, value) => sum + value, 0) <= budget) return [...naturalWidths];
+  const widths = naturalWidths.map(() => 10);
+  let remaining = budget - widths.length * 10;
+  while (remaining > 0) {
+    let selected = -1;
+    let largestDeficit = 0;
+    for (const [index, natural] of naturalWidths.entries()) {
+      const deficit = natural - widths[index]!;
+      if (deficit > largestDeficit) {
+        selected = index;
+        largestDeficit = deficit;
+      }
+    }
+    if (selected < 0) break;
+    widths[selected] = widths[selected]! + 1;
+    remaining -= 1;
+  }
+  return widths;
+}
+
+function renderStackedTable(parsed: readonly (readonly string[])[], columns: number, width: number): string[] {
+  const headers = parsed[0] ?? [];
+  const data = parsed.slice(1);
+  const out: string[] = [];
+  for (const [rowIndex, row] of data.entries()) {
+    out.push(`• row ${rowIndex + 1}`);
+    for (let column = 0; column < columns; column += 1) {
+      const header = headers[column] || `column ${column + 1}`;
+      out.push(...wrapCell(`${header}:`, Math.max(1, width - 2)).map((line) => `  ${line}`));
+      out.push(...wrapCell(row[column] ?? "", Math.max(1, width - 4)).map((line) => `    ${line}`));
+    }
+    out.push("");
+  }
+  return out.length > 0 ? out : parsed.flatMap((row) => wrapCell(row.join(" | "), width));
+}
+
+function wrapCell(value: string, width: number): string[] {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return [""];
+  const lines: string[] = [];
+  let current = "";
+  for (const character of Array.from(normalized)) {
+    const next = `${current}${character}`;
+    if (current && visibleWidth(next) > width) {
+      lines.push(current.trimEnd());
+      current = character === " " ? "" : character;
+    } else {
+      current = next;
+    }
+  }
+  if (current) lines.push(current.trimEnd());
+  return lines.length > 0 ? lines : [""];
 }
 
 function renderLine(line: string, width: number): string[] {
@@ -193,7 +258,7 @@ function inline(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
     .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/_([^_]+)_/g, "$1")
+    .replace(/(^|[^\w])_([^_]+)_($|[^\w])/g, "$1$2$3")
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 <$2>");
 }
 

@@ -129,6 +129,7 @@ export class TuiPresenter {
   #delegationId: string | undefined;
   #notice: string | undefined;
   #noticeKind: "info" | "run" | undefined;
+  #noticeExpiresAt: number | undefined;
   #skills: readonly PresentedSkill[] = [];
   #actionActivity = new Map<string, Extract<RuntimeActivity, { type: "action.output" }>>();
   #modelActivity = new Map<string, Extract<RuntimeActivity, { type: "model.text" }>>();
@@ -219,8 +220,7 @@ export class TuiPresenter {
     if (panel === "overview") {
       this.#panel = "overview";
       if (notice !== undefined) {
-        this.#notice = notice;
-        this.#noticeKind = "info";
+        this.setNotice(notice);
       }
       return;
     }
@@ -230,8 +230,7 @@ export class TuiPresenter {
   pushInspection(panel: TuiPanel, notice?: string, command?: string): void {
     this.#panel = panel;
     if (notice !== undefined) {
-      this.#notice = notice;
-      this.#noticeKind = "info";
+      this.setNotice(notice);
     }
     const body = this.panelBody(panel);
     const id = `insp_${++this.#inspectionCounter}`;
@@ -247,20 +246,31 @@ export class TuiPresenter {
     });
   }
 
-  setNotice(notice: string | undefined, kind: "info" | "run" = "info"): void {
+  setNotice(notice: string | undefined, kind: "info" | "run" = "info", now = Date.now()): void {
     this.#notice = notice;
     this.#noticeKind = notice === undefined ? undefined : kind;
+    this.#noticeExpiresAt = notice !== undefined && kind === "info" ? now + 4_000 : undefined;
   }
 
-  /** Drop a previous Run outcome notice before/after the next Run; keep operator info notices. */
+  /** Drop a previous Run outcome notice; transient operator notices expire independently. */
   clearRunNotice(): void {
     if (this.#noticeKind !== "run") return;
     this.#notice = undefined;
     this.#noticeKind = undefined;
+    this.#noticeExpiresAt = undefined;
   }
 
-  notice(): string | undefined {
+  notice(now = Date.now()): string | undefined {
+    if (this.#noticeExpiresAt !== undefined && now >= this.#noticeExpiresAt) {
+      this.#notice = undefined;
+      this.#noticeKind = undefined;
+      this.#noticeExpiresAt = undefined;
+    }
     return this.#notice;
+  }
+
+  noticeExpiresAt(): number | undefined {
+    return this.#noticeExpiresAt;
   }
 
   /** Lightweight Tip for missing rg/fd; shown on welcome and above the composer. */
@@ -592,14 +602,17 @@ export class TuiPresenter {
     const liveTail = activityText
       ?.replace(/\r/g, "")
       .split("\n")
-      .findLast((line) => Boolean(line.trim()))
-      ?.trim();
-    if (!liveTail) return [parts.join("  ")];
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(-3);
+    if (!liveTail || liveTail.length === 0) return [parts.join("  ")];
     const stream = actionActivity?.stream;
     const prefix = stream === "stderr" ? "stderr · " : "";
     return [
       parts.join("  "),
-      `  · ${truncateToWidth(`${prefix}${liveTail}`, Math.max(1, width - 4), "…")}`,
+      ...liveTail.map((line) =>
+        `  · ${truncateToWidth(`${prefix}${line}`, Math.max(1, width - 4), "…")}`
+      ),
     ];
   }
 
@@ -615,7 +628,8 @@ export class TuiPresenter {
     }
     lines.push(...this.renderChat());
     // Keep notices near the end of the transcript (line mode) / above the composer (interactive Working strip).
-    if (this.#notice) lines.push("", `notice  ${this.#notice}`);
+    const notice = this.notice();
+    if (notice) lines.push("", `notice  ${notice}`);
     // Line mode still snapshots via setPanel/pushInspection; interactive uses temporary panels.
     const inspection = this.#inspections.at(-1);
     if (inspection) {
@@ -1032,7 +1046,7 @@ export class TuiPresenter {
         lines.push(`     ${activity.stream} · live${activity.truncated ? " · truncated" : ""}`);
         lines.push(...boundedTailLines(activity.text, 4).map((line) => `       ${line}`));
       }
-      if (task.status === "running" || task.status === "stopping") lines.push(`     /task stop ${task.taskId}`);
+      if (task.status === "running") lines.push(`     /tasks → Enter · /tasks stop ${task.taskId}`);
     });
     return lines;
   }

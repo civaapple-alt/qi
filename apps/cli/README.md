@@ -34,6 +34,9 @@ or next-Run Question is pending. Accepting a Plan Review atomically enters Agent
 item Run; after that Run ends, a Next Run panel (`继续下一项` / `先停在这里` / `回到 Plan`) asks whether to
 continue — ↑↓ / Enter confirms. After stop, `/next` re-asks; after return-to-Plan, revise → review →
 `开始实现` ([ADR 0011](../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)).
+These Runtime-owned choice gates are not a general model-callable `askQuestion` tool. `FormPanel` can collect
+text for CLI workflows such as login, but arbitrary model questions and free-text answers do not yet have a
+durable waiting/answer protocol.
 
 Frequently used commands (default `/help` and autocomplete; aliases remain callable):
 
@@ -47,7 +50,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
 | `/skills` | Skills hub: list discovered Skills, or Install → scope → name/path form |
-| `/tasks [stop …]` | Background tasks hub (list / stop) |
+| `/tasks [stop …]` | Interactive background-task list; select a running task and press Enter to stop it |
 | `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path form) / unmount (picker); slash args still work |
 | `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `policy.toml`) |
 | `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
@@ -89,13 +92,14 @@ Choosing another Session from `/sessions` closes the TUI and relaunches in-proce
 (same AuthSession); **New Session** clears `sessionId`. The current Session is marked `← current`.
 
 Long pastes collapse to a line/char summary; Agent replies and Plans use a bounded terminal Markdown renderer
-(fenced code keeps internal blank lines) without permanently truncating the final reply. Tool cards appear only
+(fenced code keeps internal blank lines); wide tables wrap cells and fall back to a vertical field layout when
+the terminal cannot preserve useful columns, rather than clipping right-side values. Tool cards appear only
 when Actions exist; settlement glyphs stay distinct (`✓` / `!` / `⊘` / `?` / `×` / `●`); shell cards use compact
 `$ command duration` with collapsed output and `Ctrl+O` expand. Write/edit cards use Cursor-style
 `Edited path +N -M`, a `▎` gutter, nearby context, and no `---`/`+++`/`@@` chrome (`… truncated · Ctrl+O`).
 Composer keystrokes and the Running spinner refresh only the chrome strip; settled Runs reuse a chat fingerprint
-cache so long Sessions stay responsive. Streaming model/tool output remains visible as a bounded Working-strip
-tail without invalidating the transcript. Active Runs also reuse settled-Step formatting caches, collapse prior
+cache so long Sessions stay responsive. Streaming model/tool output remains visible as a bounded three-line
+Working-strip tail without invalidating the transcript. Active Runs also reuse settled-Step formatting caches, collapse prior
 Action cards to one-line summaries, and fold older Steps (`… N earlier steps · Ctrl+O`); chrome-only Session
 events skip transcript invalidate, while `authority.denied` repaints its visible `⊘` settlement.
 A fixed two-line statusline shows `model · context%` and the active mode (`Ask` / `Plan` / `Agent`) on the first
@@ -130,7 +134,12 @@ Run, the runtime reconciles additions, removals, and changed mount identities in
 When host execute is enabled, `[shell]` in user or project TOML selects profiles. `direct` keeps the argv `shell`
 tool; `pwsh`, `cmd`, and `bash` are probed at startup and, when available, expose a separate `script` tool.
 `/config` shows default/allowed profiles, resolved executables, versions, and unavailable reasons. Profiles are
-never chosen from command text. The same `execute` grant also probes for a responding `docker` or `podman`
+never chosen from command text. Every Run receives a required host-environment block containing the detected
+platform and the available/disallowed profile facts. Direct `shell` is described explicitly as executable plus
+argv, without pipes or redirection; on Windows the block warns against POSIX-only
+`bash`/`lsof`/`xargs` assumptions. A missing executable or unavailable profile becomes a fact for the rest of
+that Run, so the model must change approach instead of repeating the same assumption. The same `execute` grant
+also probes for a responding `docker` or `podman`
 runtime at startup and, only when one responds, exposes a `codeact` tool that runs a short generated program in a
 network-off, read-only-root container; its nested tool calls still pass through normal authorization and Session
 events, and it can never call `codeact` or `delegate` itself.
@@ -144,7 +153,9 @@ inference and, when Verify authority is already granted, immediately refreshes t
 Long-lived commands do not use an implicit detached shell mode. With a separate `background` capability, the
 model receives a `task` tool for bounded servers and watchers. Each ProcessTask links to its originating
 Session/Run/Step/Action, has a hard expiry, stores a redacted private log under `dataRoot/tasks`, survives Run
-completion as visible state, and can be stopped through `/task stop`. Restarted runtimes mark unowned live-task
+completion as visible state, and can be stopped by selecting it in `/tasks` and pressing Enter or through
+`/tasks stop <N|ID>`. Stop waits for confirmed process-tree exit and escalates after a bounded graceful wait;
+terminal tasks remain visible but cannot be selected again. Restarted runtimes mark unowned live-task
 records `lost`; normal TUI shutdown stops tasks it owns.
 
 With a separate `delegate` capability (`--allow-delegate` or `capabilities.delegate`), the model may call

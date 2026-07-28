@@ -1062,6 +1062,22 @@ async function buildTuiContextBlocks(
   const mountGuidance = mounts.length > 0
     ? ` Authorized read-only mounts (use mount:<id>/… paths; mutations stay in the primary Workspace): ${mounts.map((mount) => `${mount.id}=${mount.path}`).join("; ")}.`
     : " Paths outside the Workspace require a human /add-dir grant; do not invent absolute paths.";
+  const hostPlatform = process.platform === "win32"
+    ? "Windows (win32)"
+    : process.platform === "darwin"
+      ? "macOS (darwin)"
+      : `Unix-like (${process.platform})`;
+  const availableProfiles = shellProfiles.available.map((profile) => profile.id);
+  const profileFacts = [
+    `direct=${shellProfiles.directEnabled ? "available" : "disallowed"}`,
+    ...shellProfiles.available.map((profile) => `${profile.id}=available`),
+    ...shellProfiles.unavailable
+      .filter((profile) => profile.id !== "direct")
+      .map((profile) => `${profile.id}=${profile.status} (${boundedDescription(profile.reason)})`),
+  ].join(", ");
+  const platformGuidance = process.platform === "win32"
+    ? "Do not attempt POSIX-only bash, lsof, xargs, sleep, kill, or /dev/null syntax. Use the dedicated task tool for background-process lifecycle; for finite shell logic use the probed pwsh script profile only when pwsh=available, and use NUL only where a native Windows executable requires a null device."
+    : "Use only the probed script profiles listed as available; do not assume a shell merely because its syntax is familiar.";
   const blocks: TuiContextBlock[] = [
     {
       id: "constitution",
@@ -1073,6 +1089,17 @@ async function buildTuiContextBlocks(
       priority: 100,
       required: true,
       retentionReason: "Runtime constitution",
+    },
+    {
+      id: "host:environment",
+      kind: "constitution",
+      source: "qi:host-environment",
+      role: "system",
+      content:
+        `Host execution facts: platform=${hostPlatform}; shell profiles: ${profileFacts}. The shell tool executes one direct executable plus argv and does not interpret pipes, redirection, command chaining, variable expansion, or shell builtins. The script tool accepts only these currently probed profiles: ${availableProfiles.length > 0 ? availableProfiles.join(", ") : "none"}. ${platformGuidance} Treat a missing executable or unavailable-profile ToolFailure as an environment fact for the remainder of the Run: change approach and do not repeat the same unsupported assumption unless new probe evidence appears. These facts are regenerated from startup probes for every Run, so they take precedence over remembered shell assumptions from earlier conversations.`,
+      priority: 98,
+      required: true,
+      retentionReason: "Probed host execution environment",
     },
     {
       id: `mode:${mode}`,

@@ -20,7 +20,7 @@ the existing readline-compatible path.
 
 Interactive paint cost: composer keystrokes and the Running spinner refresh only the Working strip and footer.
 The chat transcript component caches its last paint until Session events, expand, or other transcript-affecting
-state change. Live streaming (`onActivity`) updates a bounded one-line model/tool tail in the Working strip
+state change. Live streaming (`onActivity`) updates a bounded three-line model/tool tail in the Working strip
 without invalidating the transcript. Chrome-only Session facts (`authority.requested`, `authority.granted`,
 `safety.*`, `context.compiled`, mounts/memory/presence) use the same path; `authority.denied` repaints the
 transcript because it visibly settles the Action as `⊘`. Inside `TuiPresenter`, Action propose/start/terminal
@@ -66,8 +66,9 @@ next-step line and the composer notice guide the operator to `/permissions`. Non
 mode still dumps the panel body after the transcript for pipes and accessibility. Mode changes update the
 statusline only; they do not emit a top-of-transcript notice. Transient `notice` lines appear in the strip
 above the composer so long chats do not hide them. Operator info notices (login, permissions, unknown slash,
-…) stay visible through the next Run; only previous Run-outcome notices clear when that next Run completes
-successfully.
+…) expire after four seconds and clear immediately when the next composer submission begins. Run
+failure/cancellation notices do not time out; they remain until the operator starts the next interaction or
+the Runtime explicitly clears the outcome.
 
 `/settings` opens a multi-level panel stack (Mode, Permissions, Providers, Config, Context, Theme, Language,
 Status, Session history).
@@ -117,10 +118,16 @@ take a new Plan Review, then `开始实现` (starts the first incomplete item). 
 `/mode agent` then `/next` reopens the gate. `/providers` projects real launch auth/profile data; `/coord`,
 `/work`, `/gate`, and `/extensions` stay explicit empty states until their backends exist.
 
+Plan Review and Next Run are Runtime-owned control gates, not a general model-callable `askQuestion` Tool.
+`FormPanel` supports text/secret/dropdown input for CLI-owned workflows, but arbitrary model questions do not
+yet have a durable asked/waiting/answered protocol.
+
 ## Tool rendering
 
 Settlement glyphs stay distinct: `✓` completed, `!` failed, `⊘` denied, `?` indeterminate, `×` cancelled, `●`
 running, `○` other. The TUI must not collapse these into a binary error flag.
+Markdown tables wrap cell content within adaptively allocated columns. When the terminal is too narrow to keep
+every column useful, the renderer switches to a per-row vertical field layout so right-side values are retained.
 
 - Shell/script/verify: compact `$ command duration` (or script/verify equivalents) with the last output line and
   `… N output lines hidden · Ctrl+O`. Expansion reveals cwd and a bounded stdout/stderr window. Elapsed time comes
@@ -165,8 +172,11 @@ ProcessTask count.
 
 Finite `shell` Actions wait for exit. Long-lived servers and watchers require the separate `background`
 capability and `task` tool. `task.started`, `task.stop.requested`, `task.exited`, and `task.lost` make ownership and
-recovery durable while output remains a bounded live/log channel. `/tasks` lists indexed tasks; `/task stop
-<N|ID>` is the explicit user stop path. Tasks have a hard expiry and runtime-owned tasks stop on TUI exit. See
+recovery durable while output remains a bounded live/log channel. `/tasks` opens an interactive list: Enter
+stops the selected running task, while terminal tasks remain visible and disabled. `/tasks stop <N|ID>` is the
+non-interactive equivalent. Stop waits for process-tree exit and escalates after a bounded graceful wait; it
+reports `lost` rather than claiming success if exit still cannot be confirmed. Tasks have a hard expiry and
+runtime-owned tasks stop on TUI exit. See
 [ADR 0006](../../../design/decisions.md#adr-0006-represent-long-lived-processes-as-bounded-processtasks).
 
 The Kernel still records response-only terminal Runs as `run.completed` with `completionKind: response`. The TUI
@@ -177,6 +187,12 @@ renders this as `responded`, not `completed`; `verified` is reserved for evidenc
 Every Step shows `estimatedTokens / budgetTokens` from `context.compiled`. Optional block omissions are listed
 directly. Cross-Run history compaction records each omitted Run as `history:omitted:<runId>`; the TUI therefore
 reports compaction only after the runtime has recorded it.
+
+Every Run also receives a required `host:environment` constitution block generated from startup probes. It
+states the host platform, direct-command semantics, and every available/disallowed shell profile. On Windows it
+explicitly rejects POSIX-only assumptions such as `bash`, `lsof`, `xargs`, and `/dev/null` unless a corresponding
+profile was actually probed. A missing executable or unavailable-profile failure is treated as an environment
+fact for the remainder of that Run; the model must change approach instead of retrying the same assumption.
 
 The effective configuration distinguishes the provider/model window, prompt working budget, and output reserve.
 Within a Run, `/context` lists reclaimed estimated tokens from committed `context.compacted` events. A settled

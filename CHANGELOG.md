@@ -63,6 +63,14 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- The active Working strip now retains the latest three model/tool stream lines; transient operator notices
+  expire after four seconds and clear on the next submission, while Run outcome notices remain actionable.
+- Terminal Markdown tables now wrap adaptively and fall back to vertical row fields on narrow screens instead
+  of truncating long or right-side columns.
+- Every Run now receives probed host-platform and shell-profile facts, including explicit Windows guidance and
+  a same-Run rule against retrying an executable/profile assumption after the environment rejects it.
+- `/tasks` now opens an interactive ProcessTask list where Enter stops the selected running task, terminal tasks
+  are visibly disabled, and process-tree termination escalates after a bounded graceful wait.
 - The Web workbench now keeps durable background ProcessTasks visible after their originating Run completes,
   refreshes their lifecycle over SSE, and reports command, PID, working directory, and expiry.
 - Shell guidance now directs package-manager commands through the direct argument vector plus `workdir`, documents

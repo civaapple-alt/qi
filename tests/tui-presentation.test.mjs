@@ -14,6 +14,7 @@ import {
   ListPanel,
   MultiSelectPanel,
   loadProjectConfig,
+  openTasksHubPanel,
   parseMountsCommand,
   parseSkillInstallCommand,
   parseTaskStopCommand,
@@ -203,6 +204,22 @@ test("terminal Markdown renderer covers headings, lists, tables, code, and check
   assert.match(rendered, /const x = 1;/);
   assert.match(rendered, /│\s*$/m);
   assert.match(rendered, /const y = 2;/);
+});
+
+test("wide Markdown tables wrap every column instead of truncating the right side", () => {
+  const rendered = renderMarkdown([
+    "| Action | Status | Evidence | Next step |",
+    "| --- | --- | --- | --- |",
+    "| build-client | failed | SHELL_EXIT_NONZERO after the package script returned a diagnostic | inspect the complete retained output and retry the narrow check |",
+  ].join("\n"), { width: 52 }).join("\n");
+  const compact = rendered.replace(/[\s│├┼┤─]/g, "");
+  assert.doesNotMatch(rendered, /…/);
+  assert.match(compact, /build-client/);
+  assert.match(compact, /SHELL_EXIT_NONZERO/);
+  assert.match(rendered, /diagnostic/);
+  assert.match(compact, /completeretained/);
+  assert.match(compact, /narrowcheck/);
+  for (const line of rendered.split("\n")) assert.ok(line.length <= 52);
 });
 
 test("final summary Markdown renders h3 and glued heading+table without raw hashes", () => {
@@ -1087,9 +1104,9 @@ test("active Run folds older Steps but keeps bounded edit diffs in the retained 
     provisional: true,
   });
   const modelWorking = presenter.renderWorking(true, 0, 40);
-  assert.equal(modelWorking.length, 2);
-  assert.match(modelWorking[1], /latest model tail/);
-  assert.doesNotMatch(modelWorking[1], /earlier model text/);
+  assert.equal(modelWorking.length, 3);
+  assert.match(modelWorking[1], /earlier model text/);
+  assert.match(modelWorking[2], /latest model tail/);
 
   presenter.applyActivity({
     type: "action.output",
@@ -1103,10 +1120,27 @@ test("active Run folds older Steps but keeps bounded edit diffs in the retained 
     provisional: true,
   });
   const actionWorking = presenter.renderWorking(true, 0, 40);
-  assert.equal(actionWorking.length, 2);
-  assert.match(actionWorking[1], /stderr · latest tool tail/);
-  assert.doesNotMatch(actionWorking[1], /old tool output/);
-  assert.ok(actionWorking[1].length <= 40);
+  assert.equal(actionWorking.length, 3);
+  assert.match(actionWorking[1], /stderr · old tool output/);
+  assert.match(actionWorking[2], /stderr · latest tool tail/);
+  assert.ok(actionWorking.slice(1).every((line) => line.length <= 40));
+
+  presenter.applyActivity({
+    type: "action.output",
+    sessionId: "ses_fold",
+    runId,
+    stepId: "stp_12",
+    actionId: "act_12",
+    stream: "stdout",
+    text: "first\nsecond\nthird\nfourth",
+    truncated: false,
+    provisional: true,
+  });
+  const boundedWorking = presenter.renderWorking(true, 0, 40);
+  assert.equal(boundedWorking.length, 4);
+  assert.doesNotMatch(boundedWorking.join("\n"), /first/);
+  assert.match(boundedWorking[1], /second/);
+  assert.match(boundedWorking[3], /fourth/);
 });
 
 test("line-mode panel snapshots append after the transcript without interleaving", () => {
@@ -1266,7 +1300,7 @@ test("renderPanel exposes config for temporary panels", () => {
   assert.match(presenter.renderWelcome(80).join("\n"), /QI|栖/);
 });
 
-test("info notices survive clearRunNotice; run notices do not", () => {
+test("info notices expire while Run notices remain until explicitly cleared", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",
     dataRoot: "/tmp/ws/.qi",
@@ -1280,10 +1314,12 @@ test("info notices survive clearRunNotice; run notices do not", () => {
     maxSteps: 20,
     maxActionsPerStep: 6,
   });
-  presenter.setNotice("Switched to xai/grok-4.5");
+  presenter.setNotice("Switched to xai/grok-4.5", "info", 1_000);
   presenter.clearRunNotice();
-  assert.equal(presenter.notice(), "Switched to xai/grok-4.5");
-  presenter.setNotice("Run parked: indeterminate effect", "run");
+  assert.equal(presenter.notice(4_999), "Switched to xai/grok-4.5");
+  assert.equal(presenter.notice(5_000), undefined);
+  presenter.setNotice("Run parked: indeterminate effect", "run", 1_000);
+  assert.equal(presenter.notice(Number.MAX_SAFE_INTEGER), "Run parked: indeterminate effect");
   presenter.clearRunNotice();
   assert.equal(presenter.notice(), undefined);
 });
@@ -1358,7 +1394,7 @@ test("background ProcessTasks remain visible after their Run and can be stopped 
         name: "task",
         input: {
           command: process.execPath,
-          args: ["-e", `console.log('api_key=${taskSecret}'); setInterval(() => console.log('tick'), 100)`],
+          args: ["-e", `process.on('SIGTERM',()=>{}); console.log('api_key=${taskSecret}'); setInterval(() => console.log('tick'), 100)`],
           lifetimeMs: 10_000,
         },
       },
@@ -1406,7 +1442,7 @@ test("background ProcessTasks remain visible after their Run and can be stopped 
     presenter.pushInspection("tasks");
     const tasksView = presenter.render().join("\n");
     assert.match(tasksView, /ProcessTasks 1/);
-    assert.match(tasksView, /\/task stop tsk_/);
+    assert.match(tasksView, /\/tasks → Enter · \/tasks stop tsk_/);
     assert.match(presenter.formatStatusline(false, 120).join("\n"), /tasks 1/);
 
     await runtime.stopTask(task.taskId);
@@ -1416,6 +1452,55 @@ test("background ProcessTasks remain visible after their Run and can be stopped 
     await runtime.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("/tasks Enter stops the selected running task while terminal tasks stay disabled", () => {
+  let panel;
+  let closed = false;
+  let stoppedTaskId;
+  const startedAt = new Date(0).toISOString();
+  const base = {
+    runId: "run_tasks_panel",
+    stepId: "stp_tasks_panel",
+    actionId: "act_tasks_panel",
+    command: "npm",
+    args: ["run", "dev"],
+    workdir: "web",
+    pid: 4317,
+    startedAt,
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    logRef: "task-log:test",
+  };
+  openTasksHubPanel({
+    locale: () => "en",
+    terminalRows: 40,
+    presenter: { setNotice: () => {} },
+    panels: {
+      push: (candidate) => { panel = candidate; },
+      closeAll: () => { closed = true; },
+      dismiss: () => {},
+    },
+    listTasks: () => [
+      { ...base, taskId: "tsk_running", status: "running" },
+      { ...base, taskId: "tsk_exited", status: "exited", terminalReason: "stopped", exitCode: 0 },
+    ],
+    stopTask: (taskId) => { stoppedTaskId = taskId; },
+    render: () => {},
+  });
+
+  assert.ok(panel);
+  const rendered = stripVTControlCharacters(panel.render(100).join("\n"));
+  assert.match(rendered, /Enter stop running task/);
+  assert.match(rendered, /● npm run dev/);
+  assert.match(rendered, /○ npm run dev/);
+
+  panel.handleInput("\u001b[B");
+  panel.handleInput("\r");
+  assert.equal(stoppedTaskId, undefined, "terminal task must remain disabled");
+  panel.handleInput("\u001b[A");
+  panel.handleInput("\r");
+  assert.equal(stoppedTaskId, "tsk_running");
+  assert.equal(closed, true);
 });
 
 test("Action settlement glyphs stay distinct and plan_document has its own card", () => {
