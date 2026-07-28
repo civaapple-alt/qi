@@ -41,6 +41,8 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
 - A Step whose model requested Actions is not presented as fully complete until those Actions settle.
 - Action lifecycle labels are derived by joining events on `actionId`; later events never invent missing authority
   or tool identity.
+- ProcessTasks are rendered from the Session's durable task projection independently of Run narrative folding;
+  running servers and watchers therefore remain visible after their originating Run completes.
 - Action results and Workspace diffs are diagnostics. They are not called Evidence Ledger records unless
   `evidence.recorded` exists.
 - Missing Goal, control receipt, evidence, or accepted memory is an explicit, explanatory empty state. The Web

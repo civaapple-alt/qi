@@ -25,12 +25,15 @@ import {
   scrubCredentialEnvironment,
 } from "@civaapple/qi-node/workspace";
 
-test("scrubCredentialEnvironment removes inherited FORCE_COLOR when a child disables color", () => {
+test("scrubCredentialEnvironment removes credentials and ambient npm lifecycle policy", () => {
   const environment = scrubCredentialEnvironment(
     {
       PATH: "test-path",
       FORCE_COLOR: "1",
       OPENAI_API_KEY: "should-not-leak",
+      npm_config_allow_scripts: "opencode-ai",
+      NPM_CONFIG_ALLOW_SCRIPTS: "@google/genai protobufjs",
+      npm_config_cache: "test-cache",
     },
     { NO_COLOR: "1" },
   );
@@ -39,6 +42,9 @@ test("scrubCredentialEnvironment removes inherited FORCE_COLOR when a child disa
   assert.equal(environment.NO_COLOR, "1");
   assert.equal(environment.FORCE_COLOR, undefined);
   assert.equal(environment.OPENAI_API_KEY, undefined);
+  assert.equal(environment.npm_config_allow_scripts, undefined);
+  assert.equal(environment.NPM_CONFIG_ALLOW_SCRIPTS, undefined);
+  assert.equal(environment.npm_config_cache, "test-cache");
 });
 
 test("runHostProcess captures full output beyond outputLimitBytes only when captureLimitBytes opts in", async () => {
@@ -71,6 +77,16 @@ test("runHostProcess captures full output beyond outputLimitBytes only when capt
   });
   assert.equal(untruncated.truncated, false);
   assert.equal(untruncated.stdoutFull, undefined, "an untruncated run has nothing extra to capture");
+});
+
+test("runHostProcess normalizes identifiable UTF-16LE diagnostics to UTF-8", async () => {
+  const diagnostic = "wsl: disk mounted read-only\r\n";
+  const script = `process.stderr.write(Buffer.from(${JSON.stringify(diagnostic)}, "utf16le"))`;
+  const result = await runHostProcess(process.execPath, ["-e", script]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, diagnostic);
+  assert.doesNotMatch(result.stderr, /\u0000/);
 });
 
 test("Effect Journal serializes reservations, replays completion and blocks indeterminate retry", async () => {

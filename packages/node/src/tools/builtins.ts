@@ -631,7 +631,7 @@ export const treeTool = defineTool({
 });
 
 export const shellTool = defineTool({
-  description: "Execute one program with a direct argument vector in the Workspace; shell interpolation, wildcard/glob expansion, pipes, and redirection are not available. Use find/search/read for file inspection, qi_session_inspect for Session diagnostics, and an authorized script profile instead of a long node -e program. Non-zero exits and timeouts fail the Action. In a Git Workspace, Qi records bounded before/after state fingerprints and the resulting tracked diff.",
+  description: "Execute one program with a direct argument vector in the Workspace; command contains only the executable name or path, while every flag and path operand is a separate args item. Do not put a whole command line such as mkdir -p pepsi-3d-2/src in command; use write to create files and their parent directories. Shell interpolation, wildcard/glob expansion, pipes, and redirection are not available. Pass the target directory through workdir and invoke package managers directly (for example command npm with args [\"run\",\"build\"]), rather than wrapping the command in bash, cmd, or PowerShell. On Windows, programs that need the null device must use NUL instead of /dev/null. Use find/search/read for file inspection, qi_session_inspect for Session diagnostics, and an authorized script profile instead of a long node -e program. Non-zero exits, unavailable executables, process-start failures, and timeouts fail the Action. In a Git Workspace, Qi records bounded before/after state fingerprints and the resulting tracked diff.",
   input: Type.Object(
     {
       command: Type.String({ minLength: 1 }),
@@ -675,7 +675,7 @@ export const shellTool = defineTool({
   async execute(input, context) {
     const request = input as { command: string; args: string[]; workdir?: string; timeoutMs?: number };
     const cwd = await resolveWorkspacePath(context.workspaceRoot, request.workdir ?? ".");
-    const executable = await resolveShellExecutable(request.command, context.workspaceRoot);
+    const executable = await resolveShellExecutable(request.command, context.workspaceRoot, cwd);
     const invocation = await windowsCommandInvocation(
       executable,
       request.args,
@@ -683,16 +683,29 @@ export const shellTool = defineTool({
       "UNSAFE_SHELL_ARGUMENT",
     );
     const before = await observeGitWorkspace(context.workspaceRoot, context.signal);
-    const { stdoutFull, stderrFull, ...result } = await runHostProcess(invocation.command, invocation.args, {
-      cwd,
-      timeoutMs: request.timeoutMs ?? 30_000,
-      ...(context.signal === undefined ? {} : { signal: context.signal }),
-      env: scrubCredentialEnvironment(process.env, { QI_SHELL: "1", NO_COLOR: "1" }),
-      outputLimitBytes: 64 * 1024,
-      captureLimitBytes: truncatedOutputCaptureLimitBytes,
-      ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-      ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
-    });
+    let processResult: Awaited<ReturnType<typeof runHostProcess>>;
+    try {
+      processResult = await runHostProcess(invocation.command, invocation.args, {
+        cwd,
+        timeoutMs: request.timeoutMs ?? 30_000,
+        ...(context.signal === undefined ? {} : { signal: context.signal }),
+        env: scrubCredentialEnvironment(process.env, { QI_SHELL: "1", NO_COLOR: "1" }),
+        outputLimitBytes: 64 * 1024,
+        captureLimitBytes: truncatedOutputCaptureLimitBytes,
+        ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+        ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
+      });
+    } catch (error) {
+      if (isProcessStartError(error)) {
+        throw new ToolFailure(
+          "SHELL_START_FAILED",
+          `Could not start ${request.command}: ${errorMessage(error)}`,
+          { command: request.command, code: error.code },
+        );
+      }
+      throw error;
+    }
+    const { stdoutFull, stderrFull, ...result } = processResult;
     const after = await observeGitWorkspace(context.workspaceRoot, context.signal);
     const workspaceChange = before && after
       ? (() => {
@@ -1711,8 +1724,29 @@ export async function windowsCommandInvocation(
   };
 }
 
-export async function resolveShellExecutable(command: string, workspaceRoot: string): Promise<string> {
-  if (isAbsolute(command) || command.includes("/") || command.includes("\\")) return command;
+export async function resolveShellExecutable(
+  command: string,
+  workspaceRoot: string,
+  executionDirectory = workspaceRoot,
+): Promise<string> {
+  if (isAbsolute(command) || command.includes("/") || command.includes("\\")) {
+    const candidate = isAbsolute(command) ? command : resolve(executionDirectory, command);
+    try {
+      if (!(await stat(candidate)).isFile()) throw new Error("not a file");
+      return candidate;
+    } catch {
+      throw new ToolFailure(
+        "SHELL_COMMAND_UNAVAILABLE",
+        `Executable path is unavailable: ${command}. Put flags and path operands in args instead of command`,
+      );
+    }
+  }
+  if (/\s/.test(command)) {
+    throw new ToolFailure(
+      "INVALID_SHELL_COMMAND",
+      "command must contain only one executable name; put flags and path operands in args",
+    );
+  }
   return resolveTrustedExecutable(command, workspaceRoot);
 }
 
@@ -1767,6 +1801,15 @@ function errorMessage(error: unknown): string {
 
 function isMissingFileError(error: unknown): boolean {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function isProcessStartError(error: unknown): error is NodeJS.ErrnoException & { syscall: string } {
+  return error instanceof Error
+    && "code" in error
+    && "syscall" in error
+    && typeof (error as NodeJS.ErrnoException).code === "string"
+    && typeof (error as NodeJS.ErrnoException).syscall === "string"
+    && (error as NodeJS.ErrnoException).syscall!.startsWith("spawn ");
 }
 
 async function resolveTrustedExecutable(command: string, workspaceRoot: string): Promise<string> {

@@ -97,11 +97,26 @@ PATH outside the Workspace. On Windows, PATHEXT resolution may select a `.cmd`/`
 metacharacters. Direct executables retain normal argument-vector spawning on every platform. Direct execution
 requires the `shell-profile:direct` resource in addition to host-process/workspace resources.
 
+Callers pass the target directory through `workdir` and invoke package managers directly, for example
+`command: "npm", args: ["run", "build"]`. Wrapping that operation in `bash -c`, `cmd /c`, or
+`PowerShell -Command` adds a second platform-specific parser, can select the wrong subsystem or script shim, and
+is not portable. Programs that explicitly discard output use the host null device (`NUL` on Windows,
+`/dev/null` on POSIX); an HTTP response does not turn a later write failure into a successful command.
+The same direct-vector rule applies to ordinary utilities: `command: "mkdir -p pepsi-3d-2/src"` is invalid
+because it combines the executable, flags, and operand. Prefer `write`, which creates the parent directories for
+the file being written; host-specific directory utilities are not a portable substitute. Explicit executable
+paths are validated as files before spawn. A malformed/unavailable command or a confirmed process-start error
+is a deterministic failed settlement, not an indeterminate effect; only failures after effect entry whose
+settlement cannot be established remain indeterminate.
+
 Authorized script profiles (`pwsh`, `cmd`, `bash`) are a separate `script` tool. They require matching
 `shell-profile:<name>` resources, are probed at runtime startup, and never replace `shell` based on command text.
 `pwsh` runs with `-NoLogo -NoProfile -NonInteractive` and receives the script on stdin; `bash` uses
 `--noprofile --norc -s`; `cmd` runs a temporary script through the trusted system processor. Profile scripts inherit
-a credential-scrubbed environment and terminate process trees on timeout or cancel.
+a credential-scrubbed environment and terminate process trees on timeout or cancel. Host-process environments
+also drop npm's lifecycle-exported `npm_config_allow_scripts`: when Qi itself starts through `npm run qi`, that
+ambient value must not become an explicit CLI/environment policy for a nested project-scoped `npm install`.
+Nested npm processes continue to read ordinary project, user, and global configuration files.
 
 Before and after a shell process, Qi observes bounded fixed-operation Git status and tracked diff when the
 Workspace is a repository. The output records state hashes, whether Git state changed, and final status. The
@@ -109,7 +124,8 @@ bounded final tracked diff is included only when those state hashes differ; an u
 not re-emit a pre-existing Workspace diff as causal output. This is audit evidence, not a claim that every byte
 change is attributable to the process.
 Timeout and non-zero exit produce `action.failed`; stdout, stderr, exit state, and the Git observation remain in
-the structured failure details.
+the structured failure details. Host output that clearly identifies as UTF-16LE is normalized to UTF-8 before
+bounded capture so Windows diagnostics remain readable without changing settlement semantics.
 
 While shell, script, or verification is running, an optional activity sink receives the latest bounded stdout/stderr
 snapshot after the Registry's redaction boundary. It may drive a fixed-height UI tail, but cannot affect the

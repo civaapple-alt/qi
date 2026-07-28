@@ -56,7 +56,9 @@ const observation = await workspace.observe("README.md");
 
 `LocalWorkspace`, `ContainerWorkspaceAdapter`, `GitWorktreeAdapter`, host-process helpers
 (`scrubCredentialEnvironment`, `runHostProcess`, `terminateProcessTree`), `EffectJournal`, and
-`SqliteEffectJournal`.
+`SqliteEffectJournal`. `scrubCredentialEnvironment` removes credential-shaped variables and npm's ambient
+lifecycle-exported `npm_config_allow_scripts`, preventing `npm run qi` from changing the policy layer seen by
+nested project-scoped npm commands.
 
 ## Change guide
 

@@ -63,8 +63,17 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- The Web workbench now keeps durable background ProcessTasks visible after their originating Run completes,
+  refreshes their lifecycle over SSE, and reports command, PID, working directory, and expiry.
+- Shell guidance now directs package-manager commands through the direct argument vector plus `workdir`, documents
+  the Windows `NUL` device, and decodes identifiable UTF-16LE host diagnostics before bounded capture.
+- Shell now validates executable paths and classifies malformed command strings and confirmed spawn-start errors
+  as deterministic failures instead of parking the Run with an indeterminate effect.
 - Shell and script children that explicitly disable color no longer inherit a conflicting `FORCE_COLOR` value
   that caused Node.js to emit a warning on stderr.
+- Host-process children no longer inherit npm's lifecycle-exported `npm_config_allow_scripts`, so a Qi runtime
+  launched through `npm run qi` can execute nested project-scoped npm commands without an ambient
+  `EALLOWSCRIPTS` failure.
 
 ### Security
 

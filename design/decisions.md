@@ -72,6 +72,8 @@ After a crash, only committed events and Artifacts are reconstructed.
 - Finite commands settle inside an Action; servers and watchers use an explicit background Task operation.
 - A ProcessTask has Session/Run/Step/Action ownership, a hard expiry, bounded logs, and a distinct lifecycle.
 - Starting a Task requires separate background authority and completes only after process/log ownership exists.
+- Understanding surfaces render the durable ProcessTask projection independently of the originating Action so a
+  completed Run or folded narrative cannot make a still-running background process disappear.
 - Stop intent is durable before process-tree termination.
 - Recovery marks unverifiable processes `lost`; it never guesses settlement or automatically restarts them.
 

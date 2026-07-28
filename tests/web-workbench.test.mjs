@@ -159,3 +159,103 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
   assert.deepEqual(view.evidence, {});
   assert.deepEqual(view.memories, {});
 });
+
+test("Web workbench renders durable ProcessTasks and subscribes to their lifecycle", async () => {
+  const store = new InMemoryEventStore();
+  const hub = new SessionEventHub();
+  const sessionId = "ses_web_tasks";
+  const taskId = "tsk_web_server";
+  const writer = new EventWriter(store, sessionId);
+  const actor = { kind: "runtime", id: "test" };
+  writer.append("session.created", { title: "Background server" }, actor);
+  writer.append("run.triggered", { runId: "run_web_tasks", trigger: "user", input: "Start the dev server" }, actor);
+  writer.append("run.started", { runId: "run_web_tasks" }, actor);
+  writer.append("step.started", { runId: "run_web_tasks", stepId: "stp_web_tasks" }, actor);
+  writer.append("model.completed", {
+    runId: "run_web_tasks",
+    stepId: "stp_web_tasks",
+    requestId: "req_web_tasks",
+    provider: "test",
+    model: "deterministic",
+    finishReason: "actions",
+    text: "",
+    actionCalls: [{
+      callId: "call_web_tasks",
+      name: "task",
+      input: { command: "npm", args: ["run", "dev"], workdir: "web-app" },
+    }],
+  }, actor);
+  writer.append("action.proposed", {
+    runId: "run_web_tasks",
+    stepId: "stp_web_tasks",
+    actionId: "act_web_tasks",
+    toolName: "task",
+    input: { command: "npm", args: ["run", "dev"], workdir: "web-app" },
+    resources: ["host-process:npm", "host-workspace:web-app", "background-task:process"],
+    effect: "execute",
+  }, actor);
+  writer.append("step.completed", {
+    runId: "run_web_tasks",
+    stepId: "stp_web_tasks",
+    finishReason: "action-requested",
+  }, actor);
+  writer.append("authority.requested", {
+    runId: "run_web_tasks",
+    stepId: "stp_web_tasks",
+    actionId: "act_web_tasks",
+  }, actor);
+  writer.append("authority.granted", {
+    runId: "run_web_tasks",
+    stepId: "stp_web_tasks",
+    actionId: "act_web_tasks",
+    leaseId: "lea_web_tasks",
+  }, actor);
+  writer.append("action.started", {
+    runId: "run_web_tasks",
+    stepId: "stp_web_tasks",
+    actionId: "act_web_tasks",
+  }, actor);
+  writer.append("task.started", {
+    runId: "run_web_tasks",
+    stepId: "stp_web_tasks",
+    actionId: "act_web_tasks",
+    taskId,
+    command: "npm",
+    args: ["run", "dev"],
+    workdir: "web-app",
+    pid: 4317,
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    logRef: "process-task://tsk_web_server/log",
+  }, actor);
+  writer.append("action.completed", {
+    runId: "run_web_tasks",
+    stepId: "stp_web_tasks",
+    actionId: "act_web_tasks",
+    modelOutput: [{ type: "text", text: JSON.stringify({ taskId, status: "running" }) }],
+  }, actor);
+  writer.append("run.completed", {
+    runId: "run_web_tasks",
+    completionKind: "response",
+    evaluationIds: [],
+  }, actor);
+
+  const server = new QiWebServer({ eventStore: store, eventHub: hub });
+  const address = await server.listen();
+  try {
+    const page = await fetch(address.url).then((response) => response.text());
+    assert.match(page, /Background ProcessTasks/);
+    const application = await fetch(`${address.url}/app.js`).then((response) => response.text());
+    assert.match(application, /function renderTasks/);
+    for (const eventType of ["task.started", "task.stop.requested", "task.exited", "task.lost"]) {
+      assert.match(application, new RegExp(eventType.replace(".", "\\.")));
+    }
+
+    const workbench = await fetch(`${address.url}/api/session/${sessionId}/workbench`).then((response) => response.json());
+    assert.deepEqual(workbench.view.taskOrder, [taskId]);
+    assert.equal(workbench.view.tasks[taskId].status, "running");
+    assert.equal(workbench.view.tasks[taskId].command, "npm");
+    assert.deepEqual(workbench.view.tasks[taskId].args, ["run", "dev"]);
+  } finally {
+    await server.close();
+  }
+});

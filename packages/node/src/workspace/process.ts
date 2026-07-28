@@ -47,8 +47,37 @@ export interface HostProcessOptions {
 }
 
 const credentialNamePattern = /(?:API[_-]?KEY|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN|TOKEN|SECRET|PASSWORD|AUTHORIZATION|CREDENTIAL|PRIVATE[_-]?KEY)/i;
+const ambientPackageManagerVariables = new Set([
+  "npm_config_allow_scripts",
+]);
 
-/** Copy an environment while dropping high-confidence credential variable names. */
+function detectProcessOutputEncoding(chunk: Buffer): BufferEncoding {
+  if (chunk.length >= 2 && chunk[0] === 0xff && chunk[1] === 0xfe) return "utf16le";
+  const sampleLength = Math.min(chunk.length - (chunk.length % 2), 256);
+  const pairs = sampleLength / 2;
+  if (pairs < 4) return "utf8";
+  let oddNuls = 0;
+  let evenNuls = 0;
+  for (let index = 0; index < sampleLength; index += 2) {
+    if (chunk[index] === 0) evenNuls += 1;
+    if (chunk[index + 1] === 0) oddNuls += 1;
+  }
+  return oddNuls >= Math.max(2, Math.ceil(pairs * 0.25)) && oddNuls > evenNuls * 2
+    ? "utf16le"
+    : "utf8";
+}
+
+function normalizeProcessOutputChunk(chunk: Buffer, encoding: BufferEncoding): Buffer {
+  if (encoding === "utf8") return chunk;
+  return Buffer.from(chunk.toString(encoding).replace(/^\ufeff/, ""), "utf8");
+}
+
+/**
+ * Copy a host environment while dropping high-confidence credential names and package-manager settings that
+ * npm exports into lifecycle children. In particular, inheriting `npm_config_allow_scripts` from `npm run qi`
+ * makes a nested project-scoped npm install misinterpret the launcher's policy as an explicit CLI/env override.
+ * The nested npm process still reads its ordinary project, user, and global configuration files.
+ */
 export function scrubCredentialEnvironment(
   source: NodeJS.ProcessEnv = process.env,
   markers: Readonly<Record<string, string>> = {},
@@ -58,6 +87,7 @@ export function scrubCredentialEnvironment(
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined) continue;
     if (credentialNamePattern.test(name)) continue;
+    if (ambientPackageManagerVariables.has(name.toLowerCase())) continue;
     if (disablesColor && name.toUpperCase() === "FORCE_COLOR") continue;
     environment[name] = value;
   }
@@ -133,15 +163,21 @@ export function runHostProcess(
     let stderrTruncated = false;
     let timedOut = false;
     let settled = false;
+    let stdoutEncoding: BufferEncoding | undefined;
+    let stderrEncoding: BufferEncoding | undefined;
 
     const append = (target: "stdout" | "stderr", chunk: Buffer) => {
       const isStdout = target === "stdout";
+      const encoding = isStdout
+        ? (stdoutEncoding ??= detectProcessOutputEncoding(chunk))
+        : (stderrEncoding ??= detectProcessOutputEncoding(chunk));
+      const normalizedChunk = normalizeProcessOutputChunk(chunk, encoding);
       const current = isStdout ? stdout : stderr;
       const room = Math.max(0, outputLimitBytes - Buffer.byteLength(current));
-      const addition = chunk.subarray(0, room).toString("utf8");
+      const addition = normalizedChunk.subarray(0, room).toString("utf8");
       if (isStdout) stdout += addition;
       else stderr += addition;
-      const remainder = chunk.subarray(room);
+      const remainder = normalizedChunk.subarray(room);
       if (remainder.byteLength > 0) {
         if (isStdout) stdoutTruncated = true;
         else stderrTruncated = true;

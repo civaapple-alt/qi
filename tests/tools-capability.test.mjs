@@ -32,6 +32,10 @@ import {
   treeTool,
   writeTool,
 } from "@civaapple/qi-node/tools";
+import {
+  SqliteEffectJournal,
+  effectIdempotencyKey,
+} from "@civaapple/qi-node/workspace";
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +79,12 @@ function identity(registry, name) {
   assert.ok(tool, `Expected ${name} in tool catalog`);
   return tool.identity;
 }
+
+test("shell catalog guidance is platform-aware and prefers direct package-manager execution", () => {
+  assert.match(shellTool.description, /workdir/);
+  assert.match(shellTool.description, /command npm/);
+  assert.match(shellTool.description, /NUL instead of \/dev\/null/);
+});
 
 test("findTrustedExecutable caches PATH resolution and serves repeats without re-probing", async () => {
   const originalPath = process.env.PATH ?? process.env.Path ?? "";
@@ -818,12 +828,14 @@ test("shell stores full truncated stdout as a retrievable Artifact and leaves un
   });
 });
 
-test("shell does not inherit provider credential environment variables", async () => {
+test("shell does not inherit provider credentials or npm lifecycle allow-scripts policy", async () => {
   await withWorkspace(async ({ root, artifactStore }) => {
     const previousOpenAI = process.env.OPENAI_API_KEY;
     const previousXai = process.env.XAI_API_KEY;
+    const previousAllowScripts = process.env.npm_config_allow_scripts;
     process.env.OPENAI_API_KEY = "should-not-leak";
     process.env.XAI_API_KEY = "should-not-leak-either";
+    process.env.npm_config_allow_scripts = "opencode-ai";
     try {
       const broker = new InMemoryCapabilityBroker();
       grant(broker);
@@ -836,7 +848,7 @@ test("shell does not inherit provider credential environment variables", async (
           command: process.execPath,
           args: [
             "-e",
-            "process.stdout.write(JSON.stringify({ openai: process.env.OPENAI_API_KEY ?? null, xai: process.env.XAI_API_KEY ?? null, qi: process.env.QI_SHELL ?? null, path: Boolean(process.env.PATH || process.env.Path) }))",
+            "process.stdout.write(JSON.stringify({ openai: process.env.OPENAI_API_KEY ?? null, xai: process.env.XAI_API_KEY ?? null, allowScripts: process.env.npm_config_allow_scripts ?? process.env.NPM_CONFIG_ALLOW_SCRIPTS ?? null, qi: process.env.QI_SHELL ?? null, path: Boolean(process.env.PATH || process.env.Path) }))",
           ],
           workdir: ".",
           timeoutMs: 5_000,
@@ -846,6 +858,7 @@ test("shell does not inherit provider credential environment variables", async (
       assert.deepEqual(JSON.parse(settlement.output.stdout), {
         openai: null,
         xai: null,
+        allowScripts: null,
         qi: "1",
         path: true,
       });
@@ -854,6 +867,8 @@ test("shell does not inherit provider credential environment variables", async (
       else process.env.OPENAI_API_KEY = previousOpenAI;
       if (previousXai === undefined) delete process.env.XAI_API_KEY;
       else process.env.XAI_API_KEY = previousXai;
+      if (previousAllowScripts === undefined) delete process.env.npm_config_allow_scripts;
+      else process.env.npm_config_allow_scripts = previousAllowScripts;
     }
   });
 });
@@ -905,6 +920,48 @@ test("shell resolves the npm platform shim and runs a Workspace script", async (
     assert.equal(settlement.output.exitCode, 0);
     assert.match(settlement.output.stdout, /demo-ok/);
     assert.equal(settlement.output.timedOut, false);
+  });
+});
+
+test("shell command-line strings fail deterministically instead of becoming indeterminate effects", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("shell", shellTool);
+    const journal = new SqliteEffectJournal(join(root, "effects.sqlite"));
+    const input = {
+      command: "mkdir -p pepsi-3d-2/src",
+      args: [],
+      workdir: ".",
+    };
+    const resources = [
+      "host-process:mkdir -p pepsi-3d-2/src",
+      "host-workspace:.",
+      "shell-profile:direct",
+    ];
+
+    try {
+      await assert.rejects(
+        registry.execute(
+          "shell",
+          identity(registry, "shell"),
+          input,
+          { ...context(root, artifactStore, "act_shell_invalid_command"), effectJournal: journal },
+        ),
+        (error) => {
+          assert.ok(error instanceof ToolFailure);
+          assert.equal(error.code, "SHELL_COMMAND_UNAVAILABLE");
+          assert.match(error.message, /Put flags and path operands in args/);
+          return true;
+        },
+      );
+      const key = effectIdempotencyKey("run_tools_001", "shell", input, resources);
+      assert.equal(journal.get(key)?.status, "failed");
+      assert.equal(await stat(join(root, "pepsi-3d-2")).catch(() => undefined), undefined);
+    } finally {
+      journal.close();
+    }
   });
 });
 
