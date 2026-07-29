@@ -7,6 +7,22 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Documentation
+
+## [0.7.1] - 2026-07-29
+
+### Added
+
 - Added end-to-end Memory capture and management: structured Session/Project/User scopes, provenance-backed
   `memory` proposals, `/memory` rich and line-mode lifecycle commands, explicit User promotion/pinning, and
   read-only Web provenance/usage audit.
@@ -42,7 +58,8 @@ steps and investigation history belong in pull requests, not release notes.
   diff fold for every Action.
 - TUI `update_plan` Work Plan cards now keep a full ✔/◐/○ Todo list in the chat stream (including mid-Run
   collapsed Steps), with a `Working on N to-dos · M/N done` header instead of a one-line summary.
-- Collapsed or mid-Run `shell`/`script`/`verify` cards now show up to three trailing output lines instead of one.
+- Live `shell`/`script`/`verify` tails and failed cards keep up to three bounded evidence lines; settled successes
+  collapse to one command-and-duration line unless expanded or shown in diagnostic density.
 - Restored cross-Run conversation history now supplies only a local turn ordinal and coarse write settlement class
   in a Runtime-owned system ContextBlock. Durable IDs, Action/read counts, terminal details, paths, and tool
   payloads remain outside automatic model context and are available only through bounded introspection.
@@ -50,8 +67,8 @@ steps and investigation history belong in pull requests, not release notes.
   `edit`/`write`, and that planned code blocks are not proof of a durable Workspace mutation.
 - Executor timelines now render accepted Formal Plans as at most 200 terminal lines without paste
   classification; every preview shows the immutable local path, and longer plans add a Collapsed notice while
-  Executor context remains complete. Live and committed model reasoning appears in three display-wrapped
-  Thinking lines.
+  Executor context remains complete. Live model reasoning keeps three display-wrapped lines; settled standard
+  density uses an expandable `Thinking · duration` summary with the same bounded excerpt.
 - Choice questions in Plan-mode `ask_question` now offer custom `Other…` input by default unless explicitly
   disabled, and confirmed timeline cards retain every question and option with selected, custom, or skipped
   results.
