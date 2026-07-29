@@ -64,6 +64,11 @@ atomic writes.
 Formal Plan revisions are stored at immutable content-hash paths under the machine-private project root.
 Ordinary file tools cannot read or edit that directory; `plan_document read/edit` is the bounded access path.
 
+`SqliteEventStore` keeps a non-persistent, version-checked projection cache for the running process. Normal
+append validates only the new batch and advances that cache inside the existing transaction; restart, version
+mismatch, validation failure, or rollback rebuilds from the immutable stream. The cache changes no database
+schema or recovery semantics.
+
 ## Declaration-only packages
 
 `DeclarativePackageStore` accepts exact npm versions with registry integrity, Git URLs pinned to a 40-character

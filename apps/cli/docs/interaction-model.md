@@ -18,23 +18,25 @@ Alternatives considered:
 The dependency is a rendering mechanism, not a source of authority or Session truth. Non-TTY execution stays on
 the existing readline-compatible path.
 
-Interactive paint cost: composer keystrokes and the Running spinner refresh only the Working strip and footer.
+Interactive paint cost: composer keystrokes and provisional activity refresh only the Working strip and footer.
 The chat transcript component caches its last paint until Session events, expand, or other transcript-affecting
-state change. Live streaming (`onActivity`) updates a bounded three-line model/tool tail in the Working strip
+state change. `TuiPresenter.update()` performs cold start/resynchronization; contiguous committed facts use
+`applyCommitted()` and invalidate only the affected Run/Step/Action. Live streaming (`onActivity`) updates a bounded three-line model/tool tail in the Working strip
 without invalidating the transcript. Chrome-only Session facts (`authority.requested`, `authority.granted`,
 `safety.*`, `context.compiled`, mounts/memory/presence) use the same path; `authority.denied` repaints the
 transcript because it visibly settles the Action as `⊘`. Inside `TuiPresenter`, Action propose/start/terminal
-lookups are indexed once per `update()`, settled Runs reuse a fingerprint cache, and settled Steps inside an
+lookups are indexed during cold replay and advanced per committed event, settled Runs reuse a fingerprint cache, and settled Steps inside an
 active Run cache their card/Markdown formatting by width and visible state. Non-final Steps render one-line
 Action summaries (no edit gutters); an active Run with more than eight prior Steps folds older Steps into
 `… N earlier steps · M actions · Ctrl+O` (inspired by kimi-code fold / pi-tui paint classification — not a
-virtual transcript list).
+virtual transcript list). The current Run plus 20/12/6 recent settled Runs are retained in
+compact/standard/diagnostic density respectively, with a 1200-rendered-line ceiling.
 
 ## Projection hierarchy
 
 ```text
 Session
-└── selected Run       /runs → Runs
+└── selected Run       /runs History Center → Runs
     ├── Subagents      /runs → Agents   (depth-1 delegation projection)
     └── selected Step  /runs → Steps
         └── Action     /runs → Actions
@@ -42,7 +44,8 @@ Session
 
 The current Run remains the execution target. Inspecting an older Run changes only the visible projection — pick
 it from the interactive `/runs` lists (↑↓ / Enter). A new
-event refreshes the projection from `EventStore`; it never mutates a locally inferred action state.
+event advances the supplied committed projection; a sequence/Session discontinuity requests a one-time
+EventStore resynchronization. It never mutates a locally inferred action state.
 
 The default screen is a chat transcript: full-width user bars (with vertical padding), plain Agent text, and tool
 cards only when Actions
@@ -71,7 +74,8 @@ failure/cancellation notices do not time out; they remain until the operator sta
 the Runtime explicitly clears the outcome.
 
 `/settings` opens a multi-level panel stack (Mode, Permissions, Providers, Config, Context, Theme, Language,
-Status, Session history).
+Timeline density, Status, Session history). Density changes are local presentation state; only an explicit
+“save user default” choice writes `[ui].timeline_density` to user config.
 `/providers` and empty `/login` open the provider list; selecting a provider offers API-key form or Kimi device
 login without writing secrets into Session events or TOML. Esc pops one panel level; an empty stack restores the
 composer.
@@ -97,14 +101,16 @@ Provider login details:
 
 Primary slash commands are intentionally few: overlapping inspect entries live under `/settings`, mount
 operations under `/mounts`, capability grants under `/permissions`, skill/task management under `/skills` and
-`/tasks`, Session history under `/runs` (interactive list selection; no `/run N` style selectors), and Workspace
+`/tasks`, Session history under `/runs` (height-paged, bounded type-to-search selection; no `/run N` style selectors), and Workspace
 Session resume under `/sessions`. List shortcuts `/steps` `/actions` `/agents` remain aliases.
 Previous command names that only selected by index/id were removed. UI copy for slash help, settings, and
 these hubs follows `language` in `~/.qi/config.toml` (`zh` default, or `en`).
 
 `/status` (alias) opens the denser Session/Run/Step/Action engineering panel. `Ctrl+O` expands or collapses the
-focused Action card, long paste, or Markdown code block. Focus and expansion are observational; they do not hide
-committed history.
+latest or explicitly selected Action/activity group/Thinking block, long paste, or Markdown code block.
+`Ctrl+G` opens pending gates in Run Question → Plan Review → Next Run → path grant order. New gates never replace
+a non-empty composer or follow-up editor; they leave a persistent attention notice. Focus and expansion are
+observational; they do not hide committed history.
 
 Session mode is durable (`ask` / `plan` / `agent`). Plan mode records managed Formal Markdown
 `plan_document` revisions; a Formal Plan is not a Todo. Review offers `开始实现` / `修改计划` / `拒绝计划`.
@@ -135,10 +141,10 @@ running, `○` other. The TUI must not collapse these into a binary error flag.
 Markdown tables wrap cell content within adaptively allocated columns. When the terminal is too narrow to keep
 every column useful, the renderer switches to a per-row vertical field layout so right-side values are retained.
 
-- Shell/script/verify: compact `$ command duration` (or script/verify equivalents) with up to three trailing
-  output lines and `… N output lines hidden · Ctrl+O` when more remain. Expansion reveals cwd and a bounded
-  stdout/stderr window. Elapsed time comes only from committed event timestamps. Non-zero exits and timeouts are
-  failed settlements. Live tails use a flat `·` prefix (also up to three lines) rather than box-drawing chrome.
+- Shell/script/verify: a settled success is one compact `$ command duration` line (or script/verify equivalent).
+  Expansion or diagnostic density reveals cwd and a bounded stdout/stderr window. A failure automatically keeps
+  at most three evidence lines; timeout remains explicit. Elapsed time comes only from committed event timestamps.
+  Live tails use a flat `·` prefix (also up to three lines) rather than box-drawing chrome.
 - Read: header-only (`path · N lines`); file contents are never echoed into the transcript.
 - Write/edit: completed cards read `Edited <path> +N -M` (Cursor-style). The body uses a `▎` gutter, shows
   change lines with nearby context, and omits `---`/`+++`/`@@` chrome. Long patches collapse surplus middle as
@@ -152,8 +158,9 @@ every column useful, the renderer switches to a per-row vertical field layout so
   evidence. On create, Qi assigns the Work Plan and Work item IDs even if the model supplied provisional item IDs;
   later calls use only IDs returned by a successful snapshot. Failed cards retain the rejection code and
   actionable message.
-- Discovery Actions (read/list/search/…) each keep their own compact card in the transcript; they are not folded
-  into an explore summary.
+- Consecutive same-Step read-only discovery Actions (`read/list/tree/find/search/git`) settle as
+  `Explored N actions`. Expansion and the History Center preserve every durable child. Any failed, denied,
+  cancelled, or indeterminate child expands the group automatically.
 - Delegate: parent timeline shows a Subagents progress block (`Running` / `Finished` per depth-1 delegation) with
   child context tokens on each Subagent row; the sticky Running strip keeps parent-agent tokens only
   (`waiting on subagent` while `delegate` is in flight). Child transcripts stay in the child Session
@@ -168,7 +175,8 @@ every column useful, the renderer switches to a per-row vertical field layout so
 Model deltas and process pipes may arrive before their durable terminal events. The TUI shows only a redacted,
 bounded, process-local tail labelled `live`; it never treats this provisional channel as settlement or evidence.
 Model reasoning uses the same boundary: the Working strip keeps three display-wrapped lines, and
-`model.completed.reasoning` replays as a distinct three-line Thinking block. Reasoning remains explanatory model
+`model.completed.reasoning` replays in standard density as `Thinking · duration`; expansion/diagnostic shows a
+bounded three-line excerpt, while compact hides settled Thinking. Reasoning remains explanatory model
 output rather than completion evidence. Committed terminal output replaces the live interpretation. See
 [ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-activity-outside-durable-session-truth).
 

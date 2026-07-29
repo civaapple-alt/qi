@@ -14,6 +14,7 @@ import {
 } from "../config.js";
 import { t, type Locale, type MessageKey } from "../i18n.js";
 import type { TuiPresenter } from "../presenter.js";
+import type { TimelineDensity } from "../presenter.js";
 import { formatProviderLabel } from "../provider.js";
 import type { ThemeName } from "../theme/index.js";
 import type { SessionId } from "@civaapple/qi-protocol";
@@ -49,6 +50,8 @@ export interface PanelFlowContext {
   readonly changeLocale: (locale: Locale) => void;
   readonly theme: () => ThemeName;
   readonly changeTheme: (theme: ThemeName) => void;
+  readonly density: () => TimelineDensity;
+  readonly changeDensity: (density: TimelineDensity, persist: boolean) => void;
   readonly mode: () => string;
   readonly changeMode: (mode: "ask" | "plan" | "agent") => void;
   readonly startLoginDevice: (
@@ -118,6 +121,11 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
       { id: "config", label: t(locale, "settings.config"), description: t(locale, "settings.config.desc") },
       { id: "context", label: t(locale, "settings.context"), description: t(locale, "settings.context.desc") },
       { id: "theme", label: t(locale, "settings.theme"), description: t(locale, "settings.theme.desc") },
+      {
+        id: "timeline-density",
+        label: locale === "zh" ? "时间线密度" : "Timeline density",
+        description: locale === "zh" ? "简洁、标准或诊断信息层级" : "Compact, standard, or diagnostic hierarchy",
+      },
       { id: "language", label: t(locale, "settings.language"), description: t(locale, "settings.language.desc") },
       { id: "status", label: t(locale, "settings.status"), description: t(locale, "settings.status.desc") },
     ],
@@ -141,6 +149,10 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
       }
       if (item.id === "theme") {
         openThemePanel(ctx);
+        return;
+      }
+      if (item.id === "timeline-density") {
+        openTimelineDensityPanel(ctx);
         return;
       }
       if (item.id === "language") {
@@ -763,6 +775,57 @@ export function openTasksHubPanel(ctx: PanelFlowContext): void {
   }));
 }
 
+export function openTimelineDensityPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const current = ctx.density();
+  const labels: Record<TimelineDensity, [string, string]> = locale === "zh"
+    ? {
+        compact: ["简洁", "只保留意图、结果、变更和异常"],
+        standard: ["标准", "合组探索过程，保留关键执行证据"],
+        diagnostic: ["诊断", "展开 Thinking、Action 和更多工程细节"],
+      }
+    : {
+        compact: ["Compact", "Keep intent, results, changes, and exceptions"],
+        standard: ["Standard", "Group exploration and retain important evidence"],
+        diagnostic: ["Diagnostic", "Expand Thinking, Actions, and engineering detail"],
+      };
+  ctx.panels.push(new ListPanel({
+    title: locale === "zh" ? "时间线密度" : "Timeline density",
+    hints: t(locale, "settings.hints"),
+    items: (["compact", "standard", "diagnostic"] as const).map((id) => ({
+      id,
+      label: labels[id][0],
+      description: labels[id][1],
+      current: current === id,
+    })),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      const density = item.id as TimelineDensity;
+      ctx.panels.push(new ListPanel({
+        title: labels[density][0],
+        hints: t(locale, "settings.hints"),
+        items: [
+          {
+            id: "session",
+            label: locale === "zh" ? "仅当前 Session" : "This Session",
+            description: locale === "zh" ? "立即应用，不修改配置" : "Apply now without changing config",
+          },
+          {
+            id: "default",
+            label: locale === "zh" ? "保存为用户默认" : "Save as user default",
+            description: locale === "zh" ? "应用并写入 $QI_HOME/config.toml" : "Apply and persist to $QI_HOME/config.toml",
+          },
+        ],
+        onClose: ctx.panels.dismiss,
+        onSelect: (scope) => {
+          ctx.panels.closeAll();
+          ctx.changeDensity(density, scope.id === "default");
+        },
+      }));
+    },
+  }));
+}
+
 export function openRunsHubPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   ctx.panels.push(new ListPanel({
@@ -818,6 +881,7 @@ export function openHistoryListPanel(
     title: t(locale, titleKey),
     hints: t(locale, "runs.list.hints"),
     items,
+    searchable: true,
     ...(currentIndex >= 0 ? { initialSelected: currentIndex } : {}),
     maxVisible: maxVisible(ctx.terminalRows),
     onClose: ctx.panels.dismiss,
@@ -830,6 +894,59 @@ export function openHistoryListPanel(
             ? presenter.selectAction(item.id)
             : presenter.selectDelegation(item.id);
       presenter.setNotice(notice);
+      if (kind === "runs") {
+        openHistoryRunDrilldown(ctx);
+        ctx.render();
+        return;
+      }
+      if (kind === "steps") {
+        openHistoryStepActions(ctx);
+        ctx.render();
+        return;
+      }
+      ctx.panels.dismiss();
+      ctx.render();
+    },
+  }));
+}
+
+function openHistoryRunDrilldown(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const run = ctx.presenter.selectedRun();
+  if (!run) return;
+  ctx.panels.push(new ListPanel({
+    title: `Run · ${run.runId}`,
+    hints: t(locale, "runs.hints"),
+    items: [
+      { id: "steps", label: t(locale, "runs.steps"), description: `${run.stepOrder.length}` },
+      { id: "actions", label: t(locale, "runs.actions"), description: `${Object.keys(run.actions).length}` },
+      { id: "agents", label: t(locale, "runs.agents"), description: `${Object.keys(run.delegations).length}` },
+    ],
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => openHistoryListPanel(
+      ctx,
+      item.id as "steps" | "actions" | "agents",
+    ),
+  }));
+}
+
+function openHistoryStepActions(ctx: PanelFlowContext): void {
+  const step = ctx.presenter.selectedStep();
+  if (!step) return;
+  const items = ctx.presenter.historyActionItems(step.stepId);
+  if (items.length === 0) {
+    ctx.presenter.setNotice("The selected Step has no Actions.");
+    return;
+  }
+  ctx.panels.push(new ListPanel({
+    title: `Step · ${step.stepId} → Actions`,
+    hints: t(ctx.locale(), "runs.list.hints"),
+    items,
+    searchable: true,
+    maxVisible: maxVisible(ctx.terminalRows),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      ctx.presenter.setNotice(ctx.presenter.selectAction(item.id));
       ctx.panels.dismiss();
       ctx.render();
     },

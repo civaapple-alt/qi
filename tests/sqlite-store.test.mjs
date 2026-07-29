@@ -56,6 +56,23 @@ test("SQLite append uses optimistic concurrency after restart", async () => {
   });
 });
 
+test("SQLite incremental projection is exactly equal to cold replay and restart", async () => {
+  await withDatabase((path) => {
+    const store = new SqliteEventStore(path);
+    let version = 0;
+    for (const event of fixture) {
+      const incremental = store.append("ses_golden_001", version, [event]);
+      version += 1;
+      assert.deepEqual(incremental, replaySession(fixture.slice(0, version)));
+    }
+    store.close();
+
+    const restarted = new SqliteEventStore(path);
+    assert.deepEqual(restarted.load("ses_golden_001"), replaySession(fixture));
+    restarted.close();
+  });
+});
+
 test("SQLite append rolls back the whole invalid batch", async () => {
   await withDatabase((path) => {
     const store = new SqliteEventStore(path);

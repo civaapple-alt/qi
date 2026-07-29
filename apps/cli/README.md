@@ -17,9 +17,17 @@ a deterministic line-oriented mode.
 
 ## Interaction model
 
-Selection is observational: `/runs` → Runs / Steps / Actions / Agents lists let you pick a history object
+Selection is observational: `/runs` is the History Center; its paged Runs / Steps / Actions / Agents lists
+support bounded type-to-search and let you pick a history object
 without changing the active execution target. The chat transcript is the default surface; `/status` exposes
 denser engineering detail.
+
+The rich TTY has three stable regions: a committed同行 timeline, a provisional live status strip, and controls
+(composer, follow-ups, attention panels, statusline, and History Center). Provisional Thinking/tool output never
+enters Session truth or rewrites settled history. `Ctrl+O` expands the latest or explicitly selected block.
+`Ctrl+G` opens the highest-priority pending gate: Run Question, Plan Review, Next Run, then path grant. A new gate
+never steals focus while the composer contains text or a follow-up is being edited; it leaves a persistent
+attention notice instead.
 
 ### Session modes
 
@@ -57,7 +65,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | Command | Purpose |
 | --- | --- |
 | `/help [command\|advanced]` | Shortcuts + common commands; `advanced` lists aliases |
-| `/settings` | Settings hub: mode, **permissions**, providers, config, context, theme, **language**, status |
+| `/settings` | Settings hub: mode, **permissions**, providers, config, context, theme, language, **timeline density**, status |
 | `/memory [list\|remember\|accept\|correct\|forget\|promote\|pin\|unpin]` | Inspect actual Run injection, pending candidates, Project/User boundaries and provenance; explicitly manage the full Memory lifecycle |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
@@ -88,6 +96,14 @@ Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, 
 
 UI language defaults to Chinese. Set `language = "zh"` or `language = "en"` in `~/.qi/config.toml`, or
 change it under `/settings` → Language (persists to the same file).
+
+Timeline density defaults to `standard`. `/settings` → Timeline density can apply `compact`, `standard`, or
+`diagnostic` to only the current Session, or persist the user default:
+
+```toml
+[ui]
+timeline_density = "standard"
+```
 
 Memory capture and retrieval default to enabled:
 
@@ -126,20 +142,26 @@ Long pastes collapse to a line/char summary; Agent replies and Plans use a bound
 (fenced code keeps internal blank lines); wide tables wrap cells and fall back to a vertical field layout when
 the terminal cannot preserve useful columns, rather than clipping right-side values. Tool cards appear only
 when Actions exist; settlement glyphs stay distinct (`✓` / `!` / `⊘` / `?` / `×` / `●`); shell cards use compact
-`$ command duration` with collapsed output and `Ctrl+O` expand. Write/edit cards use Cursor-style
+`$ command duration`, with successful output available through `Ctrl+O` and bounded failure evidence retained.
+Consecutive same-Step read-only `read` / `list` / `tree` / `find` / `search` / `git` Actions settle as
+`Explored N actions`; diagnostic, selected, and exceptional groups show every durable child. Write/edit cards use Cursor-style
 `Edited path +N -M`, a `▎` gutter, nearby context, and no `---`/`+++`/`@@` chrome (`… truncated · Ctrl+O`).
 The first Agent `update_plan` call does not require IDs: Qi discards model-supplied provisional Work item IDs,
 assigns stable IDs, and returns them for later snapshots. Failed Todo cards show the rejection code and message
 instead of only an empty progress ratio.
-Composer keystrokes and the Running spinner refresh only the chrome strip; settled Runs reuse a chat fingerprint
-cache so long Sessions stay responsive. Streaming model/tool output remains visible as a bounded three-line
+Composer keystrokes and provisional activity refresh only the chrome strip; settled Runs reuse a chat fingerprint
+cache and committed facts apply incrementally. The main timeline retains the current Run plus a density-specific
+recent settled window (`compact` 20, `standard` 12, `diagnostic` 6), capped at 1200 rendered lines; older Runs
+collapse behind one `/runs` anchor. Streaming model/tool output remains visible as a bounded three-line
 Working-strip tail without invalidating the transcript; reasoning uses display-width wrapping so a provider's
 single long reasoning line still occupies up to three visible lines, then replays from committed
-`model.completed` as a distinct Thinking block. Active Runs also reuse settled-Step formatting caches, collapse prior
+`model.completed` as an expandable `Thinking · duration` item. Static waits do not spin; finite Actions show
+elapsed time after two seconds and “still running” after thirty. Active Runs also reuse settled-Step formatting caches, collapse prior
 Action cards to one-line summaries, and fold older Steps (`… N earlier steps · Ctrl+O`); chrome-only Session
 events skip transcript invalidate, while `authority.denied` repaints its visible `⊘` settlement.
 A fixed two-line statusline shows `model · context%` and the active mode (`Ask` / `Plan` / `Agent`) on the first
-line, and `workspace · branch` on the second. Theme follows dark/light/auto semantic tokens. Ordinary conversation
+line, and `workspace · branch` on the second. Theme follows dark/light/auto semantic tokens and degrades through
+truecolor, ANSI-256, basic ANSI, and `NO_COLOR`; glyph/text always carries status meaning. Ordinary conversation
 termination is labeled `responded`; `verified` is reserved for evidence-backed completion. Plan Review and
 Next Run use temporary choice panels over the composer; transcript cards stay compact Session projections
 ([ADR 0011](../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)).
@@ -234,6 +256,8 @@ publish a digest-guarded update. Ordinary file tools still cannot access `.qi`. 
 EventStore; this capability adds no TUI command, panel, or query API.
 
 See [the interaction contract](docs/interaction-model.md) for projection and rendering boundaries.
+The cross-package timeline and attention decision is
+[ADR 0027](../../design/decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention).
 
 ## Change guidance
 

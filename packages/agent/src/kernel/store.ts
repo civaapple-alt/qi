@@ -1,6 +1,6 @@
 import type { SessionEvent, SessionId } from "@civaapple/qi-protocol";
 import { ConcurrencyError, StateTransitionError } from "./errors.js";
-import { replaySession, type SessionView } from "./projection.js";
+import { applySessionEvent, replaySession, type SessionView } from "./projection.js";
 
 export interface EventStream {
   sessionId: SessionId;
@@ -24,6 +24,7 @@ export interface EventStore {
 
 export class InMemoryEventStore implements EventStore {
   readonly #streams = new Map<SessionId, SessionEvent[]>();
+  readonly #projections = new Map<SessionId, { version: number; view: SessionView }>();
 
   append(sessionId: SessionId, expectedVersion: number, newEvents: readonly SessionEvent[]): SessionView {
     const current = this.#streams.get(sessionId) ?? [];
@@ -32,18 +33,31 @@ export class InMemoryEventStore implements EventStore {
     }
     if (newEvents.length === 0) {
       if (current.length === 0) throw new RangeError("Cannot append an empty batch to a missing Session");
-      return replaySession(current);
+      return this.load(sessionId)!;
     }
 
-    const candidate = [...current, ...structuredClone(newEvents)];
-    const view = replaySession(candidate);
-    if (view.sessionId !== sessionId) {
-      throw new StateTransitionError(
-        "STREAM_SESSION_MISMATCH",
-        `Cannot store events for ${view.sessionId} under stream ${sessionId}`,
-      );
+    const staged = structuredClone(newEvents);
+    let view: SessionView | undefined = current.length === 0
+      ? undefined
+      : this.#projection(sessionId, current);
+    try {
+      for (const event of staged) view = applySessionEvent(view, event);
+      if (!view) throw new StateTransitionError("EMPTY_STREAM", "A Session stream cannot be empty");
+      if (view.sessionId !== sessionId) {
+        throw new StateTransitionError(
+          "STREAM_SESSION_MISMATCH",
+          `Cannot store events for ${view.sessionId} under stream ${sessionId}`,
+        );
+      }
+    } catch (error) {
+      // applySessionEvent mutates a cached projection. The durable stream is
+      // unchanged on failure, so discard the candidate and rebuild on demand.
+      this.#projections.delete(sessionId);
+      throw error;
     }
-    this.#streams.set(sessionId, candidate);
+    current.push(...staged);
+    this.#streams.set(sessionId, current);
+    this.#projections.set(sessionId, { version: current.length, view });
     return view;
   }
 
@@ -61,7 +75,8 @@ export class InMemoryEventStore implements EventStore {
 
   load(sessionId: SessionId): SessionView | undefined {
     const current = this.#streams.get(sessionId);
-    return current ? replaySession(current) : undefined;
+    if (!current) return undefined;
+    return this.#projection(sessionId, current);
   }
 
   listSessions(): SessionSummary[] {
@@ -76,6 +91,14 @@ export class InMemoryEventStore implements EventStore {
         };
       })
       .sort(compareSessionSummary);
+  }
+
+  #projection(sessionId: SessionId, events: readonly SessionEvent[]): SessionView {
+    const cached = this.#projections.get(sessionId);
+    if (cached?.version === events.length) return cached.view;
+    const view = replaySession(events);
+    this.#projections.set(sessionId, { version: events.length, view });
+    return view;
   }
 }
 

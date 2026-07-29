@@ -11,13 +11,16 @@ Reusable Qi-specific terminal presentation and control components built on
 - Render bounded Markdown and Action cards without turning provisional activity into settlement.
 - Wrap wide Markdown table cells (or stack fields on narrow terminals) so later columns are not clipped, and
   keep the latest three display-wrapped provisional model text/reasoning/tool lines visible in the Working strip.
-- Render committed model reasoning as a distinct three-line Thinking block, and render an accepted Formal Plan
+- Keep provisional reasoning in the live strip; render settled reasoning as a one-line, expandable Thinking item,
+  and render an accepted Formal Plan
   as a 200-line transcript preview with its immutable local path instead of treating it as pasted input.
 - Render that same bounded Formal Plan preview before Plan Review choices, so the reviewed document is visible
   before acceptance.
 - Retain confirmed `ask_question` cards with every question and option plus selected, custom-text, and skipped
   answers; durable Action input/output, rather than transient panel state, drives replay.
-- Keep bounded file Diff previews for completed mutations in the active Run's retained eight-Step window, and
+- Group consecutive, same-Step read-only discovery Actions while preserving every durable Action for expansion
+  and History Center inspection.
+- Keep bounded file Diff previews for completed mutations in the current Run, and
   expose bounded process failure evidence instead of hiding it inside the ToolFailure envelope.
 - Provide reusable composer, follow-up queue, selection/form/scroll panels, themes, and layout helpers.
 - Keep Qi-specific control vocabulary separate from CLI startup, credentials, persistence, and process ownership.
@@ -62,12 +65,16 @@ console.log(renderMarkdown("## Qi", 80));
 console.log(statusGlyph("denied"));
 ```
 
-Application authors provide committed events and projections to `TuiPresenter.update()`. Components that
+Application authors provide committed events and projections to `TuiPresenter.update()` for cold start or
+resynchronization, then call `applyCommitted()` for contiguous facts. A `false` result requests one cold
+resynchronization. Components that
 implement the `pi-tui` `Component`/`Focusable` contracts can be mounted in an existing terminal application.
 
 ## Public API
 
 - `TuiPresenter` and projection/render helpers;
+- `TimelineDensity = "compact" | "standard" | "diagnostic"`; the default is `standard`, and
+  `TuiPresenter.density()` / `setDensity()` provide Session-local presentation control;
 - `ComposerComponent`, `FollowUpQueue`, and `FollowUpsComponent`;
 - `ListPanel`, `MultiSelectPanel`, `FormPanel` (text, secret, and terminal-dropdown fields with optional custom
   input), `QuestionPanel`, `ScrollPanel`, `SessionsPanel`, and `PanelHost`;
@@ -75,8 +82,8 @@ implement the `pi-tui` `Component`/`Focusable` contracts can be mounted in an ex
 - Codex-style `update_plan` Todo snapshots in the Action timeline (full ✔/◐/○ lists that flow with the chat
   stream, not a sticky footer); legacy Plan-item Todo projection remains
   replay-only for legacy plans. Failed snapshots include their durable rejection code and message.
-- Collapsed or mid-Run `shell`/`script`/`verify` cards keep the `$ command · duration` header and up to three
-  trailing stdout/stderr lines (more lines stay behind Ctrl+O).
+- Settled successful `shell`/`script`/`verify` cards collapse to `$ command · duration`; expanded or diagnostic
+  views reveal bounded output, while failures retain bounded evidence.
 - command parsing/autocomplete and localization helpers;
 - Markdown, layout, theme, Action-card, Session-list, and repaint helpers.
 
@@ -100,3 +107,4 @@ an isolated TypeScript consumer for every compatibility-sensitive public API cha
 - [ADR 0018](../../design/decisions.md#adr-0018-publish-a-modular-open-source-runtime)
 - [TUI application contract](../../apps/cli/README.md)
 - [Bounded transcript rendering](../../design/decisions.md#adr-0017-bound-tui-transcript-work)
+- [Unified Interaction Timeline](../../design/decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention)

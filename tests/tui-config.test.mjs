@@ -12,10 +12,12 @@ import {
   persistUserLanguage,
   persistUserProviderDefaults,
   persistUserTheme,
+  persistUserTimelineDensity,
   parseTuiCliArguments,
   resolveCapabilities,
   resolveLanguage,
   resolveTheme,
+  resolveTimelineDensity,
 } from "../apps/cli/dist/index.js";
 
 test("user config loads strict provider defaults and persistent capabilities", async () => {
@@ -312,6 +314,36 @@ model = "grok-config"
     const invalid = join(root, "invalid-theme.toml");
     await writeFile(invalid, 'theme = "solarized"\n');
     await assert.rejects(loadUserConfig(invalid), /theme must be one of/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("timeline density defaults to standard and persists under ui without Session facts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-config-density-"));
+  const path = join(root, "config.toml");
+  try {
+    assert.equal(resolveTimelineDensity({ version: 1 }), "standard");
+    await writeFile(path, `
+version = 1
+provider = "xai"
+model = "grok-config"
+
+[ui]
+timeline_density = "compact"
+`);
+    const loaded = await loadUserConfig(path);
+    assert.equal(resolveTimelineDensity(loaded.config), "compact");
+
+    await persistUserTimelineDensity("diagnostic", path);
+    const saved = await loadUserConfig(path);
+    assert.equal(saved.config.ui.timelineDensity, "diagnostic");
+    assert.equal(saved.config.provider, "xai");
+    assert.match(await readFile(path, "utf8"), /\[ui\]\s+timeline_density = "diagnostic"/);
+
+    const invalid = join(root, "invalid-density.toml");
+    await writeFile(invalid, "[ui]\ntimeline_density = \"dense\"\n");
+    await assert.rejects(loadUserConfig(invalid), /timeline_density must be one of/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

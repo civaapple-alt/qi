@@ -73,6 +73,9 @@ provider = "openai"
 model = "gpt-5.4-mini"
 context_window_tokens = 128000
 
+[ui]
+timeline_density = "standard"
+
 [capabilities]
 write = true
 verify = true
@@ -85,6 +88,11 @@ delegate = false
 enabled = true
 auto_accept_project = true
 ```
+
+`ui.timeline_density` accepts `compact`, `standard`, or `diagnostic`. It changes only the local projection:
+no Session event or execution target is written. The rich TTY keeps committed conversation in a bounded
+timeline, provisional Thinking/tool output in a live strip, and older Runs in the searchable `/runs` History
+Center.
 
 Memory is captured only from explicit `/memory` actions or provenance-backed proposals during new Runs; Qi does
 not mine old conversations. Session and Project Memory stay in the current project. Only explicitly confirmed

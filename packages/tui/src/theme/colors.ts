@@ -42,6 +42,18 @@ export interface ColorPalette {
   toolSuccessBg: string;
   /** Tool error background. */
   toolErrorBg: string;
+  /** Semantic body alias. Optional so existing custom palettes remain source-compatible. */
+  body?: string;
+  /** Semantic secondary-information alias. */
+  secondary?: string;
+  /** Semantic least-prominent-information alias. */
+  muted?: string;
+  /** Semantic attention alias. */
+  attention?: string;
+  /** Semantic base surface alias. */
+  surface?: string;
+  /** Semantic raised/running surface alias. */
+  surfaceRaised?: string;
 }
 
 /** Qi dark palette — cool teal primary, not the common purple-AI look. */
@@ -65,6 +77,12 @@ export const darkColors: ColorPalette = {
   toolPendingBg: "#243033",
   toolSuccessBg: "#1F2B24",
   toolErrorBg: "#332222",
+  body: "#E6E6E6",
+  secondary: "#8A8A8A",
+  muted: "#6A6A6A",
+  attention: "#D4A017",
+  surface: "#2A2A2A",
+  surfaceRaised: "#243033",
 };
 
 /** Qi light palette — WCAG AA-ish contrast on white. */
@@ -88,6 +106,12 @@ export const lightColors: ColorPalette = {
   toolPendingBg: "#E8F2F1",
   toolSuccessBg: "#E6F4EA",
   toolErrorBg: "#FCE8E6",
+  body: "#1A1A1A",
+  secondary: "#4A4A4A",
+  muted: "#5F5F5F",
+  attention: "#8A5A00",
+  surface: "#F0F0F0",
+  surfaceRaised: "#E8F2F1",
 };
 
 export type ThemeName = "dark" | "light" | "auto";

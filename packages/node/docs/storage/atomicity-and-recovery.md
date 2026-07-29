@@ -16,6 +16,11 @@ commit
 Any failure rolls back the whole batch. A caller may reload and decide how to handle concurrency, but cannot
 assume a prefix was committed.
 
+The process may retain a projection at the committed stream version. A normal append applies only the new
+events through the Kernel transition function before committing. A version mismatch, validation failure, or
+transaction rollback discards the candidate cache. This cache is never persisted; cold replay remains the
+consistency oracle, and tests require incremental and cold projections to be deeply equal.
+
 ## Restart contract
 
 After closing and reopening SQLite:

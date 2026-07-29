@@ -14,4 +14,5 @@ export * from "./provider.js";
 export * from "./render.js";
 export * from "./session-list.js";
 export * from "./theme/index.js";
+export * from "./timeline/index.js";
 export * from "./tool-renderers.js";

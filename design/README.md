@@ -65,8 +65,9 @@ the six coordinated public packages.
 1. [product vision: 同行、追寻、守望](product-vision.md#5-同行追寻守望)
 2. [system-design §7](system-design.md#7-human-control-and-application-surfaces)
 3. [decisions: human control](decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)
-4. `packages/tui/README.md`
-5. `apps/cli/README.md`
+4. [decisions: bounded interaction timeline](decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention)
+5. `packages/tui/README.md`
+6. `apps/cli/README.md`
 
 ### Extensions
 

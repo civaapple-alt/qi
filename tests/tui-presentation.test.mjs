@@ -7,9 +7,11 @@ import { stripVTControlCharacters } from "node:util";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
 import {
   commandHelp,
+  canAutoOpenAttention,
   FollowUpQueue,
   FollowUpsComponent,
   FormPanel,
+  highestPriorityAttention,
   InteractiveTui,
   ListPanel,
   MultiSelectPanel,
@@ -28,6 +30,7 @@ import {
   renderComposerPlaceholder,
   renderToolCard,
   statusGlyph,
+  Theme,
   TuiPresenter,
   TuiRuntime,
 } from "../apps/cli/dist/index.js";
@@ -79,6 +82,66 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.throws(() => parseSkillInstallCommand("install"), /Usage/);
   assert.deepEqual(parseMountsCommand("add D:/docs"), { mode: "add", argument: "D:/docs" });
   assert.equal(parseTaskStopCommand("stop abc"), "abc");
+});
+
+test("attention policy protects active input and orders Ctrl+G gates", () => {
+  assert.equal(canAutoOpenAttention({
+    panelOpen: false,
+    composerEmpty: true,
+    followUpEditing: false,
+  }), true);
+  assert.equal(canAutoOpenAttention({
+    panelOpen: false,
+    composerEmpty: false,
+    followUpEditing: false,
+  }), false);
+  assert.equal(canAutoOpenAttention({
+    panelOpen: false,
+    composerEmpty: true,
+    followUpEditing: true,
+  }), false);
+  assert.equal(highestPriorityAttention({
+    runQuestion: true,
+    planReview: true,
+    nextRun: true,
+    pathGrant: true,
+  }), "run-question");
+  assert.equal(highestPriorityAttention({
+    runQuestion: false,
+    planReview: true,
+    nextRun: true,
+    pathGrant: true,
+  }), "plan-review");
+});
+
+test("semantic theme aliases fall back for legacy palettes and NO_COLOR rendering", () => {
+  const legacy = {
+    primary: "#3DB8A8",
+    accent: "#6B9BD2",
+    text: "#E6E6E6",
+    textStrong: "#F5F5F5",
+    textDim: "#8A8A8A",
+    textMuted: "#6A6A6A",
+    border: "#555555",
+    borderFocus: "#3DB8A8",
+    success: "#4EC87E",
+    warning: "#D4A017",
+    error: "#E05C5C",
+    diffAdded: "#4EC87E",
+    diffRemoved: "#E05C5C",
+    diffMeta: "#8A8A8A",
+    roleUser: "#E8C47C",
+    userMessageBg: "#2A2A2A",
+    toolPendingBg: "#243033",
+    toolSuccessBg: "#1F2B24",
+    toolErrorBg: "#332222",
+  };
+  const noColor = new Theme("dark", legacy, 0);
+  assert.equal(noColor.fg("body", "正文"), "正文");
+  assert.equal(noColor.fg("attention", "needs input"), "needs input");
+  const basicAnsi = new Theme("dark", legacy, 1).fg("primary", "Qi");
+  assert.match(basicAnsi, /\u001b\[(?:3|9)\dmQi/);
+  assert.doesNotMatch(basicAnsi, /38;2|38;5/);
 });
 
 test("Memory tool has a dedicated lifecycle card", () => {
@@ -442,8 +505,11 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
     const overview = presenter.render().join("\n");
     assert.match(overview, /^Qi  v/m);
     assert.match(overview, /Draft a plan for the feature|Execute Plan item/);
-    assert.match(overview, /Thinking · \d+ chars/);
-    assert.match(overview, /self-contained implementation and verification plan/);
+    assert.match(overview, /Thinking · \d+(?:ms|s) · Ctrl\+O/);
+    assert.doesNotMatch(overview, /self-contained implementation and verification plan/);
+    presenter.setDensity("diagnostic");
+    assert.match(presenter.render().join("\n"), /self-contained implementation and verification plan/);
+    presenter.setDensity("standard");
     assert.match(overview, /Accepted Plan · Feature plan · rev 1/);
     assert.match(overview, /Inspect the workspace before editing/);
     assert.match(overview, /Run the focused script/);
@@ -473,7 +539,7 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
     assert.match(status, /fake\/presentation-v1/);
     assert.match(status, /Agent/);
     assert.match(status, /files/);
-    assert.match(presenter.renderWorking(true).join("\n"), /Running/);
+    assert.match(presenter.renderWorking(true).join("\n"), /◇\s+Waiting/);
 
     presenter.pushInspection("diff");
     const withDiff = presenter.render().join("\n");
@@ -790,7 +856,7 @@ test("chat-only Runs match the Cursor-style compact transcript", () => {
   assert.match(status, /Agent/);
   assert.match(status, /todo-demo · main/);
   assert.doesNotMatch(status, /write\+host execute/);
-  assert.match(presenter.renderWorking(true, 0).join("\n"), /Running\s+Waiting/);
+  assert.match(presenter.renderWorking(true, 0).join("\n"), /◇\s+Waiting/);
 });
 
 test("chat render reuses settled-run blocks and indexes Action events", () => {
@@ -927,7 +993,7 @@ test("chat render reuses settled-run blocks and indexes Action events", () => {
   const second = presenter.render(100).join("\n");
   assert.equal(second, first);
   assert.match(first, /⟦user⟧prompt 1/);
-  assert.match(first, /Edited src\/f12\.ts/);
+  assert.match(first, /edit\s+src\/f12\.ts/);
   assert.match(first, /⟦user⟧keep going/);
   presenter.selectRun("run_12");
   const actions = presenter.historyActionItems();
@@ -935,6 +1001,192 @@ test("chat render reuses settled-run blocks and indexes Action events", () => {
   assert.match(actions[0].description, /src\/f12\.ts/);
   // Indexed propose pass feeds files-changed for the executing Run (live has none).
   assert.doesNotMatch(presenter.formatStatusline(true, 80).join("\n"), /\d+ files/);
+});
+
+test("timeline density groups consecutive read-only exploration and preserves diagnostic detail", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "density",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+    timelineDensity: "standard",
+  });
+  const actor = { kind: "runtime", id: "timeline-test" };
+  const actionSpecs = [
+    ["act_read", "read", { path: "src/a.ts" }],
+    ["act_find", "find", { pattern: "TODO" }],
+    ["act_search", "search", { query: "timeline" }],
+  ];
+  const events = actionSpecs.flatMap(([actionId, toolName, input], index) => [
+    {
+      schemaVersion: 1,
+      eventId: `evt_${actionId}_proposed`,
+      sessionId: "ses_density",
+      sequence: index * 3 + 1,
+      occurredAt: new Date(index * 10).toISOString(),
+      actor,
+      type: "action.proposed",
+      data: {
+        runId: "run_density",
+        stepId: "stp_density",
+        actionId,
+        toolName,
+        effect: "read",
+        input,
+        resources: [],
+      },
+    },
+    {
+      schemaVersion: 1,
+      eventId: `evt_${actionId}_started`,
+      sessionId: "ses_density",
+      sequence: index * 3 + 2,
+      occurredAt: new Date(index * 10 + 1).toISOString(),
+      actor,
+      type: "action.started",
+      data: { runId: "run_density", stepId: "stp_density", actionId },
+    },
+    {
+      schemaVersion: 1,
+      eventId: `evt_${actionId}_completed`,
+      sessionId: "ses_density",
+      sequence: index * 3 + 3,
+      occurredAt: new Date(index * 10 + 2).toISOString(),
+      actor,
+      type: "action.completed",
+      data: { runId: "run_density", stepId: "stp_density", actionId, modelOutput: [] },
+    },
+  ]);
+  const actions = Object.fromEntries(actionSpecs.map(([actionId, toolName]) => [
+    actionId,
+    {
+      actionId,
+      stepId: "stp_density",
+      toolName,
+      effect: "read",
+      status: "completed",
+      resources: [],
+    },
+  ]));
+  const view = {
+    sessionId: "ses_density",
+    createdAt: new Date(0).toISOString(),
+    version: events.length,
+    mode: "agent",
+    runOrder: ["run_density"],
+    runs: {
+      run_density: {
+        runId: "run_density",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "inspect the timeline",
+        stepOrder: ["stp_density"],
+        steps: {
+          stp_density: {
+            stepId: "stp_density",
+            status: "completed",
+            context: { estimatedTokens: 100, budgetTokens: 64_000, includedBlockIds: [], omittedBlockIds: [] },
+            model: { text: "Inspection complete.", reasoning: "First inspect, then compare.", finishReason: "stop" },
+          },
+        },
+        actions,
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "idle" },
+  };
+  presenter.update(events, view);
+  const standard = presenter.render(100).join("\n");
+  assert.match(standard, /Explored 3 actions · read 1 · find 1 · search 1 · Ctrl\+O/);
+  assert.match(standard, /Thinking ·/);
+
+  presenter.setDensity("diagnostic");
+  const diagnostic = presenter.render(100).join("\n");
+  assert.equal(presenter.density(), "diagnostic");
+  assert.match(diagnostic, /First inspect, then compare/);
+  assert.match(diagnostic, /src\/a\.ts|TODO|timeline/);
+
+  presenter.setDensity("compact");
+  assert.doesNotMatch(presenter.render(100).join("\n"), /Thinking ·/);
+});
+
+test("applyCommitted accepts contiguous facts and requests resync for gaps", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "incremental",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const view = {
+    sessionId: "ses_incremental",
+    createdAt: new Date(0).toISOString(),
+    version: 2,
+    mode: "agent",
+    runOrder: [],
+    runs: {},
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "idle" },
+  };
+  const first = {
+    schemaVersion: 1,
+    eventId: "evt_incremental_1",
+    sessionId: "ses_incremental",
+    sequence: 1,
+    occurredAt: new Date(0).toISOString(),
+    actor: { kind: "runtime", id: "test" },
+    type: "session.created",
+    data: { mode: "agent" },
+  };
+  const second = {
+    schemaVersion: 1,
+    eventId: "evt_incremental_2",
+    sessionId: "ses_incremental",
+    sequence: 2,
+    occurredAt: new Date(1).toISOString(),
+    actor: { kind: "runtime", id: "test" },
+    type: "session.mode.changed",
+    data: { mode: "agent" },
+  };
+  assert.equal(presenter.applyCommitted(first, view), true);
+  assert.equal(presenter.applyCommitted(second, view), true);
+  assert.equal(presenter.applyCommitted({ ...second, sequence: 4, eventId: "evt_incremental_4" }, view), false);
 });
 
 test("eventAffectsTranscript classifies chrome-only Session facts", () => {
@@ -1128,6 +1380,13 @@ test("active Run folds older Steps but keeps bounded edit diffs in the retained 
       });
     }
   }
+  events.push({
+    type: "action.started",
+    sequence: sequence++,
+    occurredAt: new Date(0).toISOString(),
+    actor,
+    data: { runId, stepId: "stp_12", actionId: "act_12", leaseId: "lease_12" },
+  });
   presenter.update(events, {
     sessionId: "ses_fold",
     createdAt: new Date(0).toISOString(),
@@ -1243,6 +1502,8 @@ test("active Run folds older Steps but keeps bounded edit diffs in the retained 
   assert.doesNotMatch(boundedWorking.join("\n"), /first/);
   assert.match(boundedWorking[1], /second/);
   assert.match(boundedWorking[3], /fourth/);
+  assert.match(presenter.renderWorking(true, 2_001, 80)[0], /2\.0s/);
+  assert.match(presenter.renderWorking(true, 30_001, 80)[0], /still running/);
 });
 
 test("line-mode panel snapshots append after the transcript without interleaving", () => {
@@ -2346,10 +2607,7 @@ test("shell cards use compact $ command · duration grammar", () => {
   });
   const text = collapsed.join("\n");
   assert.match(text, /\$ git status 6\.1s/);
-  assert.match(text, /1 output lines hidden · Ctrl\+O/);
-  assert.match(text, /line2/);
-  assert.match(text, /line3/);
-  assert.match(text, /nothing to commit/);
+  assert.doesNotMatch(text, /output lines hidden|line2|line3|nothing to commit/);
   assert.doesNotMatch(text, /^  line1$/m);
   assert.doesNotMatch(text, /cwd /);
 
@@ -2362,8 +2620,8 @@ test("shell cards use compact $ command · duration grammar", () => {
     output: { exitCode: 0, stdout: "line1\nline2\nline3\nnothing to commit\n" },
   }, { summaryOnly: true });
   assert.match(summary[0] ?? "", /\$ git status 6\.1s/);
-  assert.equal(summary.length, 4);
-  assert.match(summary.join("\n"), /line2[\s\S]*line3[\s\S]*nothing to commit/);
+  assert.equal(summary.length, 1);
+  assert.doesNotMatch(summary.join("\n"), /line2|line3|nothing to commit/);
 });
 
 test("failed shell cards unwrap bounded process evidence from the ToolFailure envelope", () => {
@@ -2662,6 +2920,29 @@ test("ListPanel Enter selects and Esc closes without inventing Session state", (
   assert.deepEqual(selected, ["plan"]);
   panel.handleInput("\u001b");
   assert.equal(closed, true);
+});
+
+test("History-style ListPanel searches bounded labels and status descriptions", () => {
+  let closed = false;
+  const panel = new ListPanel({
+    title: "History Center",
+    searchable: true,
+    maxVisible: 5,
+    items: [
+      { id: "run_ok", label: "Run 1", description: "completed · read" },
+      { id: "run_failed", label: "Run 2", description: "failed · shell" },
+      { id: "run_denied", label: "Run 3", description: "denied · edit" },
+    ],
+    onClose: () => { closed = true; },
+    onSelect: () => {},
+  });
+  for (const character of "failed") panel.handleInput(character);
+  const filtered = stripVTControlCharacters(panel.render(60).join("\n"));
+  assert.match(filtered, /Run 2/);
+  assert.doesNotMatch(filtered, /Run 1|Run 3/);
+  panel.handleInput("\u001b");
+  assert.equal(closed, false, "first Esc clears search");
+  assert.match(stripVTControlCharacters(panel.render(60).join("\n")), /Run 1/);
 });
 
 test("FormPanel dropdowns support dependent defaults and a final custom text option", () => {

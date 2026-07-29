@@ -10,15 +10,18 @@ import {
   type QiProvider,
 } from "./provider.js";
 import type { ThemeName } from "./theme/colors.js";
+import type { TimelineDensity } from "./presenter.js";
 
 const userConfigLimitBytes = 64 * 1024;
 const shellProfileIds = ["direct", "pwsh", "cmd", "bash"] as const;
 const localeIds = ["zh", "en"] as const;
 const themeIds = ["dark", "light", "auto"] as const;
+const timelineDensityIds = ["compact", "standard", "diagnostic"] as const;
 
 export type ConfigShellProfileId = (typeof shellProfileIds)[number];
 export type ConfigLanguage = Locale;
 export type ConfigTheme = ThemeName;
+export type ConfigTimelineDensity = TimelineDensity;
 
 export interface QiCapabilityConfig {
   readonly write?: boolean;
@@ -37,6 +40,10 @@ export interface QiShellConfig {
 export interface QiMemoryConfig {
   readonly enabled?: boolean;
   readonly autoAcceptProject?: boolean;
+}
+
+export interface QiUiConfig {
+  readonly timelineDensity?: ConfigTimelineDensity;
 }
 
 /** Non-secret OpenAI-compatible endpoint catalog entry (secrets stay sealed). */
@@ -62,6 +69,7 @@ export interface QiUserConfig {
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
   readonly memory?: QiMemoryConfig;
+  readonly ui?: QiUiConfig;
 }
 
 export interface LoadedUserConfig {
@@ -305,6 +313,25 @@ export function resolveTheme(config: QiUserConfig | undefined): ConfigTheme {
   return config?.theme ?? "auto";
 }
 
+export function resolveTimelineDensity(config: QiUserConfig | undefined): ConfigTimelineDensity {
+  return config?.ui?.timelineDensity ?? "standard";
+}
+
+export async function persistUserTimelineDensity(
+  timelineDensity: ConfigTimelineDensity,
+  path = defaultUserConfigPath(),
+): Promise<LoadedUserConfig> {
+  const absolute = resolve(path);
+  const loaded = await loadUserConfig(absolute);
+  const next: QiUserConfig = {
+    ...loaded.config,
+    version: 1,
+    ui: { ...loaded.config.ui, timelineDensity },
+  };
+  await saveUserConfig(absolute, next);
+  return { path: absolute, exists: true, config: next };
+}
+
 export async function saveUserConfig(path: string, config: QiUserConfig): Promise<void> {
   const absolute = resolve(path);
   const encodedCompatible = config.compatible?.map((entry) => ({
@@ -346,6 +373,15 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
                 : { auto_accept_project: config.memory.autoAcceptProject }),
             },
           }),
+      ...(config.ui === undefined
+        ? {}
+        : {
+            ui: {
+              ...(config.ui.timelineDensity === undefined
+                ? {}
+                : { timeline_density: config.ui.timelineDensity }),
+            },
+          }),
     },
     absolute,
   );
@@ -383,6 +419,15 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
             ...(config.memory.autoAcceptProject === undefined
               ? {}
               : { auto_accept_project: config.memory.autoAcceptProject }),
+          },
+        }),
+    ...(config.ui === undefined
+      ? {}
+      : {
+          ui: {
+            ...(config.ui.timelineDensity === undefined
+              ? {}
+              : { timeline_density: config.ui.timelineDensity }),
           },
         }),
   });
@@ -440,6 +485,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "capabilities",
     "shell",
     "memory",
+    "ui",
   ], path);
   const version = root.version ?? 1;
   if (version !== 1) throw new TypeError(`${path}: version must be 1`);
@@ -515,6 +561,16 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
       ...(autoAcceptProject === undefined ? {} : { autoAcceptProject }),
     };
   }
+  let ui: QiUiConfig | undefined;
+  if (root.ui !== undefined) {
+    const table = requireTable(root.ui, `${path}: ui`);
+    assertOnlyKeys(table, ["timeline_density"], `${path}: ui`);
+    const timelineDensity = optionalTimelineDensityField(
+      table.timeline_density,
+      `${path}: ui.timeline_density`,
+    );
+    ui = timelineDensity === undefined ? {} : { timelineDensity };
+  }
   return {
     version: 1,
     ...(language === undefined ? {} : { language }),
@@ -530,6 +586,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(shell === undefined ? {} : { shell }),
     ...(memory === undefined ? {} : { memory }),
+    ...(ui === undefined ? {} : { ui }),
   };
 }
 
@@ -608,6 +665,17 @@ function booleanField(
   if (value === undefined) return {};
   if (typeof value !== "boolean") throw new TypeError(`${path}: capabilities.${name} must be boolean`);
   return { [name]: value };
+}
+
+function optionalTimelineDensityField(
+  value: unknown,
+  label: string,
+): ConfigTimelineDensity | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !(timelineDensityIds as readonly string[]).includes(value)) {
+    throw new TypeError(`${label} must be one of ${timelineDensityIds.join(", ")}`);
+  }
+  return value as ConfigTimelineDensity;
 }
 
 function optionalBooleanField(value: unknown, label: string): boolean | undefined {

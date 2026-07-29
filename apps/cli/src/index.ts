@@ -4,6 +4,7 @@ export * from "./follow-ups.js";
 export * from "./follow-ups-view.js";
 export * from "./auth.js";
 export * from "./auth-model-port.js";
+export * from "./attention.js";
 export * from "./cli.js";
 export * from "./commands.js";
 export * from "./brand.js";

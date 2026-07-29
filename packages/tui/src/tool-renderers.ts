@@ -1,9 +1,12 @@
 import type { ActionStatus } from "@civaapple/qi-agent/kernel";
 import { theme } from "./theme/index.js";
+import { DEFAULT_TIMELINE_DENSITY } from "./timeline/policy.js";
+import type { TimelineDensity } from "./timeline/types.js";
 
 export interface ToolCardModel {
   actionId: string;
   toolName: string;
+  effect?: string;
   status: ActionStatus;
   input?: unknown;
   output?: Record<string, unknown>;
@@ -16,6 +19,7 @@ export interface ToolCardModel {
 export interface ToolCardOptions {
   expanded?: boolean;
   outputLines?: number;
+  density?: TimelineDensity;
   /** One-line header only — used for collapsed prior Steps inside a long active Run. */
   summaryOnly?: boolean;
 }
@@ -120,10 +124,11 @@ function renderProcess(model: ToolCardModel, options: ToolCardOptions): string[]
   ].filter(Boolean).join(" ");
   if (options.summaryOnly) {
     const lines = [title];
-    appendProcessTail(lines, streamLines, 3);
+    if (model.status !== "completed") appendProcessTail(lines, streamLines, 3);
     return lines;
   }
   const lines = [title];
+  const density = options.density ?? DEFAULT_TIMELINE_DENSITY;
 
   if (model.status === "running" || model.liveTail?.text) {
     const live = model.liveTail?.text
@@ -132,7 +137,11 @@ function renderProcess(model: ToolCardModel, options: ToolCardOptions): string[]
     for (const line of live) lines.push(`  · ${oneLine(line, 110)}`);
   } else {
     if (exitSummary && model.status !== "completed") lines.push(`  ${exitSummary}`);
-    if (!options.expanded && streamLines.length > 0) {
+    if (
+      !options.expanded
+      && streamLines.length > 0
+      && (model.status !== "completed" || density === "diagnostic")
+    ) {
       const visible = Math.min(3, streamLines.length);
       const hidden = Math.max(0, streamLines.length - visible);
       if (hidden > 0) lines.push(`  … ${hidden} output lines hidden · Ctrl+O to expand`);

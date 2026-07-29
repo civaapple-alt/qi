@@ -143,6 +143,18 @@ test("Action events cannot be reassigned to a different Step", () => {
   );
 });
 
+test("in-memory incremental projection is exactly equal to a cold replay", () => {
+  const store = new InMemoryEventStore();
+  let version = 0;
+  let incremental;
+  for (const event of fixture) {
+    incremental = store.append("ses_golden_001", version, [event]);
+    version += 1;
+    assert.deepEqual(incremental, replaySession(fixture.slice(0, version)));
+  }
+  assert.deepEqual(store.load("ses_golden_001"), replaySession(fixture));
+});
+
 test("edit freshness rebase is durable before authority and requires a completed same-resource edit", () => {
   const shaA = "a".repeat(64);
   const shaB = "b".repeat(64);

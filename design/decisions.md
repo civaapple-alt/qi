@@ -186,6 +186,7 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 - Provisional output occupies one bounded live region; model reasoning uses a three-display-line tail there.
 - Settled Runs and Steps reuse width/state-keyed formatting caches.
 - Active Runs show a bounded recent-Step window; older Steps fold reversibly.
+- The richer hierarchy, density, attention, and long-Session contract is defined by ADR-0027.
 - A Formal Plan remains complete in review and Executor context, but both TUI projections render at most 200
   terminal lines and always name the immutable local document path. Longer plans also end with a Collapsed
   notice; the transcript does not add a second expansion state for content that can be opened directly.
@@ -351,6 +352,42 @@ improving the requested task.
   new model context/output and diagnosed by extraction. Tests must prove the allowlisted disclosure shape, absence
   of internal IDs/counters, deterministic omission/accounting, and that details remain available only through
   explicit introspection.
+
+## ADR-0027: project one bounded interaction timeline with protected human attention
+
+Pressure: a long-lived Session can contain hundreds of Runs and thousands of committed Actions plus high-rate
+provisional output. Rendering every fact with equal visual weight obscures user intent, changes, verification,
+risks, and handoffs; replaying the complete stream on every append or paint also makes long Sessions progressively
+less responsive.
+
+- The terminal has three regions: a committed同行 timeline, one bounded provisional Working region, and a local
+  control region. Only committed Session facts enter the timeline. Provisional model/tool/task output remains
+  redacted, bounded, and non-evidentiary.
+- Timeline density is local presentation policy: `compact | standard | diagnostic`, default `standard`. It may be
+  persisted as a user preference or overridden for one Session without writing a Session event.
+- Consecutive known read-only discovery Actions in one Step may project as one reversible activity group. Every
+  durable Action and distinct settlement remains inspectable; failed, denied, cancelled, indeterminate, parked,
+  and lost outcomes cannot be hidden by a successful aggregate.
+- The standard timeline prioritizes user messages, committed Qi replies, mutations, verification, decisions,
+  risks, and handoffs. Settled reasoning becomes a one-line expandable record; successful finite process and
+  discovery detail collapses; exceptions retain bounded evidence.
+- The main transcript uses a density-specific recent-Run window plus a rendered-line ceiling. Older Runs remain
+  available through a searchable, observational History Center. Selection never changes the executing Run.
+- Attention controls are focus-safe. A blocking gate may open automatically only when the composer is empty and
+  no follow-up edit is active; otherwise it becomes a persistent attention notice opened explicitly by the user.
+- UI timing never invents Runtime state. Elapsed/still-running labels are local projections of committed start
+  time plus the current clock. Qi does not label a later Action as a retry without a durable relation and never
+  recommends automatic retry for an indeterminate effect.
+- Append validation and hot presentation use incremental in-process projections. Cold start, cache invalidation,
+  version mismatch, and restart still rebuild from the append-only stream; no projection cache is persisted or
+  promoted to truth.
+- Compatibility: Session schemas and database formats do not change. `TuiPresenter.update()` remains the full
+  resynchronization API; additive incremental and density APIs preserve existing embedders. Non-TTY output uses
+  the same bounded standard projection without animation.
+- Required evidence covers replay parity after incremental append, rollback/cache invalidation, all density and
+  settlement states, focus protection, CJK/narrow/no-color rendering, bounded caches, and a fixed 500-Run stress
+  fixture. Rejected alternatives are an unbounded transcript, a second UI state machine, inferred retries,
+  modal focus stealing, and hiding all tool facts behind an opaque summary.
 
 ## Changing a decision
 

@@ -4,6 +4,7 @@ import { parseSessionEvent } from "@civaapple/qi-protocol";
 import {
   ConcurrencyError,
   StateTransitionError,
+  applySessionEvent,
   replaySession,
   type EventStore,
   type EventStream,
@@ -32,6 +33,7 @@ export interface SqliteEventStoreOptions {
 
 export class SqliteEventStore implements EventStore {
   readonly #database: DatabaseSync;
+  readonly #projections = new Map<SessionId, { version: number; view: SessionView }>();
   #closed = false;
 
   constructor(path: string, options: SqliteEventStoreOptions = {}) {
@@ -75,19 +77,22 @@ export class SqliteEventStore implements EventStore {
       const actualVersion = row?.version ?? 0;
 
       if (actualVersion !== expectedVersion) {
+        this.#projections.delete(sessionId);
         throw new ConcurrencyError(expectedVersion, actualVersion);
       }
       if (newEvents.length === 0) {
         if (!row) throw new RangeError("Cannot append an empty batch to a missing Session");
-        const existing = this.#readEvents(sessionId, 0);
-        const view = replaySession(existing);
+        const view = this.#projection(sessionId, actualVersion);
         this.#database.exec("COMMIT");
         return view;
       }
 
-      const current = this.#readEvents(sessionId, 0);
-      const candidate = [...current, ...structuredClone(newEvents)];
-      const view = replaySession(candidate);
+      const staged = structuredClone(newEvents);
+      let view = actualVersion === 0
+        ? undefined
+        : this.#projection(sessionId, actualVersion);
+      for (const event of staged) view = applySessionEvent(view, event);
+      if (!view) throw new StateTransitionError("EMPTY_STREAM", "A Session stream cannot be empty");
       if (view.sessionId !== sessionId) {
         throw new StateTransitionError(
           "STREAM_SESSION_MISMATCH",
@@ -103,17 +108,21 @@ export class SqliteEventStore implements EventStore {
         INSERT INTO session_events (session_id, sequence, event_id, event_type, event_json)
         VALUES (?, ?, ?, ?, ?)
       `);
-      for (const event of newEvents) {
+      for (const event of staged) {
         insert.run(sessionId, event.sequence, event.eventId, event.type, JSON.stringify(event));
       }
 
       this.#database
         .prepare("UPDATE session_streams SET version = ? WHERE session_id = ?")
-        .run(candidate.length, sessionId);
+        .run(actualVersion + staged.length, sessionId);
       this.#database.exec("COMMIT");
+      this.#projections.set(sessionId, { version: actualVersion + staged.length, view });
       return view;
     } catch (error) {
       this.#database.exec("ROLLBACK");
+      // A candidate projection may have been mutated before SQLite rejected the
+      // batch. Never reuse it after a failed durable append.
+      this.#projections.delete(sessionId);
       throw error;
     }
   }
@@ -134,8 +143,12 @@ export class SqliteEventStore implements EventStore {
   }
 
   load(sessionId: SessionId): SessionView | undefined {
-    const stream = this.read(sessionId);
-    return stream.version === 0 ? undefined : replaySession(stream.events);
+    this.#assertOpen();
+    const row = this.#database
+      .prepare("SELECT version FROM session_streams WHERE session_id = ?")
+      .get(sessionId) as VersionRow | undefined;
+    if (!row || row.version === 0) return undefined;
+    return this.#projection(sessionId, row.version);
   }
 
   listSessions(): SessionSummary[] {
@@ -162,6 +175,7 @@ export class SqliteEventStore implements EventStore {
 
   close(): void {
     if (this.#closed) return;
+    this.#projections.clear();
     this.#database.close();
     this.#closed = true;
   }
@@ -173,6 +187,14 @@ export class SqliteEventStore implements EventStore {
       )
       .all(sessionId, afterVersion) as unknown as EventRow[];
     return rows.map((row) => parseSessionEvent(JSON.parse(row.event_json)));
+  }
+
+  #projection(sessionId: SessionId, version: number): SessionView {
+    const cached = this.#projections.get(sessionId);
+    if (cached?.version === version) return cached.view;
+    const view = replaySession(this.#readEvents(sessionId, 0));
+    this.#projections.set(sessionId, { version, view });
+    return view;
   }
 
   #assertOpen(): void {

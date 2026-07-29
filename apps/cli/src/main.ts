@@ -192,7 +192,11 @@ async function main(): Promise<void> {
     onActivity: (activity) => activityConsumer(activity),
   });
 
-  presenter = new TuiPresenter(await launchInfo(options, runtime, authStatus.authStatus));
+  presenter = new TuiPresenter(await launchInfo(
+    { ...options, timelineDensity: "standard" },
+    runtime,
+    authStatus.authStatus,
+  ));
   presenter.update(runtime.events(), runtime.view());
   presenter.setSkills(runtime.skillCatalog());
 
@@ -773,6 +777,7 @@ async function launchInfo(
     shell: runtime.shellProfiles,
     language: options.language,
     theme: options.theme,
+    timelineDensity: options.timelineDensity,
     contextWindowTokens: options.contextWindowTokens,
     contextBudgetTokens: contextBudgetFromWindow(options.contextWindowTokens, options.outputReserveTokens),
     outputReserveTokens: options.outputReserveTokens,

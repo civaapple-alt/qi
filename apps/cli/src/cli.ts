@@ -1,7 +1,14 @@
 import { resolve } from "node:path";
 import { providerModelContextTokens } from "@civaapple/qi-ai";
 import { SessionIdSchema, assertSchema, type SessionId } from "@civaapple/qi-protocol";
-import { defaultUserConfigPath, loadUserConfig, resolveLanguage, resolveTheme, type CapabilityOverrides } from "./config.js";
+import {
+  defaultUserConfigPath,
+  loadUserConfig,
+  resolveLanguage,
+  resolveTheme,
+  resolveTimelineDensity,
+  type CapabilityOverrides,
+} from "./config.js";
 import { defaultSessionDataRoot } from "./paths.js";
 import {
   assertMountPathAllowed,
@@ -44,6 +51,7 @@ export interface TuiCliOptions {
   shell?: import("./config.js").QiShellConfig;
   language: import("./i18n.js").Locale;
   theme: import("./theme/colors.js").ThemeName;
+  timelineDensity: import("./presenter.js").TimelineDensity;
   contextWindowTokens: number;
   /** True only for an explicit user `context_window_tokens`; model switches must otherwise refresh the window. */
   contextWindowTokensOverride: boolean;
@@ -209,6 +217,7 @@ export async function parseTuiCliArguments(
       ...(values.has("--max-steps") ? { maxStepsOverride: maxSteps } : {}),
       language: resolveLanguage(loaded.config),
       theme: resolveTheme(loaded.config),
+      timelineDensity: resolveTimelineDensity(loaded.config),
       ...capabilities,
       memoryEnabled: loaded.config.memory?.enabled ?? true,
       memoryAutoAcceptProject: loaded.config.memory?.autoAcceptProject ?? true,

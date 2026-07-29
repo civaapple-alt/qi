@@ -19,6 +19,7 @@ export {
   openSkillsHubPanel,
   openTasksHubPanel,
   openThemePanel,
+  openTimelineDensityPanel,
   openVerifySetupPanel,
   CAPABILITY_IDS,
   capabilityIdsFromLaunchLabels,

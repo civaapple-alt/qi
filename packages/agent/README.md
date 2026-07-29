@@ -25,6 +25,9 @@ npm install @civaapple/qi-agent @civaapple/qi-ai @civaapple/qi-protocol
 `@civaapple/qi-protocol` defines durable event facts. `agent/kernel` validates transitions and rebuilds
 projections. `agent/loop` produces events and persists authority plus `ActionStarted` before executor entry.
 Concrete SQLite storage and SSE transport belong to `@civaapple/qi-node`.
+The portable in-memory EventStore keeps a process-local incremental projection after cold replay. Append
+validates each new fact with the same `applySessionEvent` transition function; any failed candidate discards the
+cache, while the append-only stream remains authoritative and rebuildable.
 
 Memory is a portable policy/state-machine boundary: `MemoryController` validates provenance, batches candidate
 and lifecycle facts, requires a user for User/sensitive/relational claims, and exposes only optional

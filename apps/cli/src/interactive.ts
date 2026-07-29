@@ -17,6 +17,7 @@ import { nextSessionMode, type RuntimeActivity, type SessionMode } from "@civaap
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import type { AuthSession, AuthSessionStatus } from "./auth.js";
 import { parseLoginCommand } from "./auth.js";
+import { canAutoOpenAttention, highestPriorityAttention } from "./attention.js";
 import {
   commandHelp,
   parseMountsCommand,
@@ -27,7 +28,16 @@ import {
   tuiCommands,
   type TuiPanel,
 } from "./commands.js";
-import { defaultUserConfigPath, persistUserLanguage, persistUserTheme, loadUserConfig, findCompatibleEndpoint, removeCompatibleEndpoint, type QiCapabilityConfig } from "./config.js";
+import {
+  defaultUserConfigPath,
+  persistUserLanguage,
+  persistUserTheme,
+  persistUserTimelineDensity,
+  loadUserConfig,
+  findCompatibleEndpoint,
+  removeCompatibleEndpoint,
+  type QiCapabilityConfig,
+} from "./config.js";
 import { ComposerComponent } from "./composer.js";
 import { FollowUpQueue } from "./follow-ups.js";
 import { FollowUpsComponent } from "./follow-ups-view.js";
@@ -183,6 +193,10 @@ export class InteractiveTui {
         }
         return undefined;
       }
+      if (matchesKey(data, "ctrl+g")) {
+        this.#openPendingAttention();
+        return { consume: true };
+      }
       if (matchesKey(data, "ctrl+o")) {
         this.#presenter.setNotice(this.#presenter.toggleExpand());
         this.#render();
@@ -267,7 +281,10 @@ export class InteractiveTui {
       const path = extractGrantPath(event.data.modelOutput);
       if (path) this.#queuePathGrant(path);
     }
-    this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+    const view = this.#runtime.view();
+    if (!this.#presenter.applyCommitted(event, view)) {
+      this.#presenter.update(this.#runtime.events(), view);
+    }
     if (event.type === "run.question.asked") this.#maybeOfferRunQuestion();
     this.#maybeOfferPathGrant();
     // Authority / safety / context.compiled update Working strip only — keep the transcript cached.
@@ -519,6 +536,54 @@ export class InteractiveTui {
     this.#maybeOfferPathGrant();
   }
 
+  #canAutoOpenGate(): boolean {
+    return canAutoOpenAttention({
+      panelOpen: this.#panels.open,
+      composerEmpty: this.#editor.getText().length === 0,
+      followUpEditing: this.#followUps.editing,
+    });
+  }
+
+  #deferGate(label: string): void {
+    this.#presenter.setNotice(`${label} · Ctrl+G`, "run");
+    this.#renderChrome();
+  }
+
+  /** Open the highest-priority durable gate without changing the execution target. */
+  #openPendingAttention(): void {
+    if (this.#panels.open) return;
+    const view = this.#runtime.view();
+    const run = view?.currentRunId ? view.runs[view.currentRunId] : undefined;
+    const questionSetId = run?.pendingQuestionSetId;
+    const questionSet = questionSetId ? run?.questions[questionSetId] : undefined;
+    const gate = highestPriorityAttention({
+      runQuestion: Boolean(questionSetId && questionSet?.status === "pending"),
+      planReview: view?.pendingReview?.status === "pending",
+      nextRun: view?.pendingQuestion?.status === "pending" && view.pendingQuestion.kind === "next_run",
+      pathGrant: this.#pendingPathGrants.length > 0,
+    });
+    if (gate === "run-question" && questionSetId) {
+      this.#openRunQuestionPanel(questionSetId);
+      return;
+    }
+    if (gate === "plan-review") {
+      this.#openPlanReviewPanel();
+      return;
+    }
+    if (gate === "next-run") {
+      this.#openNextRunPanel();
+      return;
+    }
+    const path = this.#pendingPathGrants[0];
+    if (gate === "path-grant" && path) {
+      this.#pathGrantKey = path;
+      this.#openPathGrantPanel(path);
+      return;
+    }
+    this.#presenter.setNotice("No pending question, review, or permission request.");
+    this.#renderChrome();
+  }
+
   #queuePathGrant(path: string): void {
     const absolute = resolve(grantDirectory(path));
     if (this.#runtime.mounts().some((mount) => resolve(mount.path) === absolute)) return;
@@ -534,6 +599,10 @@ export class InteractiveTui {
       return;
     }
     if (this.#pathGrantKey === next) return;
+    if (!this.#canAutoOpenGate()) {
+      this.#deferGate("Directory permission needs your attention");
+      return;
+    }
     this.#pathGrantKey = next;
     this.#openPathGrantPanel(next);
   }
@@ -600,6 +669,10 @@ export class InteractiveTui {
     if (this.#runtime.active || this.#active.size > 0 || this.#panels.open) return;
     const key = `${pending.planId}:${pending.revision}`;
     if (this.#planReviewKey === key) return;
+    if (!this.#canAutoOpenGate()) {
+      this.#deferGate("Plan Review needs your attention");
+      return;
+    }
     this.#planReviewKey = key;
     this.#openPlanReviewPanel();
   }
@@ -612,6 +685,10 @@ export class InteractiveTui {
     }
     if (this.#runtime.active || this.#active.size > 0 || this.#panels.open) return;
     if (this.#nextRunKey === pending.questionId) return;
+    if (!this.#canAutoOpenGate()) {
+      this.#deferGate("Next Run needs your attention");
+      return;
+    }
     this.#nextRunKey = pending.questionId;
     this.#openNextRunPanel();
   }
@@ -1097,6 +1174,21 @@ export class InteractiveTui {
       changeLocale: (locale) => this.#changeLocale(locale),
       theme: () => this.#themePreference,
       changeTheme: (name) => this.#changeTheme(name),
+      density: () => this.#presenter.density(),
+      changeDensity: (density, persist) => {
+        this.#presenter.setDensity(density);
+        this.#render();
+        if (!persist) return;
+        const configPath = this.#presenter.launch.configPath ?? defaultUserConfigPath();
+        this.#startManagementTask(async () => {
+          await persistUserTimelineDensity(density, configPath);
+          this.#presenter.setNotice(
+            this.#presenter.locale() === "zh"
+              ? `时间线密度已保存：${density}`
+              : `Timeline density saved: ${density}`,
+          );
+        }, "Timeline density");
+      },
       mode: () => this.#runtime.mode(),
       changeMode: (mode) => {
         try {
@@ -1415,6 +1507,20 @@ export class InteractiveTui {
       return;
     }
     if (this.#runQuestionKey === questionSetId || this.#panels.open) return;
+    if (!this.#canAutoOpenGate()) {
+      this.#deferGate("Run Question needs your attention");
+      return;
+    }
+    this.#openRunQuestionPanel(questionSetId);
+  }
+
+  #openRunQuestionPanel(
+    questionSetId: import("@civaapple/qi-protocol").QuestionId,
+  ): void {
+    const view = this.#runtime.view();
+    const run = view?.currentRunId ? view.runs[view.currentRunId] : undefined;
+    const questionSet = run?.questions[questionSetId];
+    if (!questionSet || questionSet.status !== "pending") return;
     this.#runQuestionKey = questionSetId;
     this.#panels.push(new QuestionPanel({
       questions: questionSet.questions,

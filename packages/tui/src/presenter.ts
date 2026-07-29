@@ -13,6 +13,14 @@ import { defaultLocale, t, type Locale } from "./i18n.js";
 import { shortenPath, splitKeepRight, truncateToWidth, visibleWidth } from "./layout.js";
 import { renderMarkdown } from "./markdown.js";
 import { formatProviderLabel } from "./provider.js";
+import {
+  TIMELINE_RENDERED_LINE_LIMIT,
+  normalizeTimelineDensity,
+  recentRunLimit,
+} from "./timeline/policy.js";
+import { discoveryGroupExceptional, groupTimelineActions } from "./timeline/grouping.js";
+import { createTimelineRendererRegistry } from "./timeline/renderer-registry.js";
+import type { TimelineDensity } from "./timeline/types.js";
 import { renderToolCard, shouldExpandByDefault, statusGlyph, type ToolCardModel } from "./tool-renderers.js";
 
 export interface ShellProfileSnapshot {
@@ -52,6 +60,7 @@ export interface TuiLaunchInfo {
   readonly shell?: ShellProfileSnapshot;
   readonly language?: Locale;
   readonly theme?: import("./theme/colors.js").ThemeName;
+  readonly timelineDensity?: TimelineDensity;
   readonly contextWindowTokens: number;
   readonly contextBudgetTokens: number;
   readonly outputReserveTokens: number;
@@ -124,9 +133,10 @@ const FORMAL_PLAN_MAX_RENDERED_LINES = 200;
 
 export class TuiPresenter {
   launch: TuiLaunchInfo;
-  #events: readonly SessionEvent[] = [];
+  #events: SessionEvent[] = [];
   #view: SessionView | undefined;
   #actionIndex: ActionIndex = emptyActionIndex();
+  readonly #timelineRenderers = createTimelineRendererRegistry();
   #runChatCache = new Map<string, { key: string; lines: string[] }>();
   #stepChatCache = new Map<string, { key: string; lines: string[] }>();
   #panel: TuiPanel = "overview";
@@ -150,10 +160,12 @@ export class TuiPresenter {
   #width = 120;
   #childViewLookup: ((childSessionId: string) => SessionView | undefined) | undefined;
   #locale: Locale;
+  #density: TimelineDensity;
 
   constructor(launch: TuiLaunchInfo) {
     this.launch = launch;
     this.#locale = launch.language ?? defaultLocale();
+    this.#density = normalizeTimelineDensity(launch.timelineDensity);
   }
 
   locale(): Locale {
@@ -163,6 +175,17 @@ export class TuiPresenter {
   setLocale(locale: Locale): void {
     this.#locale = locale;
     this.launch = { ...this.launch, language: locale };
+  }
+
+  density(): TimelineDensity {
+    return this.#density;
+  }
+
+  setDensity(density: TimelineDensity): void {
+    this.#density = normalizeTimelineDensity(density);
+    this.launch = { ...this.launch, timelineDensity: this.#density };
+    this.#runChatCache.clear();
+    this.#stepChatCache.clear();
   }
 
   /** Refresh auth/provider launch fields after `/login` / logout. */
@@ -204,7 +227,7 @@ export class TuiPresenter {
   }
 
   update(events: readonly SessionEvent[], view: SessionView | undefined): void {
-    this.#events = events;
+    this.#events = [...events];
     this.#view = view;
     this.#actionIndex = buildActionIndex(events);
     for (const [actionId] of this.#actionActivity) {
@@ -217,6 +240,43 @@ export class TuiPresenter {
       const step = view && Object.values(view.runs).map((run) => run.steps[stepId]).find(Boolean);
       if (!step || step.model) this.#modelActivity.delete(stepId);
     }
+  }
+
+  /**
+   * Apply one newly committed parent-Session fact without rescanning history.
+   * Returns false when the caller must resynchronise with update().
+   */
+  applyCommitted(event: SessionEvent, view: SessionView | undefined): boolean {
+    if (!view) return false;
+    if (event.sessionId !== view.sessionId) return true;
+    const previous = this.#events.at(-1);
+    if (
+      previous
+      && (previous.sessionId !== event.sessionId || event.sequence !== previous.sequence + 1)
+    ) {
+      return false;
+    }
+    if (!previous && event.sequence !== 1) return false;
+    this.#events.push(event);
+    this.#view = view;
+    applyActionIndexEvent(this.#actionIndex, event);
+    const refs = eventRefs(event);
+    if (refs.runId) this.#runChatCache.delete(refs.runId);
+    if (refs.stepId) this.#stepChatCache.delete(refs.stepId);
+    if (
+      event.type === "action.completed"
+      || event.type === "action.failed"
+      || event.type === "action.cancelled"
+      || event.type === "action.indeterminate"
+      || event.type === "authority.denied"
+    ) {
+      if (refs.actionId) this.#actionActivity.delete(refs.actionId);
+    }
+    if (event.type === "model.completed") this.#modelActivity.delete(event.data.stepId);
+    if (event.type === "task.exited" || event.type === "task.lost") {
+      this.#taskActivity.delete(event.data.taskId);
+    }
+    return true;
   }
 
   applyActivity(activity: RuntimeActivity): void {
@@ -333,6 +393,24 @@ export class TuiPresenter {
       this.#expanded.add(historyKey);
       return "Expanded earlier steps";
     }
+    const activityKey = this.latestActivityKey();
+    if (activityKey) {
+      if (this.#expanded.has(activityKey)) {
+        this.#expanded.delete(activityKey);
+        return "Collapsed exploration details";
+      }
+      this.#expanded.add(activityKey);
+      return "Expanded exploration details";
+    }
+    const thinkingKey = this.latestThinkingKey();
+    if (thinkingKey) {
+      if (this.#expanded.has(thinkingKey)) {
+        this.#expanded.delete(thinkingKey);
+        return "Collapsed Thinking";
+      }
+      this.#expanded.add(thinkingKey);
+      return "Expanded Thinking";
+    }
     const action = this.selectedAction();
     if (action) {
       const key = `action:${action.actionId}`;
@@ -431,10 +509,11 @@ export class TuiPresenter {
     });
   }
 
-  historyActionItems(): { id: string; label: string; description: string; current: boolean }[] {
+  historyActionItems(stepId?: string): { id: string; label: string; description: string; current: boolean }[] {
     const run = this.selectedRun();
     if (!run) return [];
-    const ids = this.actionOrder(run);
+    const ids = this.actionOrder(run).filter((id) =>
+      stepId === undefined || run.actions[id]?.stepId === stepId);
     const selected = this.selectedAction()?.actionId;
     return ids.flatMap((id, index) => {
       const action = run.actions[id];
@@ -584,13 +663,15 @@ export class TuiPresenter {
     const frame = frames[Math.floor(now / 80) % frames.length] ?? "·";
     const run = this.activeRun();
     const phase = this.phase();
+    const waiting = phase === "Waiting";
     const action = this.activeAction(run);
     const stepId = run?.stepOrder.at(-1);
     const step = stepId && run ? run.steps[stepId] : undefined;
     // Main strip = parent agent context only; Subagent tokens live on the Subagents block.
     const tokens = step?.context?.estimatedTokens;
     const tokenPart = tokens === undefined ? undefined : `${formatTokens(tokens)} tokens`;
-    const parts = [frame, "Running", phase];
+    const parts = [waiting ? "◇" : frame, waiting ? "Waiting" : "Running"];
+    if (!waiting) parts.push(phase);
     if (action?.status === "running") {
       if (action.toolName === "delegate") {
         parts.push("waiting on subagent");
@@ -608,6 +689,12 @@ export class TuiPresenter {
       }
     }
     if (tokenPart) parts.push(tokenPart);
+    if (action) {
+      const startedAt = this.#actionIndex.startedAtByAction.get(action.actionId);
+      const elapsedMs = startedAt === undefined ? 0 : Math.max(0, now - Date.parse(startedAt));
+      if (elapsedMs >= 2_000) parts.push(formatDuration(elapsedMs));
+      if (elapsedMs >= 30_000) parts.push("still running");
+    }
     const actionActivity = action ? this.#actionActivity.get(action.actionId) : undefined;
     const modelActivity = stepId ? this.#modelActivity.get(stepId) : undefined;
     const activityText = actionActivity?.text || modelActivity?.text;
@@ -703,11 +790,13 @@ export class TuiPresenter {
   renderChat(): string[] {
     const view = this.#view;
     if (!view || view.runOrder.length === 0) return [];
-    const maximumRuns = 30;
-    const visibleRunIds = view.runOrder.slice(-maximumRuns);
+    const activeId = this.activeRun()?.runId;
+    const historyLimit = recentRunLimit(this.#density);
+    const settledIds = view.runOrder.filter((runId) => runId !== activeId).slice(-historyLimit);
+    const visibleRunIds = activeId ? [...settledIds, activeId] : settledIds;
     const lines: string[] = [];
-    if (view.runOrder.length > maximumRuns) {
-      lines.push(`… ${view.runOrder.length - maximumRuns} earlier Runs · /runs`, "");
+    if (view.runOrder.length > visibleRunIds.length) {
+      lines.push(`… ${view.runOrder.length - visibleRunIds.length} earlier Runs · /runs`, "");
     }
     const visible = new Set(visibleRunIds);
     for (const cachedId of this.#runChatCache.keys()) {
@@ -735,7 +824,13 @@ export class TuiPresenter {
       );
       lines.push(...this.renderRunChat(run, { isLast, showTodo, showHandoff }));
     });
-    return lines;
+    if (lines.length <= TIMELINE_RENDERED_LINE_LIMIT) return lines;
+    const hidden = lines.length - TIMELINE_RENDERED_LINE_LIMIT + 2;
+    return [
+      `… ${hidden} earlier timeline lines hidden · /runs`,
+      "",
+      ...lines.slice(-(TIMELINE_RENDERED_LINE_LIMIT - 2)),
+    ];
   }
 
   /** One Run's chat block; settled Runs reuse a fingerprint cache across paints. */
@@ -809,6 +904,11 @@ export class TuiPresenter {
         if (key === "markdown:final") return options.isLast;
         if (key.startsWith("action:")) return Boolean(run.actions[key.slice("action:".length)]);
         if (key.startsWith("step:")) return Boolean(run.steps[key.slice("step:".length)]);
+        if (key.startsWith("thinking:")) return Boolean(run.steps[key.slice("thinking:".length)]);
+        if (key.startsWith("activity:")) {
+          const firstActionId = key.split(":")[1];
+          return firstActionId ? Boolean(run.actions[firstActionId]) : false;
+        }
         return false;
       })
       .sort()
@@ -830,6 +930,7 @@ export class TuiPresenter {
     const selection = `${this.#runId === run.runId ? this.#actionId ?? "" : ""}`;
     return [
       this.#width,
+      this.#density,
       options.isLast ? 1 : 0,
       options.showTodo ? 1 : 0,
       options.showHandoff ? 1 : 0,
@@ -1300,6 +1401,11 @@ export class TuiPresenter {
           const actionId = key.slice("action:".length);
           return stepActions.includes(actionId);
         }
+        if (key === `thinking:${step.stepId}`) return true;
+        if (key.startsWith("activity:")) {
+          const firstActionId = key.split(":")[1];
+          return firstActionId ? stepActions.includes(firstActionId) : false;
+        }
         return false;
       })
       .sort()
@@ -1315,6 +1421,7 @@ export class TuiPresenter {
       : "";
     return [
       this.#width,
+      this.#density,
       options.collapse ? 1 : 0,
       step.status,
       step.model?.text?.length ?? 0,
@@ -1333,39 +1440,81 @@ export class TuiPresenter {
   ): string[] {
     const lines: string[] = [];
     const activeRun = run.status === "active" || run.status === "triggered";
-    for (const actionId of actionIds) {
-      const action = run.actions[actionId];
-      if (!action) continue;
+    const actions = actionIds.map((actionId) => run.actions[actionId]).filter(Boolean) as ActionView[];
+    const latestWorkPlanId = actions.filter((action) => action.toolName === "update_plan").at(-1)?.actionId;
+    const latestRunId = this.#view?.runOrder.at(-1);
+    const renderAction = (action: ActionView): string[] => {
+      const actionId = action.actionId;
       const card = this.toolCard(action);
       const stepExpanded = this.#expanded.has(`step:${action.stepId}`);
-      // One-line summaries only mid-Run; settled Runs keep full Cursor cards (already fingerprint-cached).
       const retainedMutationDiff = action.status === "completed"
         && ["write", "edit", "move", "remove"].includes(action.toolName)
         && typeof card.output?.diff === "string"
         && card.output.diff.length > 0;
       const retainedQuestionAnswer = action.status === "completed" && action.toolName === "ask_question";
-      // Work Plan Todo snapshots stay in the chat stream as full lists, not sticky footers.
       const retainedWorkPlan = action.toolName === "update_plan";
+      const oldSuccessfulWorkPlan = retainedWorkPlan
+        && action.status === "completed"
+        && actionId !== latestWorkPlanId;
+      const oldSettledMutation = retainedMutationDiff
+        && run.runId !== latestRunId
+        && !shouldExpandByDefault(action.status);
       if (
-        activeRun
-        && options.collapse
-        && !stepExpanded
-        && !retainedMutationDiff
-        && !retainedQuestionAnswer
-        && !retainedWorkPlan
+        oldSuccessfulWorkPlan
+        || oldSettledMutation
+        || this.#density === "compact"
+        || (
+          activeRun
+          && options.collapse
+          && !stepExpanded
+          && !retainedMutationDiff
+          && !retainedQuestionAnswer
+          && !retainedWorkPlan
+        )
       ) {
-        lines.push(...renderToolCard(card, { summaryOnly: true }));
-        continue;
+        return renderToolCard(card, { summaryOnly: true, density: this.#density });
       }
-      // Show each Action as its own card; do not collapse discovery into an explore summary.
       const expanded = this.#expanded.has(`action:${actionId}`)
         || this.#actionId === actionId
         || shouldExpandByDefault(action.status);
       const outputLines = retainedWorkPlan
         ? (expanded ? 32 : 16)
         : (expanded ? 12 : 4);
-      const rendered = renderToolCard(card, { expanded, outputLines });
-      lines.push(...rendered);
+      return renderToolCard(card, { expanded, outputLines, density: this.#density });
+    };
+
+    for (const group of groupTimelineActions(actions)) {
+      if (group.kind === "action") {
+        lines.push(...renderAction(group.action));
+        continue;
+      }
+      const exceptional = discoveryGroupExceptional(group.actions);
+      const expanded = this.#density === "diagnostic"
+        || exceptional
+        || this.#expanded.has(group.key)
+        || group.actions.some((action) => this.#actionId === action.actionId);
+      const counts = new Map<string, number>();
+      for (const action of group.actions) counts.set(action.toolName, (counts.get(action.toolName) ?? 0) + 1);
+      const countLabel = [...counts.entries()].map(([name, count]) => `${name} ${count}`).join(" · ");
+      const running = group.actions.some((action) => action.status === "running");
+      const completed = group.actions.every((action) => action.status === "completed");
+      const glyph = exceptional ? "!" : running ? "●" : completed ? "✓" : "○";
+      lines.push(...this.#timelineRenderers.render({
+        kind: "activity-group",
+        key: group.key,
+        importance: exceptional ? "attention" : "secondary",
+        lifecycle: running ? "active" : "settled",
+        expandable: true,
+        fingerprint: group.actions.map((action) => `${action.actionId}:${action.status}`).join("|"),
+        actionIds: group.actions.map((action) => action.actionId),
+        glyph,
+        label: `${running ? "Exploring" : "Explored"} ${group.actions.length} actions · ${countLabel}`,
+      }, { density: this.#density, expanded }));
+      if (expanded) {
+        for (const action of group.actions) {
+          lines.push(...renderAction(action).map((line) => `  ${line}`));
+        }
+      }
     }
     return lines;
   }
@@ -1397,13 +1546,22 @@ export class TuiPresenter {
 
   private renderReasoning(step: StepView): string[] {
     const committed = step.model?.reasoning;
-    const live = this.#modelActivity.get(step.stepId);
-    const reasoning = committed || (live?.type === "model.reasoning" ? live.text : undefined);
+    const reasoning = committed;
     if (!reasoning?.trim()) return [];
+    if (this.#density === "compact") return [];
+    const startedAt = this.#actionIndex.startedAtByStep.get(step.stepId);
+    const completedAt = this.#actionIndex.modelCompletedAtByStep.get(step.stepId);
+    const duration = elapsed(startedAt, completedAt);
+    const expanded = this.#density === "diagnostic"
+      || this.#expanded.has(`thinking:${step.stepId}`)
+      || this.#expanded.has(`step:${step.stepId}`);
+    if (!expanded) {
+      return [`Thinking${duration ? ` · ${duration}` : ""} · Ctrl+O`];
+    }
     const lines = boundedDisplayTailLines(reasoning, Math.max(20, this.#width - 6), 3);
     if (lines.length === 0) return [];
     return [
-      `Thinking · ${reasoning.length} chars`,
+      `Thinking${duration ? ` · ${duration}` : ""}`,
       ...lines.map((line) => `  ${line}`),
     ];
   }
@@ -1663,6 +1821,26 @@ export class TuiPresenter {
     return undefined;
   }
 
+  private latestActivityKey(): string | undefined {
+    const run = this.activeRun() ?? this.selectedRun();
+    if (!run) return undefined;
+    const step = this.selectedStep() ?? (run.stepOrder.at(-1) ? run.steps[run.stepOrder.at(-1)!] : undefined);
+    if (!step) return undefined;
+    const actions = this.actionOrder(run)
+      .map((actionId) => run.actions[actionId])
+      .filter((action): action is ActionView => action !== undefined)
+      .filter((action) => action.stepId === step.stepId);
+    const group = groupTimelineActions(actions).findLast((entry) => entry.kind === "discovery");
+    return group?.kind === "discovery" ? group.key : undefined;
+  }
+
+  private latestThinkingKey(): string | undefined {
+    const run = this.activeRun() ?? this.selectedRun();
+    if (!run) return undefined;
+    const step = this.selectedStep() ?? (run.stepOrder.at(-1) ? run.steps[run.stepOrder.at(-1)!] : undefined);
+    return step?.model?.reasoning ? `thinking:${step.stepId}` : undefined;
+  }
+
   /** Ctrl+O target when an active Run has folded older Steps into a summary line. */
   private latestFoldedHistoryKey(): string | undefined {
     const run = this.activeRun() ?? this.selectedRun();
@@ -1681,6 +1859,7 @@ export class TuiPresenter {
     return {
       actionId: action.actionId,
       toolName: action.toolName,
+      effect: action.effect,
       status: action.status,
       ...(events.proposed?.data.input === undefined ? {} : { input: events.proposed.data.input }),
       ...(output === undefined ? {} : { output }),
@@ -1717,71 +1896,91 @@ export class TuiPresenter {
 }
 
 interface ActionIndex {
-  readonly byId: ReadonlyMap<string, ActionEvents>;
-  readonly orderByRun: ReadonlyMap<string, readonly string[]>;
-  readonly filesChangedByRun: ReadonlyMap<string, number>;
+  readonly byId: Map<string, ActionEvents>;
+  readonly orderByRun: Map<string, string[]>;
+  readonly filesByRun: Map<string, Set<string>>;
+  readonly filesChangedByRun: Map<string, number>;
+  readonly startedAtByAction: Map<string, string>;
+  readonly startedAtByStep: Map<string, string>;
+  readonly modelCompletedAtByStep: Map<string, string>;
 }
 
 function emptyActionIndex(): ActionIndex {
   return {
     byId: new Map(),
     orderByRun: new Map(),
+    filesByRun: new Map(),
     filesChangedByRun: new Map(),
+    startedAtByAction: new Map(),
+    startedAtByStep: new Map(),
+    modelCompletedAtByStep: new Map(),
   };
 }
 
 /** Single pass over the Session event stream for Action cards and chat renders. */
 function buildActionIndex(events: readonly SessionEvent[]): ActionIndex {
-  const byId = new Map<string, ActionEvents>();
-  const orderByRun = new Map<string, string[]>();
-  const filesByRun = new Map<string, Set<string>>();
+  const index = emptyActionIndex();
+  for (const event of events) applyActionIndexEvent(index, event);
+  return index;
+}
 
-  for (const event of events) {
-    if (event.type === "action.proposed") {
-      const actionId = event.data.actionId;
-      const runId = event.data.runId;
-      const entry = byId.get(actionId) ?? {};
-      entry.proposed = event;
-      byId.set(actionId, entry);
-      const order = orderByRun.get(runId) ?? [];
-      order.push(actionId);
-      orderByRun.set(runId, order);
-      if (["write", "edit", "move", "remove"].includes(event.data.toolName)) {
-        const input = record(event.data.input);
-        const path = typeof input?.path === "string"
-          ? input.path
-          : typeof input?.from === "string"
-            ? input.from
-            : undefined;
-        if (path) {
-          const set = filesByRun.get(runId) ?? new Set();
-          set.add(path);
-          filesByRun.set(runId, set);
-        }
-      }
-      continue;
-    }
-    if (!("actionId" in event.data)) continue;
-    const actionId = event.data.actionId;
-    if (typeof actionId !== "string") continue;
-    const entry = byId.get(actionId) ?? {};
-    if (event.type === "action.started") entry.started = event;
-    else if (
-      event.type === "action.completed" ||
-      event.type === "action.failed" ||
-      event.type === "action.cancelled" ||
-      event.type === "action.indeterminate"
-    ) {
-      entry.terminal = event;
-    } else {
-      continue;
-    }
-    byId.set(actionId, entry);
+function applyActionIndexEvent(index: ActionIndex, event: SessionEvent): void {
+  if (event.type === "step.started") {
+    index.startedAtByStep.set(event.data.stepId, event.occurredAt);
+    return;
   }
+  if (event.type === "model.completed") {
+    index.modelCompletedAtByStep.set(event.data.stepId, event.occurredAt);
+    return;
+  }
+  if (event.type === "action.proposed") {
+    const { actionId, runId } = event.data;
+    const entry = index.byId.get(actionId) ?? {};
+    entry.proposed = event;
+    index.byId.set(actionId, entry);
+    const order = index.orderByRun.get(runId) ?? [];
+    if (!order.includes(actionId)) order.push(actionId);
+    index.orderByRun.set(runId, order);
+    if (["write", "edit", "move", "remove"].includes(event.data.toolName)) {
+      const input = record(event.data.input);
+      const path = typeof input?.path === "string"
+        ? input.path
+        : typeof input?.from === "string" ? input.from : undefined;
+      if (path) {
+        const paths = index.filesByRun.get(runId) ?? new Set<string>();
+        paths.add(path);
+        index.filesByRun.set(runId, paths);
+        index.filesChangedByRun.set(runId, paths.size);
+      }
+    }
+    return;
+  }
+  if (!("actionId" in event.data) || typeof event.data.actionId !== "string") return;
+  const actionId = event.data.actionId;
+  const entry = index.byId.get(actionId) ?? {};
+  if (event.type === "action.started") {
+    entry.started = event;
+    index.startedAtByAction.set(actionId, event.occurredAt);
+  } else if (
+    event.type === "action.completed"
+    || event.type === "action.failed"
+    || event.type === "action.cancelled"
+    || event.type === "action.indeterminate"
+  ) {
+    entry.terminal = event;
+  } else {
+    return;
+  }
+  index.byId.set(actionId, entry);
+}
 
-  const filesChangedByRun = new Map<string, number>();
-  for (const [runId, paths] of filesByRun) filesChangedByRun.set(runId, paths.size);
-  return { byId, orderByRun, filesChangedByRun };
+function eventRefs(event: SessionEvent): { runId?: string; stepId?: string; actionId?: string } {
+  const data = event.data as Record<string, unknown>;
+  return {
+    ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
+    ...(typeof data.stepId === "string" ? { stepId: data.stepId } : {}),
+    ...(typeof data.actionId === "string" ? { actionId: data.actionId } : {}),
+  };
 }
 
 function structuredOutput(event: ActionEvents["terminal"]): Record<string, unknown> | undefined {

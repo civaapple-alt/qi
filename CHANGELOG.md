@@ -19,6 +19,17 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Changed
 
+- Unified the TUI into a bounded committed timeline, provisional live strip, and protected control region.
+  `standard` is the default of three timeline densities; consecutive same-Step read-only exploration groups
+  after settlement, successful process output collapses on completion, exceptional evidence remains visible,
+  and older Runs move behind the searchable `/runs` History Center.
+- TUI committed facts and in-memory/SQLite Session projections now update incrementally with cold-replay
+  fallback. Composer/activity ticks do not scan EventStore history, and process-local caches are discarded on
+  discontinuity, failed validation, or transaction rollback without changing Session events or the database.
+- Human gates no longer steal focus from a non-empty composer or follow-up editor. A persistent notice points to
+  `Ctrl+G`, which opens Run Question → Plan Review → Next Run → path grant in priority order.
+- Qi themes now use compatible semantic aliases and degrade through truecolor, ANSI-256, basic ANSI, and
+  `NO_COLOR`; state glyphs and labels remain meaningful without color.
 - Memory capture and retrieval now default on for new Runs without historical conversation backfill. Project
   claims remain project-local; only explicitly confirmed User claims cross projects. Context compilation
   considers at most 12 optional Memory blocks and records actual inclusion/omission through existing block IDs.
@@ -71,6 +82,8 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Documentation
 
+- Added ADR-0027 for Interaction Timeline hierarchy, density, attention, long-session bounds, and incremental
+  projection rules; updated the TUI/CLI and storage contracts.
 - Documented Memory scope, storage, lifecycle, recovery, CLI/Web behavior, and corrected the
   `SqliteMemoryIndex` import path.
 
