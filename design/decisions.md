@@ -125,6 +125,10 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 - Before Plan Review can be settled, the timeline projects the complete Formal Plan with the same
   200-rendered-line bound and immutable local path used for Executor presentation; review choices must not hide
   the document being accepted.
+- A Formal Plan drafting or revision Run cannot complete merely because `plan_document` was called. It must
+  complete a `write`-effect `plan_document create/edit` Action that records a new immutable revision in that Run.
+  `plan_document read` supplies current Markdown and SHA for a later edit, but never satisfies the drafting
+  completion gate or creates a new review.
 - Complex Agent work may create a separate Work Plan through `update_plan`. Work Plan status is navigation only,
   never completion evidence, and does not schedule Runs.
 - Qi assigns Work Plan and Work item IDs on first creation. Model-supplied item IDs are discarded on create;
@@ -281,12 +285,18 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 
 - Cross-Run conversation history still restores only the final assistant text of completed (or budget-handoff)
   Runs; tool transcripts remain durable Session evidence and do not masquerade as dialogue.
-- Each restored assistant message appends a compact `<qi-run-facts>` footer with write/read Action counts and
-  terminal reason from the Run projection.
-- The footer exists so later Runs can distinguish verbal “already fixed” narration from durable write settlement
-  without replaying Action payloads or inventing Runtime hard-blocks on free-form responses.
+- Restored assistant messages remain only assistant-authored narrative. A separate Runtime-owned system
+  ContextBlock may label each selected restored turn with only a coarse write-settlement class:
+  `none | completed | unsuccessful | mixed`. It exposes no durable Run/Action IDs, read counts, write counts,
+  timestamps, paths, terminal reasons, or tool payloads.
+- The minimal disclosure lets later Runs distinguish verbal “already fixed” narration from the existence of a
+  settled write Action. It is not verification evidence and does not describe what changed. Reserved legacy
+  `<qi-run-facts>` tags are removed from restored narrative and committed model responses so model imitation
+  cannot multiply or fabricate Session metadata.
 - Session extractors may emit a diagnostic `CLAIMED_MUTATION_WITHOUT_ACTIONS` signal when a responded Run claims
-  mutation in prose with zero completed write Actions; that signal does not change Run completion semantics.
+  mutation in prose with zero completed write Actions, including Formal Plan persistence claims. They may also
+  flag legacy reserved Run-fact tags found in committed model output. These signals do not change Run completion
+  semantics.
 
 ## ADR-0025: make memory scope explicit and user continuity opt-in
 
@@ -310,6 +320,37 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
   automatically; only existing Memory events are replayed.
 - Memory claim text remains plaintext inside machine-private SQLite files. Credential-like material is rejected at
   the durable boundary regardless of sensitivity or confirmation.
+
+## ADR-0026: treat Runtime-to-model disclosure as a least-information boundary
+
+Pressure: the durable Session stream contains IDs, lifecycle milestones, authority decisions, counts, paths,
+timestamps, and settlement details useful to replay and operators. Copying those facts into ordinary model context
+increases prompt influence, teaches models to imitate internal syntax, and exposes implementation topology without
+improving the requested task.
+
+- The event stream and projections are the complete Runtime truth. Model context is a purpose-built disclosure
+  view, never a mirror of that truth. Runtime-owned model-visible fields are deny-by-default and explicitly
+  allowlisted per use case.
+- Every Runtime-owned ContextBlock must state one concrete model decision it supports, use the least precise
+  semantic value sufficient for that decision, remain bounded, and omit internal identifiers, exact counts,
+  timestamps, paths, provider details, authority traces, and unrelated lifecycle state unless one is strictly
+  necessary for the stated purpose.
+- Prefer coarse predicates or enums over telemetry. Correlate disclosure to the model's already-visible material
+  with local ordinals, not durable Session/Run/Step/Action IDs. For restored history, ADR-0024's write-settlement
+  class is the entire automatic disclosure contract.
+- Runtime disclosure never grants capability, proves task completion, enters the Evidence Ledger, or makes model
+  narration authoritative. Detailed Runtime facts require an explicit bounded read/introspection Action and its
+  ordinary capability decision; metadata already present in model context cannot widen that query.
+- Required Runtime ContextBlocks are reserved for safety or control invariants. Task-helpful diagnostics are
+  optional and omission-visible. Payloads stay out of `context.compiled`; that event records selected/omitted
+  block identities and budgets only.
+- Rejected alternatives: replaying Action/tool transcripts or raw event JSON; embedding machine tags in assistant
+  prose; automatically exposing IDs and exact counters “for debugging”; and withholding all settlement indication,
+  which lets restored verbal mutation claims influence later Runs with no counter-signal.
+- Compatibility and evidence: legacy reserved tags remain readable in old Session events but are stripped from
+  new model context/output and diagnosed by extraction. Tests must prove the allowlisted disclosure shape, absence
+  of internal IDs/counters, deterministic omission/accounting, and that details remain available only through
+  explicit introspection.
 
 ## Changing a decision
 

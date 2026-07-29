@@ -117,7 +117,9 @@ Collapsed notice instead of `Ctrl+O`; every preview names the immutable local fi
 context still contains the complete document. The same preview is visible in the timeline before the Plan
 Review choices appear, so the user can inspect exactly what will be accepted.
 Revision reads the latest document and uses SHA-checked `plan_document edit`; each edit creates an immutable
-revision and reopens review.
+revision and reopens review. A drafting Run cannot finish on `plan_document read`: it must complete a
+`write`-effect create/edit Action in that Run, otherwise the Loop asks for the missing mutation or parks for
+review without claiming a new revision.
 
 Rich TTY Plan Runs may block on `ask_question`. Its panel supports single/multiple/text/custom answers, Esc skip
 per question, and Ctrl+C Run cancellation; choice questions expose `Other…` unless `allowText: false` is

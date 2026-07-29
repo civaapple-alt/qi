@@ -877,10 +877,13 @@ export class TuiRuntime {
       input,
       requiredCompletionTool: {
         toolName: "plan_document",
+        effect: "write",
         parkReason: "review",
         correction:
           "This drafting Run is not complete. If information is missing, ask the user with ask_question when available. " +
-          "Otherwise call plan_document create/edit with the complete self-contained Formal Plan Markdown now.",
+          "Otherwise call plan_document create/edit with the complete self-contained Formal Plan Markdown now. " +
+          "A plan_document read only supplies the latest Markdown and SHA; it does not complete the drafting Run. " +
+          "Do not claim a revision was persisted until that create/edit Action completes.",
       },
     });
   }

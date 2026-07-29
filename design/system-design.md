@@ -119,6 +119,11 @@ The Context Compiler selects source-aware blocks under a working budget. Model w
 budget are distinct. Settled exchanges may compact into causal summaries plus Artifact references; complete
 events remain unchanged.
 
+Runtime truth is not copied wholesale into model context. Runtime-owned blocks are a least-information disclosure
+boundary: each has an explicit purpose and allowlisted semantic schema, omits internal IDs and unrelated telemetry,
+and cannot grant authority or prove completion. Detailed lifecycle facts remain behind bounded introspection
+Actions. See ADR-0026.
+
 Memory is not transcript accumulation. Claims have provenance, structured Session/Project/User scope, confidence,
 correction, forgetting, activation, and sensitivity rules. Project claims stay within one project; explicitly
 confirmed User claims live in a machine-private Continuity Session and may cross projects. Project and user

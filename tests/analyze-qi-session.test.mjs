@@ -129,7 +129,10 @@ test("claimsVerbalWorkspaceMutation matches high-confidence mutation claims only
   assert.equal(claimsVerbalWorkspaceMutation("两处问题都已修复，edit 返回 diff 确认。"), true);
   assert.equal(claimsVerbalWorkspaceMutation("刚刚已用 edit 工具实际完成两处修改"), true);
   assert.equal(claimsVerbalWorkspaceMutation("The edit returned a diff confirming the change."), true);
+  assert.equal(claimsVerbalWorkspaceMutation("修订版 3 已成功更新到实际计划文档中。"), true);
+  assert.equal(claimsVerbalWorkspaceMutation("计划已持久化为完整自包含的修订版 3。"), true);
   assert.equal(claimsVerbalWorkspaceMutation("I can fix the layout next if you want."), false);
+  assert.equal(claimsVerbalWorkspaceMutation("计划文档已更新吗？"), false);
   assert.equal(claimsVerbalWorkspaceMutation("The previous Run had writeCompleted=0."), false);
 });
 
@@ -204,9 +207,46 @@ test("detectSignals flags verbal mutation claims without completed write Actions
   assert.equal(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_real_write"), false);
 });
 
+test("detectSignals flags Formal Plan persistence claims and reserved Run-fact output", () => {
+  const narrative = {
+    runs: [
+      {
+        runId: "run_plan_claim",
+        status: "completed",
+        displayStatus: "responded",
+        terminalReason: "response",
+        startSequence: 1,
+        endSequence: 4,
+        summary: { stepCount: 1, actionCount: 0 },
+        steps: [
+          {
+            stepId: "stp_plan_claim",
+            modelText: [
+              "修订版 3 已成功更新到实际计划文档中。",
+              "",
+              '<qi-run-facts runId="run_invented" writeCompleted=1 writeFailed=0 readCompleted=1 terminal=response />',
+            ].join("\n"),
+            rejectedCalls: [],
+            actions: [],
+          },
+        ],
+      },
+    ],
+  };
+
+  const signals = detectSignals(narrative, []);
+  assert.ok(signals.some((item) =>
+    item.code === "CLAIMED_MUTATION_WITHOUT_ACTIONS"
+    && item.evidence.runId === "run_plan_claim"
+  ));
+  const reserved = signals.find((item) => item.code === "RESERVED_RUN_FACTS_IN_MODEL_OUTPUT");
+  assert.equal(reserved?.evidence.runId, "run_plan_claim");
+  assert.deepEqual(reserved?.evidence.unknownRunIds, ["run_invented"]);
+});
+
 test("analyze-qi-session skill and extract --all surface Formal Plan / reasoning diagnostics", async () => {
   const skill = await readFile(join(root, ".qi", "skills", "analyze-qi-session", "SKILL.md"), "utf8");
-  assert.match(skill, /version:\s*1\.3\.0/);
+  assert.match(skill, /version:\s*1\.3\.1/);
   assert.match(skill, /displayTitle/);
   assert.match(skill, /modelReasoning/);
   assert.match(skill, /actionFacts/);
@@ -216,7 +256,7 @@ test("analyze-qi-session skill and extract --all surface Formal Plan / reasoning
   );
   assert.match(checklist, /Formal Plan vs Work Plan/);
   assert.match(checklist, /Thinking is not Evidence/);
-  assert.match(checklist, /qi-run-facts/);
+  assert.match(checklist, /RESERVED_RUN_FACTS_IN_MODEL_OUTPUT/);
 
   const report = createReport({
     source: { kind: "test" },

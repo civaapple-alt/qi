@@ -21,6 +21,9 @@ import { compileContext } from "@civaapple/qi-ai/context";
 ```
 
 The compiler treats the model window, output reserve, required context, optional context, and conversation
-history as distinct budgets. It is deterministic and fails closed when required blocks cannot fit.
+history as distinct budgets. It is deterministic and fails closed when required blocks cannot fit. Runtime-owned
+blocks are purpose-built least-information disclosures rather than serialized Session projections: internal IDs,
+authority traces, and unrelated lifecycle diagnostics stay outside model context unless an explicit bounded
+introspection path is authorized.
 
 See [`docs/model/`](docs/model/) and [`docs/context/`](docs/context/) for adapter and compiler contracts.

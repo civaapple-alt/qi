@@ -21,7 +21,7 @@ Use this checklist after extracting the Session report. It is a review rubric, n
 | Verification | declared profile or deterministic command, exit evidence | mutation completed without relevant validation |
 | Evidence | evaluation and Evidence Ledger linkage | tool success mislabeled as acceptance evidence |
 | Recovery | later Step/Action after a failure | recovery hidden; same failure repeated without strategy change |
-| History | restored `<qi-run-facts>` footnotes | footnotes are counts only — they do not replace the Action timeline |
+| History | Runtime-owned coarse write settlement; legacy reserved tags in model output | the coarse class does not replace the Action timeline; committed tags may be model imitation |
 
 ## Common patterns
 
@@ -42,10 +42,20 @@ status as proof that `edit`/`write` ran.
 `modelReasoning` / Thinking blocks express intermediate intent. They do not settle Actions, mutate the Workspace,
 or enter the Evidence Ledger.
 
-### History footnotes are not a tool transcript
+### Restored-history facts are not a tool transcript
 
-Cross-Run restored assistant history may append `<qi-run-facts writeCompleted=… readCompleted=… terminal=… />`.
-Those counts match inspect `actionFacts` and are diagnostic only — open the Action timeline for settlement proof.
+Cross-Run history supplies only a local turn ordinal and coarse `none` / `completed` / `unsuccessful` / `mixed`
+write settlement class in a Runtime-owned system ContextBlock. It intentionally omits durable IDs, exact Action
+counts, reads, and terminal details. The class is a grounding hint, not proof of what changed — use inspect
+`actionFacts` and open the Action timeline for settlement evidence. Legacy `<qi-run-facts … />` found in committed
+`modelText` is not trusted metadata; compare it with the Session projection and report
+`RESERVED_RUN_FACTS_IN_MODEL_OUTPUT` when emitted.
+
+### Formal Plan read is not a revision
+
+A drafting or revision Run requires a completed `write`-effect `plan_document create/edit` Action and a newly
+recorded immutable revision. A completed `plan_document read` only returns current Markdown/SHA; if prose claims a
+new revision after read-only work, classify it as a verbal mutation claim without Actions.
 
 ### Verbal mutation claim without write Actions
 

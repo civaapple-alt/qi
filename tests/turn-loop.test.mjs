@@ -7,7 +7,7 @@ import { Type } from "@sinclair/typebox";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
-import { TurnLoop } from "@civaapple/qi-agent/loop";
+import { TurnLoop, formatRunHistoryFacts } from "@civaapple/qi-agent/loop";
 import {
   FileArtifactStore,
   ToolRegistry,
@@ -38,6 +38,19 @@ function delayedReadTool(activity) {
         activity.active -= 1;
       }
     },
+  });
+}
+
+function testPlanDocumentTool() {
+  return defineTool({
+    description: "test-only managed plan document",
+    input: Type.Object({
+      operation: Type.Union([Type.Literal("read"), Type.Literal("edit")]),
+    }, { additionalProperties: false }),
+    output: Type.Object({ operation: Type.String() }, { additionalProperties: false }),
+    effect: (input) => input.operation === "read" ? "read" : "write",
+    resources: () => ["plan:document:test"],
+    execute: async (input) => ({ operation: input.operation }),
   });
 }
 
@@ -202,15 +215,26 @@ test("TurnLoop restores bounded completed conversation history across Runs", asy
       (request) => {
         assert.deepEqual(request.messages.map((message) => message.role), [
           "system",
+          "system",
           "user",
           "assistant",
           "user",
         ]);
-        const texts = request.messages.slice(1).map((message) => message.content[0].text);
-        assert.equal(texts[0], "Does Web support chat?");
-        assert.match(texts[1], /^Web is currently a read-only workbench\.\n\n<qi-run-facts /);
-        assert.match(texts[1], /writeCompleted=0 writeFailed=0 readCompleted=0 terminal=response \/>$/);
-        assert.equal(texts[2], "What did I just ask?");
+        const facts = request.messages
+          .filter((message) => message.role === "system")
+          .flatMap((message) => message.content)
+          .find((part) => part.type === "text" && part.text.includes("Runtime-maintained write settlement"))
+          ?.text;
+        const history = request.messages.find((message) => message.role === "assistant")
+          ?.content.find((part) => part.type === "text")
+          ?.text;
+        const users = request.messages
+          .filter((message) => message.role === "user")
+          .map((message) => message.content[0].text);
+        assert.deepEqual(users, ["Does Web support chat?", "What did I just ask?"]);
+        assert.equal(history, "Web is currently a read-only workbench.");
+        assert.match(facts, /restoredTurn=1; writeSettlement=none/);
+        assert.doesNotMatch(facts, /runId|run_|readCompleted|writeCompleted|terminal=/);
         return [
           { type: "text.delta", delta: "You asked whether Web supports chat." },
           { type: "completed", finishReason: "stop" },
@@ -252,7 +276,7 @@ test("TurnLoop restores bounded completed conversation history across Runs", asy
   });
 });
 
-test("TurnLoop annotates restored history with durable write/read Action facts", async () => {
+test("TurnLoop annotates restored history with coarse write settlement only", async () => {
   await withRuntime(async ({ root, artifactStore }) => {
     const { writeFile } = await import("node:fs/promises");
     const { createHash } = await import("node:crypto");
@@ -275,6 +299,8 @@ test("TurnLoop annotates restored history with durable write/read Action facts",
     registry.register("edit", editTool);
     let verbalClaimHistory;
     let afterWriteHistory;
+    let verbalClaimFacts;
+    let afterWriteFacts;
     const model = new ScriptedModelPort([
       [
         { type: "text.delta", delta: "两处问题都已修复，edit 返回 diff 确认。" },
@@ -284,6 +310,11 @@ test("TurnLoop annotates restored history with durable write/read Action facts",
         verbalClaimHistory = request.messages
           .find((message) => message.role === "assistant")
           ?.content.find((part) => part.type === "text")
+          ?.text;
+        verbalClaimFacts = request.messages
+          .filter((message) => message.role === "system")
+          .flatMap((message) => message.content)
+          .find((part) => part.type === "text" && part.text.includes("Runtime-maintained write settlement"))
           ?.text;
         return [
           {
@@ -308,6 +339,11 @@ test("TurnLoop annotates restored history with durable write/read Action facts",
         afterWriteHistory = request.messages
           .filter((message) => message.role === "assistant")
           .map((message) => message.content.find((part) => part.type === "text")?.text);
+        afterWriteFacts = request.messages
+          .filter((message) => message.role === "system")
+          .flatMap((message) => message.content)
+          .find((part) => part.type === "text" && part.text.includes("Runtime-maintained write settlement"))
+          ?.text;
         return [
           { type: "text.delta", delta: "Saw prior write facts." },
           { type: "completed", finishReason: "stop" },
@@ -333,19 +369,187 @@ test("TurnLoop annotates restored history with durable write/read Action facts",
       contextBudgetTokens: 8_000,
     }));
 
-    assert.match(
-      verbalClaimHistory,
-      /两处问题都已修复，edit 返回 diff 确认。\n\n<qi-run-facts runId="run_[^"]+" writeCompleted=0 writeFailed=0 readCompleted=0 terminal=response \/>/,
-    );
+    assert.equal(verbalClaimHistory, "两处问题都已修复，edit 返回 diff 确认。");
+    assert.doesNotMatch(verbalClaimHistory, /qi-run-facts/);
+    assert.match(verbalClaimFacts, /restoredTurn=1; writeSettlement=none/);
+    assert.doesNotMatch(verbalClaimFacts, /runId|run_|readCompleted|writeCompleted|terminal=/);
     assert.equal(afterWriteHistory.length, 2);
-    assert.match(
-      afterWriteHistory[0],
-      /writeCompleted=0 writeFailed=0 readCompleted=0 terminal=response \/>$/,
-    );
-    assert.match(
-      afterWriteHistory[1],
-      /writeCompleted=1 writeFailed=0 readCompleted=0 terminal=response \/>$/,
-    );
+    assert.equal(afterWriteHistory[0], "两处问题都已修复，edit 返回 diff 确认。");
+    assert.equal(afterWriteHistory[1], "Edit landed with tool evidence.");
+    assert.ok(afterWriteHistory.every((text) => !text.includes("qi-run-facts")));
+    assert.match(afterWriteFacts, /restoredTurn=1; writeSettlement=none/);
+    assert.match(afterWriteFacts, /restoredTurn=2; writeSettlement=completed/);
+    assert.doesNotMatch(afterWriteFacts, /runId|run_|readCompleted|writeCompleted|terminal=/);
+  });
+});
+
+test("formatRunHistoryFacts discloses only a coarse write settlement class", () => {
+  const action = (status) => ({ effect: "write", status });
+  assert.equal(formatRunHistoryFacts({ actions: {} }), "writeSettlement=none");
+  assert.equal(
+    formatRunHistoryFacts({ actions: { act_write: action("completed") } }),
+    "writeSettlement=completed",
+  );
+  assert.equal(
+    formatRunHistoryFacts({ actions: { act_write: action("failed") } }),
+    "writeSettlement=unsuccessful",
+  );
+  assert.equal(
+    formatRunHistoryFacts({
+      actions: {
+        act_write_done: action("completed"),
+        act_write_failed: action("failed"),
+      },
+    }),
+    "writeSettlement=mixed",
+  );
+});
+
+test("TurnLoop drafting completion guard does not accept a read-only tool Action", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_plan_read",
+      subject: "agent_main",
+      tools: ["plan_document"],
+      effects: ["read"],
+      resources: ["plan:document:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("plan_document", testPlanDocumentTool());
+    let correction;
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call-plan-read",
+          name: "plan_document",
+          input: { operation: "read" },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [
+        { type: "text.delta", delta: "The plan is ready for review." },
+        { type: "completed", finishReason: "stop" },
+      ],
+      (request) => {
+        correction = request.messages
+          .filter((message) => message.role === "user")
+          .at(-1)
+          ?.content.find((part) => part.type === "text")
+          ?.text;
+        return [
+          { type: "text.delta", delta: "Still no write." },
+          { type: "completed", finishReason: "stop" },
+        ];
+      },
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+
+    const result = await loop.run(turnRequest(root, artifactStore, {
+      maxSteps: 3,
+      mode: "plan",
+      requiredCompletionTool: {
+        toolName: "plan_document",
+        effect: "write",
+        parkReason: "review",
+        correction: "Call plan_document create/edit; read does not complete drafting.",
+      },
+    }));
+
+    assert.equal(result.status, "parked");
+    assert.equal(result.view.runs[result.runId].terminal?.reason, "review");
+    assert.match(correction, /read does not complete drafting/);
+    const actions = Object.values(result.view.runs[result.runId].actions);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].effect, "read");
+    assert.equal(actions[0].status, "completed");
+  });
+});
+
+test("TurnLoop drafting completion guard accepts the matching write Action", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_plan_write",
+      subject: "agent_main",
+      tools: ["plan_document"],
+      effects: ["write"],
+      resources: ["plan:document:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("plan_document", testPlanDocumentTool());
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call-plan-edit",
+          name: "plan_document",
+          input: { operation: "edit" },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [
+        { type: "text.delta", delta: "The new plan revision is ready for review." },
+        { type: "completed", finishReason: "stop" },
+      ],
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+
+    const result = await loop.run(turnRequest(root, artifactStore, {
+      mode: "plan",
+      requiredCompletionTool: {
+        toolName: "plan_document",
+        effect: "write",
+        parkReason: "review",
+        correction: "Call plan_document create/edit.",
+      },
+    }));
+
+    assert.equal(result.status, "completed");
+    assert.equal(result.text, "The new plan revision is ready for review.");
+    const actions = Object.values(result.view.runs[result.runId].actions);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].effect, "write");
+    assert.equal(actions[0].status, "completed");
+  });
+});
+
+test("TurnLoop removes Runtime-reserved Run-fact tags from committed model output", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const activities = [];
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "text.delta",
+          delta: [
+            "Grounded answer.",
+            "",
+            '<qi-run-facts runId="run_invented" writeCompleted=1 writeFailed=0 readCompleted=1 terminal=response />',
+          ].join("\n"),
+        },
+        { type: "completed", finishReason: "stop" },
+      ],
+    ]);
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: model,
+      toolRegistry: new ToolRegistry(new InMemoryCapabilityBroker()),
+      onActivity: (activity) => activities.push(activity),
+    });
+
+    const result = await loop.run(turnRequest(root, artifactStore));
+    assert.equal(result.text, "Grounded answer.");
+    assert.ok(activities
+      .filter((activity) => activity.type === "model.text")
+      .every((activity) => !activity.text.includes("<qi-run-facts")));
+    const completed = store.read("ses_turn_test").events.find((event) => event.type === "model.completed");
+    assert.equal(completed?.data.text, "Grounded answer.");
   });
 });
 

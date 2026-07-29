@@ -35,11 +35,18 @@ Redacted model text and reasoning may also pass through the bounded process-loca
 live presentation. Terminal text and reasoning are committed once in `model.completed`; reasoning is
 explanatory model output, not completion evidence.
 
+Restored cross-Run conversation keeps assistant narrative separate from Runtime truth. Automatic model context
+receives only a local turn ordinal and coarse write settlement class; durable IDs, exact Action counts, reads,
+terminal details, and tool payloads require explicit bounded introspection. See
+[ADR 0026](../../design/decisions.md#adr-0026-treat-runtime-to-model-disclosure-as-a-least-information-boundary).
+
 Formal Plans, Work Plans, and Questions are separate state machines. A Formal Plan is immutable reviewed
-Markdown; acceptance starts one whole-plan Agent Run. `update_plan` snapshots are optional implementation Todo
-navigation and never completion evidence. Qi assigns Work Plan/Work item IDs on create; later updates preserve
-only IDs returned by a successful snapshot. `run.question.*` can suspend and resume a read/control Action inside
-the same Plan Run, while legacy `control.question.*` remains the between-Run compatibility path.
+Markdown; acceptance starts one whole-plan Agent Run. A drafting Run requires a completed `write`-effect
+`plan_document create/edit` Action that records a new revision; reading the current document and SHA cannot
+satisfy that completion gate. `update_plan` snapshots are optional implementation Todo navigation and never
+completion evidence. Qi assigns Work Plan/Work item IDs on create; later updates preserve only IDs returned by a
+successful snapshot. `run.question.*` can suspend and resume a read/control Action inside the same Plan Run,
+while legacy `control.question.*` remains the between-Run compatibility path.
 
 `qi-agent` does not depend on `qi-node`, `qi-tui`, or an application. Node filesystem, process, database,
 credential-file, network, and package-acquisition implementations stay behind ports.

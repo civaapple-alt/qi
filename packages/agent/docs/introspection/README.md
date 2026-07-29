@@ -50,7 +50,9 @@ every omission.
 Diagnostic fields (not Evidence):
 
 - Run `displayTitle`, light `planBinding`, detail `formalPlan` (`title` / `revision` / `path`), and
-  `actionFacts` (`writeCompleted` / `writeFailed` / `readCompleted`, same counts as `<qi-run-facts>`).
+  `actionFacts` (`writeCompleted` / `writeFailed` / `readCompleted`). These detailed diagnostic counts are
+  available only through explicit bounded inspection; automatic restored-history context exposes only the coarse
+  write settlement class defined by ADR 0024/0026.
 - Session header `currentWorkPlanId` and compact `workPlan` snapshot when present.
 - Step `modelReasoning` beside `modelText`.
 - Action detail summaries for `update_plan` (`workPlanItems`), process tools (`process`), and

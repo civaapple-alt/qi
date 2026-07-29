@@ -22,6 +22,11 @@ explicit token budget and estimator.
 - Memory retrieval supplies candidate blocks but does not mark them required without policy.
 - Skill and MCP details remain progressively disclosed.
 - Provider-specific token counting can implement `TokenEstimator` without changing selection semantics.
+- Runtime-owned blocks are allowlisted disclosure views, not serialized projections. Their caller must define the
+  model decision being supported, use the least precise bounded value sufficient for it, and omit internal
+  Session/Run/Step/Action IDs and unrelated telemetry unless the owning ADR explicitly requires one.
+- Runtime metadata in context never grants authority or becomes completion evidence. Detailed Runtime state stays
+  behind explicit bounded introspection Actions.
 
 Any heuristic change must preserve deterministic tie-breaking and explicit omission reporting. See the context
 cases in `tests/llm-context.test.mjs`.

@@ -40,6 +40,10 @@ same bounded preview and path appear before the Plan Review choices, so acceptan
 visibility. The Executor still receives the complete document. Legacy item plans keep their item-per-Run
 `/next` behavior.
 
+A Plan drafting or revision Run must complete a `write`-effect `plan_document create/edit` Action before it can
+finish and offer review. `plan_document read` returns the latest Markdown and SHA for editing but cannot publish
+a revision or reopen review.
+
 In a rich TTY, Plan mode advertises `ask_question`. Its blocking panel supports single choice (Enter), multiple
 choice (Space then Enter), custom/free text, Esc to persist a skipped question, and Ctrl+C to cancel the Run.
 Choice questions include `Other…` by default unless the Planner explicitly marks custom input invalid. After

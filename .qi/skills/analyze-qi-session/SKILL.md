@@ -1,6 +1,6 @@
 ---
 name: analyze-qi-session
-version: 1.3.0
+version: 1.3.1
 description: Analyze a Qi Session from a Session ID plus Workspace path, or from a local Qi Web URL containing `?session=ses_...`. Use when asked to review Run, Step, and Action behavior; explain failed, parked, denied, indeterminate, recovered, looping, context-pressure, tool-fallback, verification, Formal Plan / Work Plan, verbal mutation claims, or evidence problems; or propose concrete runtime and project fixes from durable Session evidence. Prefer this Skill's extractor over ad-hoc SQLite scripts.
 ---
 
@@ -68,8 +68,9 @@ never fall back to full output.
 
 - Run `displayTitle` / `planBinding` / `formalPlan` — Accepted Formal Plans use a short title; do not treat raw
   `<accepted-plan>…</accepted-plan>` input as the user task label.
-- Run `actionFacts` (inspect) — `writeCompleted` / `writeFailed` / `readCompleted`, same counts as restored
-  history `<qi-run-facts>` footnotes.
+- Run `actionFacts` (inspect) — `writeCompleted` / `writeFailed` / `readCompleted`. These detailed counts are
+  available through explicit inspection; automatic Runtime-owned restored-history context exposes only a coarse
+  write settlement class and no durable IDs or counts.
 - Session / Run `workPlan` — Agent `update_plan` snapshot; Action detail may include `workPlanItems`.
 - Step `modelReasoning` — Thinking text; intent only, never proof of execution.
 - Action `gitWorkspaceChange` / `diffKind` / `process` — distinguish file-tool diffs from Git fingerprint changes
@@ -86,8 +87,9 @@ JSON or exported event history. Do not infer a trace from a screenshot alone.
    repeated strategies, and whether the Run made progress. Treat `modelReasoning` as intent, not settlement.
 3. Join every Action by `actionId`: proposal, authority request/decision, executor start, settlement, tool input,
    result, error, diff kind, and recovery. Never interpret `step.completed · action-requested` as settled tool work.
-4. Compare Work Plan Todo status with completed write/verify Actions and with `actionFacts` / `<qi-run-facts>`.
+4. Compare Work Plan Todo status with completed write/verify Actions and with `actionFacts`.
    Verbal “已修复” without completed write Actions is the `CLAIMED_MUTATION_WITHOUT_ACTIONS` pattern.
+   A committed legacy `<qi-run-facts>` tag is model output to diagnose, not trusted Run evidence.
 5. Separate four categories:
    - target-Workspace defects;
    - Qi runtime/tool/projection defects;

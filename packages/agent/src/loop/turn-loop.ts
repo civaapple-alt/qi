@@ -4,6 +4,7 @@ import {
   modeAllowsIntent,
   redactSensitiveText,
   redactSensitiveValue,
+  type Effect,
   type RedactionSummary,
 } from "@civaapple/qi-agent/capability";
 import {
@@ -66,8 +67,14 @@ export interface TurnRequest {
   maxActionsPerStep?: number;
   /** When set, only these tool names are advertised to the model for this Turn. */
   toolAllowlist?: readonly string[];
-  /** A drafting Run may not complete until this tool has successfully committed its document. */
-  requiredCompletionTool?: { toolName: string; correction: string; parkReason: "review" };
+  /** A drafting Run may not complete until a matching Action has successfully committed its document. */
+  requiredCompletionTool?: {
+    toolName: string;
+    /** Optional effect constraint; applications should set this when reads cannot satisfy completion. */
+    effect?: Effect;
+    correction: string;
+    parkReason: "review";
+  };
   /** Session mode frozen onto run.triggered when creating a new Run. */
   mode?: SessionMode;
   planBinding?: RunPlanBinding;
@@ -249,6 +256,7 @@ export class TurnLoop {
       const budgetWarningStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps - 1;
       const stepContextBlocks = [
         ...request.contextBlocks,
+        ...(history.factsBlock ? [history.factsBlock] : []),
         ...(budgetWarningStep ? [createBudgetWarningBlock(stepNumber, request.maxSteps)] : []),
         ...(finalHandoffStep ? [createBudgetHandoffBlock(stepNumber, request.maxSteps)] : []),
       ];
@@ -479,7 +487,7 @@ export class TurnLoop {
         mergeRedactionSummaries(safeText.redactions, safeReasoning.redactions),
         { runId, stepId },
       );
-      modelResult.text = safeText.value;
+      modelResult.text = stripReservedRunFacts(safeText.value);
       modelResult.reasoning = safeReasoning.value;
 
       writer.append(
@@ -559,6 +567,10 @@ export class TurnLoop {
           && !Object.values(writer.view?.runs[runId]?.actions ?? {}).some(
             (action) =>
               action.toolName === request.requiredCompletionTool!.toolName
+              && (
+                request.requiredCompletionTool!.effect === undefined
+                || action.effect === request.requiredCompletionTool!.effect
+              )
               && action.status === "completed",
           )
         ) {
@@ -571,7 +583,10 @@ export class TurnLoop {
               {
                 runId,
                 reason: request.requiredCompletionTool.parkReason,
-                detail: `Required ${request.requiredCompletionTool.toolName} was not completed`,
+                detail:
+                  `Required ${request.requiredCompletionTool.effect
+                    ? `${request.requiredCompletionTool.effect} `
+                    : ""}${request.requiredCompletionTool.toolName} was not completed`,
               },
               { kind: "runtime", id: "completion_guard" },
             );
@@ -1302,7 +1317,7 @@ async function aggregateModelEvents(
     switch (event.type) {
       case "text.delta":
         text += event.delta;
-        onText?.(redactSensitiveText(text).value.slice(-16_000));
+        onText?.(stripReservedRunFacts(redactSensitiveText(text).value).slice(-16_000));
         break;
       case "reasoning.delta":
         reasoning += event.delta;
@@ -1511,30 +1526,39 @@ function truncateSummary(value: string, maximum: number): string {
   return normalized.length <= maximum ? normalized : `${normalized.slice(0, maximum - 1)}…`;
 }
 
-/** Compact durable Action/terminal facts appended to restored assistant history (not a tool transcript). */
+/** Least-information write settlement for the Runtime-owned restored-history ContextBlock. */
 export function formatRunHistoryFacts(run: RunView): string {
-  const actions = Object.values(run.actions);
-  let writeCompleted = 0;
-  let writeFailed = 0;
-  let readCompleted = 0;
-  for (const action of actions) {
-    if (action.effect === "write" && action.status === "completed") writeCompleted += 1;
-    else if (action.effect === "write" && action.status === "failed") writeFailed += 1;
-    else if (action.effect === "read" && action.status === "completed") readCompleted += 1;
-  }
-  const terminal = run.terminal?.reason ?? run.status;
-  return (
-    `<qi-run-facts runId="${run.runId}" writeCompleted=${writeCompleted} ` +
-    `writeFailed=${writeFailed} readCompleted=${readCompleted} terminal=${terminal} />`
-  );
+  const writes = Object.values(run.actions).filter((action) => action.effect === "write");
+  const hasCompleted = writes.some((action) => action.status === "completed");
+  const hasUnsuccessful = writes.some((action) => action.status !== "completed");
+  const writeSettlement = writes.length === 0
+    ? "none"
+    : hasCompleted && hasUnsuccessful
+      ? "mixed"
+      : hasCompleted
+        ? "completed"
+        : "unsuccessful";
+  return `writeSettlement=${writeSettlement}`;
+}
+
+const reservedRunFactsPattern = /[ \t]*<qi-run-facts\b[^>\r\n]*\/>[ \t]*/gi;
+
+/** Remove legacy Runtime-reserved fact tags from assistant-authored text before persistence or restoration. */
+function stripReservedRunFacts(value: string): string {
+  if (!value.includes("<qi-run-facts")) return value;
+  return value
+    .replace(reservedRunFactsPattern, "")
+    .replace(/[ \t]+\r?\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
 }
 
 function compileConversationHistory(
   view: SessionView | undefined,
   budgetTokens: number,
-): { messages: ModelMessage[]; omittedRunIds: RunId[] } {
+): { messages: ModelMessage[]; omittedRunIds: RunId[]; factsBlock?: ContextBlock } {
   if (!view) return { messages: [], omittedRunIds: [] };
-  const turns: Array<{ runId: RunId; messages: ModelMessage[] }> = [];
+  const turns: Array<{ runId: RunId; messages: ModelMessage[]; facts: string }> = [];
   for (const runId of view.runOrder) {
     const run = view.runs[runId];
     if (!run || run.trigger !== "user" || !run.input) continue;
@@ -1543,10 +1567,10 @@ function compileConversationHistory(
       && run.terminal?.reason === "budget"
       && run.steps[run.stepOrder.at(-1) ?? ""]?.finishReason === "handoff";
     if (!isCompleted && !isBudgetHandoff) continue;
-    const finalText = [...run.stepOrder]
+    const finalText = stripReservedRunFacts([...run.stepOrder]
       .reverse()
       .map((stepId) => run.steps[stepId]?.model?.text.trim())
-      .find((text): text is string => Boolean(text));
+      .find((text): text is string => Boolean(text)) ?? "");
     const narrative = isBudgetHandoff
       ? [
           "<qi-budget-handoff>",
@@ -1556,17 +1580,17 @@ function compileConversationHistory(
         ].join("\n")
       : finalText;
     if (!narrative) continue;
-    const assistantText = `${narrative}\n\n${formatRunHistoryFacts(run)}`;
     turns.push({
       runId,
+      facts: formatRunHistoryFacts(run),
       messages: [
         { role: "user", content: [{ type: "text", text: run.input }] },
-        { role: "assistant", content: [{ type: "text", text: assistantText }] },
+        { role: "assistant", content: [{ type: "text", text: narrative }] },
       ],
     });
   }
 
-  const selected: Array<{ runId: RunId; messages: ModelMessage[] }> = [];
+  const selected: Array<{ runId: RunId; messages: ModelMessage[]; facts: string }> = [];
   let usedTokens = 0;
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
@@ -1580,9 +1604,27 @@ function compileConversationHistory(
     usedTokens += turnTokens;
   }
   const selectedIds = new Set(selected.map((turn) => turn.runId));
+  const factsBlock = selected.length === 0
+    ? undefined
+    : {
+        id: "history:write-settlement",
+        kind: "recent" as const,
+        source: "qi:runtime",
+        role: "system" as const,
+        content: [
+          "Runtime-maintained write settlement summaries for restored conversation turns follow.",
+          "They only state whether a write-effect Action settled; they do not identify what changed or verify completion.",
+          "They are metadata, not assistant prose. Do not quote, reproduce, or invent them.",
+          ...selected.map((turn, index) => `- restoredTurn=${index + 1}; ${turn.facts}`),
+        ].join("\n"),
+        priority: 1_000,
+        required: true,
+        retentionReason: "A coarse write settlement counters unsupported mutation narration without Runtime telemetry.",
+      };
   return {
     messages: selected.flatMap((turn) => turn.messages),
     omittedRunIds: turns.map((turn) => turn.runId).filter((runId) => !selectedIds.has(runId)),
+    ...(factsBlock ? { factsBlock } : {}),
   };
 }
 

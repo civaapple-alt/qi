@@ -497,6 +497,7 @@ function createReport(bundle, workspace) {
 
 function detectSignals(narrative, events) {
   const signals = [];
+  const knownRunIds = new Set(narrative.runs.map((run) => run.runId));
   for (const run of narrative.runs) {
     const actions = run.steps.flatMap((step) => step.actions);
     const writeActions = actions.filter((action) => action.effect === "write" && action.status === "completed");
@@ -551,10 +552,32 @@ function detectSignals(narrative, events) {
         signals.push(signal(
           "medium",
           "CLAIMED_MUTATION_WITHOUT_ACTIONS",
-          "Final response claims a Workspace mutation, but this Run had no completed write Action",
+          "Final response claims a durable mutation, but this Run had no completed write Action",
           { runId: run.runId },
         ));
       }
+    }
+    const reservedFactTags = run.steps.flatMap((step) =>
+      [...String(step.modelText ?? "").matchAll(/<qi-run-facts\b[^>]*\brunId="([^"]+)"[^>]*\/>/gi)]
+        .map((match) => ({ stepId: step.stepId, embeddedRunId: match[1] }))
+    );
+    if (reservedFactTags.length > 0) {
+      const unknownRunIds = [...new Set(
+        reservedFactTags
+          .map((item) => item.embeddedRunId)
+          .filter((runId) => !knownRunIds.has(runId)),
+      )];
+      signals.push(signal(
+        "medium",
+        "RESERVED_RUN_FACTS_IN_MODEL_OUTPUT",
+        `${reservedFactTags.length} Runtime-reserved Run-fact tag(s) appeared in committed model output` +
+          (unknownRunIds.length > 0 ? `; ${unknownRunIds.length} referenced unknown Run IDs` : ""),
+        {
+          runId: run.runId,
+          stepIds: [...new Set(reservedFactTags.map((item) => item.stepId))],
+          unknownRunIds: unknownRunIds.slice(0, 16),
+        },
+      ));
     }
     const failedDedicated = failedActions.filter((action) => new Set(["edit", "write", "move", "remove"]).has(action.toolName));
     const laterShellMutation = actions.find((action) => action.toolName === "shell" && action.status === "completed" && action.diff);
@@ -588,7 +611,7 @@ function isVerificationAction(action) {
 export function claimsVerbalWorkspaceMutation(text) {
   if (typeof text !== "string" || !text.trim()) return false;
   return (
-    /已(?:经)?修复|已实际(?:执行|修改|完成|落盘)|(?:两处|问题)?都改掉了|已改掉|本轮实际修改成功|刚刚已用\s*`?edit`?|已用\s*`?edit`?\s*工具|(?:编辑工具|edit)\s*返回(?:了)?(?:确认\s*)?diff|diff\s*(?:均)?确认|强制滚动代码已(?:彻底)?删除|改动已实际落盘/i
+    /已(?:经)?修复|已实际(?:执行|修改|完成|落盘)|(?:两处|问题)?都改掉了|已改掉|本轮实际修改成功|刚刚已用\s*`?edit`?|已用\s*`?edit`?\s*工具|(?:编辑工具|edit)\s*返回(?:了)?(?:确认\s*)?diff|diff\s*(?:均)?确认|强制滚动代码已(?:彻底)?删除|改动已实际落盘|(?:正式)?计划(?:文档)?已(?:经)?(?:成功)?(?:更新|保存|持久化|补存)(?!吗|么|[？?])|修订版\s*\d+\s*已(?:经)?(?:成功)?(?:更新|保存|持久化)(?!吗|么|[？?])|已成功更新到实际计划文档/i
       .test(text)
     || /\balready\s+fixed\b|\bedit\s+returned\s+(?:a\s+)?diff\b|\bmutation\s+(?:has\s+)?landed\b|\bfixed\s+with\s+(?:an?\s+)?edit\b/i
       .test(text)

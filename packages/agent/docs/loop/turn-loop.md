@@ -79,11 +79,13 @@ preview. See [ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-a
 ## Context between Runs
 
 A new user-triggered Run reconstructs completed conversational turns from the same Session as portable user and
-assistant messages. Only the final response of a completed Run is normally restored. Each restored assistant
-message appends a compact `<qi-run-facts … />` footer derived from the Run projection (`writeCompleted`,
-`writeFailed`, `readCompleted`, and terminal reason). That footer is Session-fact annotation, not a tool
-transcript: it counters long-Session imitation of verbal “already fixed” narration without smuggling Action
-payloads into conversation. A budget-parked Run is
+assistant messages. Only the final response of a completed Run is normally restored. Each selected turn receives
+one Runtime-owned, local ordinal and a coarse write settlement class: `none`, `completed`, `unsuccessful`, or
+`mixed`. The block does not disclose durable Run/Action IDs, Action counts, reads, timestamps, paths, terminal
+reasons, or tool payloads. It is a grounding signal, not proof of what changed or verified completion. It never
+becomes assistant prose or a tool transcript, so later Runs can distinguish verbal “already fixed” narration from
+settled writes without teaching the model to echo or fabricate internal markup. Legacy reserved
+`<qi-run-facts … />` tags are removed from restored narrative and committed model responses. A budget-parked Run is
 restored only when a Step explicitly completed with `finishReason: handoff`; the injected wrapper states that the
 prior Run was paused, not completed. If the model produced no usable handoff, the Loop derives a deterministic
 summary from durable Step/Action/Plan facts. Tool transcripts, failed partial responses, and active Runs otherwise
@@ -92,6 +94,11 @@ turns are retained under `historyBudgetTokens`; when the budget is exhausted, ol
 pairs so role ordering and causal meaning remain intact. Every omitted Run is exposed in the next
 `context.compiled.omittedBlockIds` as `history:omitted:<runId>` so control surfaces can show when compaction
 actually occurred instead of inferring it from token use.
+
+This is an instance of the Runtime-to-model least-information boundary in
+[ADR 0026](../../../design/decisions.md#adr-0026-treat-runtime-to-model-disclosure-as-a-least-information-boundary).
+Complete lifecycle facts remain in the Session event stream and are available to explicitly authorized, bounded
+introspection rather than being injected into every model request.
 
 ## Stop conditions
 

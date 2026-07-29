@@ -12,8 +12,10 @@ steps and investigation history belong in pull requests, not release notes.
   read-only Web provenance/usage audit.
 - Added machine-wide local-user continuity under `$QI_HOME/state`, transactional/versioned Memory indexes,
   exact-scope and CJK retrieval, activation limits, and startup projection recovery.
-- Session extract reports may emit `CLAIMED_MUTATION_WITHOUT_ACTIONS` when a responded Run claims a Workspace
-  mutation in prose without any completed write Action (diagnostic only; Run completion is unchanged).
+- Session extract reports may emit `CLAIMED_MUTATION_WITHOUT_ACTIONS` when a responded Run claims a Workspace or
+  Formal Plan mutation in prose without any completed write Action, and
+  `RESERVED_RUN_FACTS_IN_MODEL_OUTPUT` for legacy internal fact tags committed as model text (diagnostic only;
+  Run completion is unchanged).
 
 ### Changed
 
@@ -30,8 +32,9 @@ steps and investigation history belong in pull requests, not release notes.
 - TUI `update_plan` Work Plan cards now keep a full ✔/◐/○ Todo list in the chat stream (including mid-Run
   collapsed Steps), with a `Working on N to-dos · M/N done` header instead of a one-line summary.
 - Collapsed or mid-Run `shell`/`script`/`verify` cards now show up to three trailing output lines instead of one.
-- Restored cross-Run conversation history now appends a compact `<qi-run-facts>` footer with durable write/read
-  Action counts and terminal reason, without replaying tool transcripts.
+- Restored cross-Run conversation history now supplies only a local turn ordinal and coarse write settlement class
+  in a Runtime-owned system ContextBlock. Durable IDs, Action/read counts, terminal details, paths, and tool
+  payloads remain outside automatic model context and are available only through bounded introspection.
 - Agent constitution and mode guidance now state that minimizing investigative tool calls does not skip
   `edit`/`write`, and that planned code blocks are not proof of a durable Workspace mutation.
 - Executor timelines now render accepted Formal Plans as at most 200 terminal lines without paste
@@ -50,6 +53,10 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- Fixed Formal Plan drafting completion so a read-only `plan_document` Action cannot masquerade as a new
+  revision; the Run now requires a completed write-effect create/edit before offering review.
+- Removed legacy `<qi-run-facts>` tags from restored and committed assistant text so models cannot multiply or
+  fabricate internal Session metadata in the visible timeline.
 - Made the `plan_document` function parameters compatible with Moonshot/Kimi JSON Schema validation while
   preserving strict per-operation field checks inside the Tool.
 - Fixed failed `plan_document` cards so ToolFailure envelopes show the operation, error code, and message instead
