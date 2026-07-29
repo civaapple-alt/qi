@@ -6,6 +6,7 @@ const messages = {
   zh: {
     "cmd.help": "列出常用命令与快捷键；/help advanced 查看全部",
     "cmd.settings": "设置：模式、权限、提供商、配置、主题、语言、状态",
+    "cmd.memory": "查看本轮命中、待确认、项目与用户记忆；添加、纠正、提升、固定或遗忘",
     "cmd.status": "查看当前选中的 Run / Step / Action",
     "cmd.config": "查看生效的模型、路径与能力授权",
     "cmd.context": "查看 token 用量、省略与压缩策略",
@@ -232,6 +233,7 @@ const messages = {
   en: {
     "cmd.help": "List common commands and shortcuts; /help advanced for all",
     "cmd.settings": "Settings: mode, permissions, providers, config, theme, language, status",
+    "cmd.memory": "Inspect used, pending, project, and user memory; add, correct, promote, pin, or forget",
     "cmd.status": "Show the selected Run, Step, and Action",
     "cmd.config": "Show effective model, paths, and capability grants",
     "cmd.context": "Show token use, omissions, and compaction policy",

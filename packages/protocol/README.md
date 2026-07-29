@@ -47,6 +47,9 @@ for untrusted serialized input.
   this additive value keep their prior history behavior.
 - `action.freshness.rebased` records the original and effective whole-file digests when the Loop safely chains a
   same-Step `edit` after a completed edit; it must precede authority and executor entry.
+- New Memory facts use the structured `MemoryScope` union. `memory.user.asserted` records an explicit human
+  source and `memory.activation.changed` records `relevant` versus user-only `always`; legacy string scopes
+  remain replayable but isolated.
 
 ## Failure semantics
 

@@ -80,7 +80,15 @@ network = false
 execute = false
 background = false
 delegate = false
+
+[memory]
+enabled = true
+auto_accept_project = true
 ```
+
+Memory is captured only from explicit `/memory` actions or provenance-backed proposals during new Runs; Qi does
+not mine old conversations. Session and Project Memory stay in the current project. Only explicitly confirmed
+User Memory is stored in `$QI_HOME/state` and retrieved across projects.
 
 For Kimi Code, `model = "k3"` automatically selects a 1,048,576-token window; `k3-256k`,
 `kimi-for-coding`, and `kimi-for-coding-highspeed` select 262,144 unless `context_window_tokens` overrides it.

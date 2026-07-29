@@ -119,9 +119,12 @@ The Context Compiler selects source-aware blocks under a working budget. Model w
 budget are distinct. Settled exchanges may compact into causal summaries plus Artifact references; complete
 events remain unchanged.
 
-Memory is not transcript accumulation. Claims have provenance, scope, confidence, correction, forgetting, and
-sensitivity rules. Only accepted, relevant claims can enter context. Sensitive and relational claims do not
-self-promote.
+Memory is not transcript accumulation. Claims have provenance, structured Session/Project/User scope, confidence,
+correction, forgetting, activation, and sensitivity rules. Project claims stay within one project; explicitly
+confirmed User claims live in a machine-private Continuity Session and may cross projects. Project and user
+SQLite indexes are rebuildable projections. Only accepted, relevant or explicitly always-active claims can enter
+context, and Context Compiler records whether each optional block was included. Sensitive, relational, and
+User-scoped claims do not self-promote.
 
 ## 6. Goals, evidence, and completion
 

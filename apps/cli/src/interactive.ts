@@ -31,6 +31,12 @@ import { defaultUserConfigPath, persistUserLanguage, persistUserTheme, loadUserC
 import { ComposerComponent } from "./composer.js";
 import { FollowUpQueue } from "./follow-ups.js";
 import { FollowUpsComponent } from "./follow-ups-view.js";
+import {
+  formatMemoryClaims,
+  memoryIdsUsedInLatestRun,
+  memoryUsageInLatestRun,
+  parseMemoryCommand,
+} from "./memory-command.js";
 import { persistLoginProviderDefaults } from "./login-persist.js";
 import { formatProviderLabel } from "./provider.js";
 import { t, type Locale } from "./i18n.js";
@@ -456,8 +462,16 @@ export class InteractiveTui {
     const task = operation()
       .then((result) => {
         if (result.status === "completed") {
-          // Keep operator info notices (login, permissions, …) across the next Run.
-          this.#presenter.clearRunNotice();
+          const pendingMemories = this.#runtime.pendingMemoryCountForLatestRun();
+          if (pendingMemories > 0) {
+            this.#presenter.setNotice(
+              `${pendingMemories} Memory candidate${pendingMemories === 1 ? "" : "s"} await review · /memory list pending`,
+              "run",
+            );
+          } else {
+            // Keep operator info notices (login, permissions, …) across the next Run.
+            this.#presenter.clearRunNotice();
+          }
           return;
         }
         this.#presenter.update(this.#runtime.events(), this.#runtime.view());
@@ -1177,6 +1191,220 @@ export class InteractiveTui {
     this.#presenter.patchAuthLaunch({ ...status, ...context });
   }
 
+  #openMemoryPanel(scope?: "session" | "project" | "user" | "pending"): void {
+    const usage = memoryUsageInLatestRun(this.#runtime.events());
+    const claims = this.#runtime.listMemories().filter((claim) => {
+      if (!scope) return true;
+      if (scope === "pending") return claim.status === "candidate";
+      if (scope === "project") {
+        return typeof claim.scope !== "string" &&
+          (claim.scope.kind === "session" || claim.scope.kind === "project");
+      }
+      return typeof claim.scope !== "string" && claim.scope.kind === scope;
+    });
+    this.#openScrollPanel(
+      "/memory",
+      formatMemoryClaims(claims, {
+        title: scope ? `${scope[0]?.toUpperCase()}${scope.slice(1)} Memory` : "Memory",
+        usedMemoryIds: usage.included,
+        omittedMemoryIds: usage.omitted,
+      }),
+    );
+    this.#render();
+  }
+
+  #openUsedMemoryPanel(): void {
+    const used = memoryIdsUsedInLatestRun(this.#runtime.events());
+    this.#openScrollPanel(
+      "Used this Run",
+      formatMemoryClaims(
+        this.#runtime.listMemories().filter((claim) => used.has(claim.memoryId)),
+        { title: "Used this Run", usedMemoryIds: used },
+      ),
+    );
+    this.#render();
+  }
+
+  #openMemoryHub(): void {
+    const claims = this.#runtime.listMemories();
+    const used = memoryIdsUsedInLatestRun(this.#runtime.events());
+    const count = (predicate: (claim: (typeof claims)[number]) => boolean) => claims.filter(predicate).length;
+    this.#panels.push(new ListPanel({
+      title: "Memory",
+      hints: "↑↓ select · Enter open · Esc close",
+      items: [
+        {
+          id: "used",
+          label: "Used this Run",
+          description: `${used.size} actually included ContextBlock${used.size === 1 ? "" : "s"}`,
+        },
+        {
+          id: "pending",
+          label: "Pending",
+          description: `${count((claim) => claim.status === "candidate")} candidates await review`,
+        },
+        {
+          id: "project",
+          label: "Project",
+          description: `${count((claim) =>
+            typeof claim.scope !== "string" &&
+            (claim.scope.kind === "session" || claim.scope.kind === "project"))} project-local claims`,
+        },
+        {
+          id: "user",
+          label: "User",
+          description: `${count((claim) =>
+            typeof claim.scope !== "string" && claim.scope.kind === "user")} explicit cross-project claims`,
+        },
+        {
+          id: "add",
+          label: "Add Memory",
+          description: "confirm final scope, activation, and plaintext storage",
+        },
+        {
+          id: "all",
+          label: "All lifecycle entries",
+          description: `${claims.length} claims across available indexes`,
+        },
+      ],
+      onClose: this.#panels.dismiss,
+      onSelect: (item) => {
+        if (item.id === "add") {
+          this.#openRememberMemoryForm();
+          return;
+        }
+        if (item.id === "used") {
+          this.#openUsedMemoryPanel();
+          return;
+        }
+        this.#openMemoryPanel(
+          item.id === "pending" || item.id === "project" || item.id === "user"
+            ? item.id
+            : undefined,
+        );
+      },
+    }));
+    this.#render();
+  }
+
+  #openRememberMemoryForm(): void {
+    this.#panels.push(new FormPanel({
+      title: "Add Memory",
+      description:
+        "Session/Project stays in this project. User is stored as machine-private plaintext " +
+        "under $QI_HOME and is available across projects only after this submission.",
+      fields: [
+        {
+          id: "scope",
+          label: "Final scope",
+          options: [
+            { value: "project", label: "Project", description: "all Sessions in this project" },
+            { value: "session", label: "Session", description: "this Session only" },
+            { value: "user", label: "User", description: "explicit cross-project continuity" },
+          ],
+          required: true,
+        },
+        {
+          id: "activation",
+          label: "Activation",
+          options: [
+            { value: "relevant", label: "Relevant", description: "retrieve when the query matches" },
+            { value: "always", label: "Always", description: "User scope only; at most four" },
+          ],
+          required: true,
+        },
+        {
+          id: "statement",
+          label: "Memory",
+          placeholder: "What should Qi remember?",
+          required: true,
+        },
+      ],
+      submitLabel: "Confirm Memory",
+      onClose: this.#panels.dismiss,
+      onSubmit: (values) => {
+        const scope = values.scope as "session" | "project" | "user";
+        const activation = values.activation as "relevant" | "always";
+        if (activation === "always" && scope !== "user") {
+          this.#presenter.setNotice("Always activation is only available for User Memory.");
+          this.#render();
+          return;
+        }
+        this.#panels.closeAll();
+        this.#runMemoryOperation(() =>
+          this.#runtime.rememberMemory(values.statement ?? "", scope, activation),
+        );
+      },
+    }));
+    this.#render();
+  }
+
+  #runMemoryOperation(operation: () => { memoryId: string; statement: string; status: string }): void {
+    this.#startManagementTask(async () => {
+      const claim = operation();
+      this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+      this.#presenter.setNotice(
+        `Memory ${claim.memoryId} · ${claim.status} · ${claim.statement}`,
+      );
+    }, "Memory");
+  }
+
+  #handleMemoryCommand(argument: string): void {
+    const trimmed = argument.trim();
+    if (!trimmed) {
+      this.#openMemoryHub();
+      return;
+    }
+    if (trimmed === "remember" || trimmed === "add") {
+      this.#openRememberMemoryForm();
+      return;
+    }
+    try {
+      const request = parseMemoryCommand(argument);
+      switch (request.mode) {
+        case "list":
+          this.#openMemoryPanel(request.scope);
+          return;
+        case "remember":
+          this.#runMemoryOperation(() =>
+            this.#runtime.rememberMemory(request.statement, request.scope, request.activation),
+          );
+          return;
+        case "accept":
+          this.#runMemoryOperation(() => this.#runtime.acceptMemory(request.memoryId));
+          return;
+        case "correct":
+          this.#runMemoryOperation(() =>
+            this.#runtime.correctMemory(request.memoryId, request.statement),
+          );
+          return;
+        case "forget":
+          this.#runMemoryOperation(() =>
+            this.#runtime.forgetMemory(request.memoryId, request.reason),
+          );
+          return;
+        case "promote":
+          this.#runMemoryOperation(() =>
+            this.#runtime.promoteMemory(request.memoryId, request.activation),
+          );
+          return;
+        case "pin":
+          this.#runMemoryOperation(() =>
+            this.#runtime.setMemoryActivation(request.memoryId, "always"),
+          );
+          return;
+        case "unpin":
+          this.#runMemoryOperation(() =>
+            this.#runtime.setMemoryActivation(request.memoryId, "relevant"),
+          );
+          return;
+      }
+    } catch (error) {
+      this.#presenter.setNotice(message(error));
+      this.#render();
+    }
+  }
+
   #maybeOfferRunQuestion(): void {
     const view = this.#runtime.view();
     const run = view?.currentRunId ? view.runs[view.currentRunId] : undefined;
@@ -1248,6 +1476,10 @@ export class InteractiveTui {
     }
     if (name === "settings") {
       openSettingsPanel(this.#panelFlow());
+      return;
+    }
+    if (name === "memory") {
+      this.#handleMemoryCommand(argument);
       return;
     }
     if (name === "providers") {

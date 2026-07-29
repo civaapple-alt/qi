@@ -5,6 +5,7 @@ import { SessionIdSchema, assertSchema, type SessionId } from "@civaapple/qi-pro
 import { EventStreamService, SessionEventHub, encodeSseEvent } from "@civaapple/qi-node/stream";
 import { css, html, javascript } from "./assets.js";
 import { ProjectEventStoreRegistry } from "./projects.js";
+import { projectMemoryAudit, singleDatabaseMemoryAudit } from "./memory-audit.js";
 import { projectWebSession } from "./projection.js";
 
 export interface WebServerOptions {
@@ -68,10 +69,15 @@ export class QiWebServer {
         }
         if (match[2] === "workbench") {
           const events = store.read(sessionId).events;
+          const projectId = url.searchParams.get("project")?.trim();
+          const memory = this.#registry && projectId
+            ? projectMemoryAudit(this.#registry.projectsRoot, projectId, events)
+            : singleDatabaseMemoryAudit(view, events);
           return send(response, 200, "application/json", JSON.stringify({
             view,
             narrative: projectWebSession(view, events),
             events,
+            memory,
           }));
         }
         if (match[2] === "events") {

@@ -44,7 +44,20 @@ const renderers: Record<string, Renderer> = {
   plan_document: renderPlanDocument,
   update_plan: renderWorkPlan,
   ask_question: renderAskQuestion,
+  memory: renderMemory,
 };
+
+function renderMemory(model: ToolCardModel, options: ToolCardOptions): string[] {
+  const input = record(model.input);
+  const output = model.output;
+  const scope = String(output?.scope ?? input?.scope ?? "current");
+  const result = String(output?.status ?? model.errorCode ?? model.status);
+  const statement = typeof input?.statement === "string" ? input.statement : "Memory proposal";
+  const lines = [header(model, `Memory · ${scope}`, result)];
+  if (!options.summaryOnly) lines.push(`  ${oneLine(statement, 110)}`);
+  if (output?.requiresConfirmation === true) lines.push("  pending user confirmation · /memory list pending");
+  return lines;
+}
 
 export function renderToolCard(model: ToolCardModel, options: ToolCardOptions = {}): string[] {
   return (renderers[model.toolName] ?? renderGeneric)(model, options);

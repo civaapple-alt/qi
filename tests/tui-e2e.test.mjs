@@ -7,6 +7,196 @@ import { ScriptedModelPort } from "@civaapple/qi-ai";
 import { SqliteEventStore } from "@civaapple/qi-node/storage";
 import { renderEvent, renderStatus, TuiRuntime } from "../apps/cli/dist/index.js";
 
+test("Memory persists across Sessions and only explicit User Memory crosses projects", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-memory-scope-"));
+  const qiHome = join(root, "home");
+  const projectA = join(root, "project-a");
+  const projectB = join(root, "project-b");
+  await mkdir(projectA, { recursive: true });
+  await mkdir(projectB, { recursive: true });
+  let runtime;
+  try {
+    runtime = await TuiRuntime.create({
+      workspaceRoot: projectA,
+      dataRoot: join(projectA, ".qi"),
+      qiHome,
+      projectId: "project-a",
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "fake", model: "memory-v1" },
+    });
+    const projectClaim = runtime.rememberMemory("Project A uses pnpm.", "project");
+    const userClaim = runtime.rememberMemory("The user prefers concise status.", "user", "always");
+    assert.equal(projectClaim.scope.kind, "project");
+    assert.equal(userClaim.scope.kind, "user");
+    assert.equal(userClaim.activation, "always");
+    await runtime.close();
+    runtime = undefined;
+
+    runtime = await TuiRuntime.create({
+      workspaceRoot: projectA,
+      dataRoot: join(projectA, ".qi"),
+      qiHome,
+      projectId: "project-a",
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "fake", model: "memory-v1" },
+    });
+    assert.deepEqual(
+      runtime.listMemories({ statuses: ["accepted"] }).map((claim) => claim.statement).sort(),
+      ["Project A uses pnpm.", "The user prefers concise status."],
+    );
+    await runtime.close();
+    runtime = undefined;
+
+    runtime = await TuiRuntime.create({
+      workspaceRoot: projectB,
+      dataRoot: join(projectB, ".qi"),
+      qiHome,
+      projectId: "project-b",
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "fake", model: "memory-v1" },
+    });
+    const crossProject = runtime.listMemories({ statuses: ["accepted"] });
+    assert.deepEqual(crossProject.map((claim) => claim.statement), ["The user prefers concise status."]);
+    assert.equal(crossProject[0].scope.kind, "user");
+  } finally {
+    await runtime?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disabled Memory remains manageable but is not injected, and secrets never enter Session events", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-memory-disabled-"));
+  let runtime;
+  const model = new ScriptedModelPort([
+    (request) => {
+      const prompt = request.messages.flatMap((message) => message.content)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+      assert.doesNotMatch(prompt, /Remembered while disabled/);
+      assert.equal(request.tools.some((tool) => tool.name === "memory"), false);
+      return [
+        { type: "text.delta", delta: "Memory injection is disabled." },
+        { type: "completed", finishReason: "stop" },
+      ];
+    },
+  ]);
+  try {
+    runtime = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi"),
+      qiHome: join(root, "home"),
+      projectId: "disabled-project",
+      memoryEnabled: false,
+      modelPort: model,
+      model: { provider: "fake", model: "memory-disabled-v1" },
+    });
+    const claim = runtime.rememberMemory("Remembered while disabled.", "project");
+    assert.equal(runtime.listMemories().some((candidate) => candidate.memoryId === claim.memoryId), true);
+    assert.throws(
+      () => runtime.rememberMemory("API token sk-1234567890abcdefghijklmnop", "project"),
+      /was not recorded/i,
+    );
+    assert.equal(
+      runtime.events().some((event) =>
+        JSON.stringify(event.data).includes("sk-1234567890abcdefghijklmnop")),
+      false,
+    );
+    const result = await runtime.run("Report whether Memory is injected.");
+    assert.equal(result.status, "completed");
+  } finally {
+    await runtime?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Memory tool auto-accepts exact public project evidence and injects it on the next Run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-memory-tool-"));
+  let runtime;
+  const model = new ScriptedModelPort([
+    (request) => {
+      assert.equal(request.tools.some((tool) => tool.name === "memory"), true);
+      return [
+        {
+          type: "action.requested",
+          callId: "call_memory_project",
+          name: "memory",
+          input: {
+            statement: "This repository uses pnpm.",
+            layer: "semantic",
+            scope: "project",
+            sensitivity: "public",
+            confidence: 0.95,
+            source: { kind: "user_input", evidenceQuote: "repository uses pnpm" },
+          },
+        },
+        {
+          type: "action.requested",
+          callId: "call_memory_user",
+          name: "memory",
+          input: {
+            statement: "The user prefers concise status.",
+            layer: "semantic",
+            scope: "user",
+            sensitivity: "private",
+            confidence: 0.99,
+            source: { kind: "user_input", evidenceQuote: "Remember that" },
+          },
+        },
+        { type: "completed", finishReason: "actions" },
+      ];
+    },
+    (request) => {
+      const result = request.messages.flatMap((message) => message.content)
+        .find((part) => part.type === "tool-result" && part.callId === "call_memory_project");
+      assert.ok(result);
+      assert.equal(JSON.parse(result.output[0].text).status, "accepted");
+      const pending = request.messages.flatMap((message) => message.content)
+        .find((part) => part.type === "tool-result" && part.callId === "call_memory_user");
+      assert.ok(pending);
+      assert.equal(JSON.parse(pending.output[0].text).status, "candidate");
+      return [
+        { type: "text.delta", delta: "Saved the project Memory." },
+        { type: "completed", finishReason: "stop" },
+      ];
+    },
+    (request) => {
+      const prompt = request.messages.flatMap((message) => message.content)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+      assert.match(prompt, /This repository uses pnpm\./);
+      return [
+        { type: "text.delta", delta: "The project uses pnpm." },
+        { type: "completed", finishReason: "stop" },
+      ];
+    },
+  ]);
+  try {
+    runtime = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi"),
+      qiHome: join(root, "home"),
+      projectId: "memory-tool-project",
+      modelPort: model,
+      model: { provider: "fake", model: "memory-tool-v1" },
+    });
+    assert.equal((await runtime.run("This repository uses pnpm. Remember that.")).status, "completed");
+    const claim = runtime.listMemories({ statuses: ["accepted"] })[0];
+    assert.equal(claim.statement, "This repository uses pnpm.");
+    assert.equal(runtime.pendingMemoryCountForLatestRun(), 1);
+    const pending = runtime.listMemories({ statuses: ["candidate"] })[0];
+    assert.equal(pending.scope.kind, "user");
+    runtime.acceptMemory(pending.memoryId);
+    assert.equal((await runtime.run("Which package manager does this project use?")).status, "completed");
+    const compiled = runtime.events().filter((event) => event.type === "context.compiled").at(-1);
+    assert.equal(compiled.data.includedBlockIds.includes(`memory:${claim.memoryId}`), true);
+  } finally {
+    await runtime?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("TUI declared verification generates a private manifest from package scripts", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-generated-verify-"));
   const dataRoot = join(root, ".qi");

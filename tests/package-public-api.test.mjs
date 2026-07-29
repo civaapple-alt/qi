@@ -45,7 +45,7 @@ const expectedRuntimeExports = {
   "@civaapple/qi-agent/loop": [
     "ASK_MODE_TOOLS", "EventWriter", "HumanControlService", "PLAN_MODE_EXTRA_TOOLS",
     "SESSION_MODES", "SessionSupervisor", "SteeringMailbox", "TurnLoop",
-    "firstIncompleteItem", "formatModeLabel", "formatPlanItemInput", "isToolAllowedInMode",
+    "firstIncompleteItem", "formatModeLabel", "formatPlanItemInput", "formatRunHistoryFacts", "isToolAllowedInMode",
     "latestTerminalPlanBoundRun", "nextSessionMode", "toolsForMode",
   ],
   "@civaapple/qi-agent/tools": [
@@ -54,10 +54,13 @@ const expectedRuntimeExports = {
   ],
   "@civaapple/qi-agent/effects": ["effectIdempotencyKey", "effectIntentHash"],
   "@civaapple/qi-node/mcp": ["McpBridge"],
-  "@civaapple/qi-agent/memory": ["ContinuityController", "MemoryController"],
+  "@civaapple/qi-agent/memory": [
+    "ContinuityController", "MemoryController", "MemoryIndexPendingError",
+    "memoryRelevanceScore", "memoryScopeKey",
+  ],
   "@civaapple/qi-protocol": [
     "ActionIdSchema", "EvaluationIdSchema", "EventIdSchema", "EvidenceIdSchema",
-    "GoalIdSchema", "LeaseIdSchema", "MemoryIdSchema", "PlanIdSchema",
+    "GoalIdSchema", "LeaseIdSchema", "MemoryIdSchema", "MemoryScopeSchema", "PlanIdSchema",
     "PlanItemIdSchema", "QuestionIdSchema", "ReceiptIdSchema", "RunIdSchema",
     "SessionEventSchema", "SessionIdSchema", "SessionModeSchema", "StepIdSchema",
     "TaskIdSchema", "WorkItemIdSchema", "WorkPlanIdSchema", "assertSchema", "createId", "parseSessionEvent",
@@ -70,7 +73,7 @@ const expectedRuntimeExports = {
     "QI_LAYOUT_GENERATION", "QI_LAYOUT_VERSION", "assertSafePrivateRoot",
     "canonicalWorkspacePath", "defaultProjectConfigPath", "defaultProjectsRoot",
     "defaultQiHome", "defaultSessionDataRoot", "discoverProjects", "ensureProjectLayout",
-    "ensureQiLayout", "projectPaths", "workspaceProjectId",
+    "ensureQiLayout", "projectPaths", "qiStatePaths", "workspaceProjectId",
   ],
   "@civaapple/qi-node/extensions": [
     "DeclarativePackageStore", "WORKSPACE_QI_DIRECTORIES", "WORKSPACE_QI_FILES",

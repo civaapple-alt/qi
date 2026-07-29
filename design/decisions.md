@@ -288,6 +288,29 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 - Session extractors may emit a diagnostic `CLAIMED_MUTATION_WITHOUT_ACTIONS` signal when a responded Run claims
   mutation in prose with zero completed write Actions; that signal does not change Run completion semantics.
 
+## ADR-0025: make memory scope explicit and user continuity opt-in
+
+- New Memory claims use structured `session`, `project`, or `user` scopes. Runtime composition binds the concrete
+  Session, project, and local-user IDs; a model may request a scope class but cannot name or widen its authority
+  domain. Legacy string scopes remain replayable but do not participate in automatic cross-domain retrieval.
+- Project and Session claims remain facts in the owning project's Session streams. Cross-project User claims live
+  in one machine-private Continuity Session under `$QI_HOME/state`; this preserves append-only Session truth while
+  allowing correction and forgetting from any Workspace.
+- Promotion copies an accepted Project claim into a new, explicitly confirmed User claim with provenance. It never
+  mutates the original claim's scope or makes Project memory visible elsewhere.
+- The project and user SQLite Memory indexes are rebuildable projections. Event append commits before index
+  application; stable operation identities and startup replay repair an interrupted projection without creating
+  duplicate claims.
+- The model may propose only provenance-backed candidates. Runtime auto-accept is limited to public,
+  non-relational Session/Project claims backed by an exact user-input or completed-Action excerpt. User, private,
+  secret, relational, correction, and promotion candidates require an explicit user actor.
+- User claims may be marked `always` only by the user. At most four bounded claims are preferentially considered
+  for each Run; Context Compiler omission remains explicit and Memory still grants no Tool authority.
+- Memory capture and retrieval are enabled by default but configurable. Existing conversations are never mined
+  automatically; only existing Memory events are replayed.
+- Memory claim text remains plaintext inside machine-private SQLite files. Credential-like material is rejected at
+  the durable boundary regardless of sensitivity or confirmation.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

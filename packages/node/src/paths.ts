@@ -56,6 +56,21 @@ export interface ProjectPaths {
   readonly temporaryRoot: string;
 }
 
+export interface QiStatePaths {
+  readonly stateRoot: string;
+  readonly continuityDatabaseFile: string;
+  readonly memoryFile: string;
+}
+
+export function qiStatePaths(qiHome: string): QiStatePaths {
+  const stateRoot = resolve(qiHome, "state");
+  return {
+    stateRoot,
+    continuityDatabaseFile: resolve(stateRoot, "continuity.sqlite"),
+    memoryFile: resolve(stateRoot, "memory.sqlite"),
+  };
+}
+
 export function defaultQiHome(
   environment: QiEnvironment = process.env,
   homeDirectory = homedir(),
@@ -158,6 +173,7 @@ export async function ensureQiLayout(
   await assertLayoutGeneration(root);
   await mkdir(root, { recursive: true });
   const directories = [
+    "state",
     "credentials",
     "resources/skills",
     "resources/prompts",

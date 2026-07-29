@@ -90,6 +90,41 @@ export const SessionModeSchema = Type.Union([
   Type.Literal("agent"),
 ]);
 
+export const MemoryScopeSchema = Type.Union([
+  Type.Object(
+    { kind: Type.Literal("session"), sessionId: SessionIdSchema },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("project"),
+      projectId: Type.String({ minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { kind: Type.Literal("user"), userId: Type.Literal("local") },
+    { additionalProperties: false },
+  ),
+]);
+
+export type MemoryScope = Static<typeof MemoryScopeSchema>;
+export type MemoryActivation = "relevant" | "always";
+
+const MemoryProvenanceSchema = Type.Object(
+  {
+    projectId: Type.Optional(Type.String({
+      minLength: 1,
+      maxLength: 200,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    })),
+    sessionId: SessionIdSchema,
+    eventId: EventIdSchema,
+    sequence: Type.Integer({ minimum: 1 }),
+  },
+  { additionalProperties: false },
+);
+
 const PlanItemSchema = Type.Object(
   {
     planItemId: PlanItemIdSchema,
@@ -601,10 +636,22 @@ export const SessionEventSchema = Type.Union([
     ),
   ),
   event(
+    "memory.user.asserted",
+    Type.Object(
+      {
+        operationId: Type.String({ minLength: 1, maxLength: 200 }),
+        statement: Type.String({ minLength: 1, maxLength: 2_000 }),
+        scope: MemoryScopeSchema,
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
     "memory.candidate.created",
     Type.Object(
       {
         memoryId: MemoryIdSchema,
+        operationId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
         layer: Type.Union([
           Type.Literal("working"),
           Type.Literal("episodic"),
@@ -613,16 +660,17 @@ export const SessionEventSchema = Type.Union([
           Type.Literal("relational"),
         ]),
         statement: Type.String({ minLength: 1, maxLength: 20_000 }),
-        scope: Type.String({ minLength: 1, maxLength: 500 }),
-        provenance: Type.Array(Type.Object(
-          { sessionId: SessionIdSchema, eventId: EventIdSchema, sequence: Type.Integer({ minimum: 1 }) },
-          { additionalProperties: false },
-        ), { minItems: 1 }),
+        scope: Type.Union([
+          MemoryScopeSchema,
+          Type.String({ minLength: 1, maxLength: 500 }),
+        ]),
+        provenance: Type.Array(MemoryProvenanceSchema, { minItems: 1 }),
         confidence: Type.Number({ minimum: 0, maximum: 1 }),
         sensitivity: Type.Union([Type.Literal("public"), Type.Literal("private"), Type.Literal("secret")]),
         validFrom: Type.String({ pattern: isoTimestampPattern }),
         expiresAt: Type.Optional(Type.String({ pattern: isoTimestampPattern })),
         contradictionOf: Type.Optional(MemoryIdSchema),
+        derivedFromMemoryId: Type.Optional(MemoryIdSchema),
         requiresConfirmation: Type.Boolean(),
       },
       { additionalProperties: false },
@@ -902,6 +950,16 @@ export const SessionEventSchema = Type.Union([
           Type.Literal("publish"),
           Type.Literal("spend"),
         ]),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "memory.activation.changed",
+    Type.Object(
+      {
+        memoryId: MemoryIdSchema,
+        activation: Type.Union([Type.Literal("relevant"), Type.Literal("always")]),
       },
       { additionalProperties: false },
     ),

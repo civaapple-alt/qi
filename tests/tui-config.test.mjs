@@ -40,6 +40,10 @@ background = true
 [shell]
 default = "pwsh"
 allowed = ["direct", "pwsh"]
+
+[memory]
+enabled = false
+auto_accept_project = false
 `);
     const loaded = await loadUserConfig(path);
     assert.equal(loaded.exists, true);
@@ -53,6 +57,7 @@ allowed = ["direct", "pwsh"]
       maxSteps: 32,
       capabilities: { write: true, verify: true, network: true, execute: false, background: true },
       shell: { default: "pwsh", allowed: ["direct", "pwsh"] },
+      memory: { enabled: false, autoAcceptProject: false },
     });
     assert.deepEqual(resolveCapabilities(loaded.config.capabilities), {
       allowWrite: true,
@@ -84,6 +89,10 @@ execute = true
 [shell]
 default = "direct"
 allowed = ["direct", "pwsh"]
+
+[memory]
+enabled = true
+auto_accept_project = false
 `);
     const saved = await persistUserProviderDefaults({
       provider: "deepseek",
@@ -97,9 +106,11 @@ allowed = ["direct", "pwsh"]
     assert.equal(saved.config.baseURL, "https://api.deepseek.com/v1");
     assert.deepEqual(saved.config.capabilities, { write: true, execute: true });
     assert.deepEqual(saved.config.shell, { default: "direct", allowed: ["direct", "pwsh"] });
+    assert.deepEqual(saved.config.memory, { enabled: true, autoAcceptProject: false });
     const reloaded = await loadUserConfig(path);
     assert.equal(reloaded.config.provider, "deepseek");
     assert.equal(reloaded.config.model, "deepseek-v4-pro");
+    assert.deepEqual(reloaded.config.memory, { enabled: true, autoAcceptProject: false });
     const body = await readFile(path, "utf8");
     assert.match(body, /provider = "deepseek"/);
     assert.doesNotMatch(body, /api_key|secret/i);

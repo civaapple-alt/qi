@@ -17,14 +17,17 @@ presence signals.
 
 ## Core model
 
-`MemoryController` proposes, accepts, disputes, corrects, and forgets claims. `SqliteMemoryIndex` stores accepted
-and lifecycle-aware entries for retrieval. Every durable claim references a real immutable Session event.
+`MemoryController` proposes, accepts, disputes, corrects, activates, and forgets claims through the portable
+`MemoryIndex` port. Node's `SqliteMemoryIndex` stores lifecycle-aware, rebuildable retrieval projections. Every
+durable claim references a real immutable Session event.
 
 ## Behavioral invariants
 
 - Long-lived claims have provenance and explicit status.
 - Correction and forgetting remove superseded content from retrieval.
 - Sensitive and relational candidates require user confirmation.
+- Session/Project/User scopes are structured; only explicitly confirmed User claims cross projects.
+- Only a user may select `always`; at most four accepted User claims may use it.
 - Working and expired claims never re-enter long-lived context.
 - Quiet hours and attention budgets govern interruption independently of memory relevance.
 
@@ -40,11 +43,13 @@ npm install @civaapple/qi-agent/memory
 ```
 
 ```ts
-import { SqliteMemoryIndex } from "@civaapple/qi-agent/memory";
+import { MemoryController } from "@civaapple/qi-agent/memory";
+import { SqliteMemoryIndex } from "@civaapple/qi-node/storage";
 
 const index = new SqliteMemoryIndex(":memory:");
 try {
-  // Controllers write only provenance-validated claims into the derived index.
+  const controller = new MemoryController(eventStore, index, sessionId);
+  // Controllers write provenance-validated events, then update the derived index.
 } finally {
   index.close();
 }
@@ -52,7 +57,8 @@ try {
 
 ## Public API
 
-`MemoryController`, `SqliteMemoryIndex`, claim types, `ContinuityController`, and attention decision types.
+`MemoryController`, `MemoryIndex`, claim/scope types, `ContinuityController`, and attention decision types.
+`SqliteMemoryIndex` is exported by `@civaapple/qi-node/storage`.
 
 ## Change guide
 
@@ -66,6 +72,6 @@ forgetting, quiet hours, and presence.
 
 ## Further reading
 
-- [Memory lifecycle](docs/memory-lifecycle.md)
-- [Attention and presence](docs/attention-and-presence.md)
-- [Memory design](../../design/system-design.md#5-context-models-and-memory)
+- [Memory lifecycle](memory-lifecycle.md)
+- [Attention and presence](attention-and-presence.md)
+- [Memory design](../../../../design/system-design.md#5-context-models-and-memory)

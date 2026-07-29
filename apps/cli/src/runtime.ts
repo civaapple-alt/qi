@@ -1,12 +1,24 @@
 import { lstat, mkdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
-import { InMemoryCapabilityBroker, type CapabilityLease } from "@civaapple/qi-agent/capability";
+import {
+  InMemoryCapabilityBroker,
+  redactSensitiveValue,
+  type CapabilityLease,
+} from "@civaapple/qi-agent/capability";
+import type { IndexedMemoryClaim, MemoryListOptions } from "@civaapple/qi-agent/memory";
+import {
+  MemoryController,
+  memoryRelevanceScore,
+  memoryScopeKey,
+} from "@civaapple/qi-agent/memory";
 import { probeContainerRuntime } from "@civaapple/qi-node/codeact";
 import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-agent/extensions";
 import type { EventStore, SessionSummary, SessionView } from "@civaapple/qi-agent/kernel";
 import type { ModelPort, ModelRef } from "@civaapple/qi-ai";
 import {
   HumanControlService,
+  EventWriter,
   SessionSupervisor,
   TurnLoop,
   type RuntimeActivity,
@@ -16,7 +28,8 @@ import {
   type TurnResult,
 } from "@civaapple/qi-agent/loop";
 import { createId, type QuestionId, type RunId, type SessionEvent, type SessionId } from "@civaapple/qi-protocol";
-import { SqliteEventStore } from "@civaapple/qi-node/storage";
+import { SqliteEventStore, SqliteMemoryIndex } from "@civaapple/qi-node/storage";
+import { qiStatePaths, workspaceProjectId } from "@civaapple/qi-node/paths";
 import { SkillCatalog, type CatalogSkill, type SkillScope } from "@civaapple/qi-node/skills";
 import {
   FileArtifactStore,
@@ -58,6 +71,7 @@ import {
 import { createPlanDocumentTool } from "./plan-tool.js";
 import { createUpdatePlanTool } from "./update-plan-tool.js";
 import { createTuiSkillTool } from "./skill-tool.js";
+import { createMemoryTool } from "./memory-tool.js";
 import { ProcessTaskManager } from "./process-tasks.js";
 
 const OPTIONAL_LEASE_IDS = [
@@ -81,6 +95,10 @@ export interface RuntimeMount {
 export interface TuiRuntimeOptions {
   workspaceRoot: string;
   dataRoot: string;
+  qiHome?: string;
+  projectId?: string;
+  memoryEnabled?: boolean;
+  memoryAutoAcceptProject?: boolean;
   modelPort: ModelPort;
   model: ModelRef;
   /**
@@ -155,6 +173,13 @@ export class TuiRuntime {
   readonly #skills: SkillCatalog;
   readonly #processTasks: ProcessTaskManager;
   readonly #dataRoot: string;
+  readonly #projectId: string;
+  readonly #memoryEnabled: boolean;
+  readonly #projectMemoryIndex: SqliteMemoryIndex;
+  readonly #userMemoryIndex: SqliteMemoryIndex;
+  readonly #projectMemory: MemoryController;
+  readonly #userMemory: MemoryController;
+  readonly #userMemoryStore: SqliteEventStore;
   readonly #projectConfigPath: string;
   readonly #shellConfig: QiShellConfig | undefined;
   #verificationManifest: TuiVerificationManifest | undefined;
@@ -188,6 +213,11 @@ export class TuiRuntime {
     skills: SkillCatalog,
     skillSnapshot: readonly CatalogSkill[],
     processTasks: ProcessTaskManager,
+    projectMemoryIndex: SqliteMemoryIndex,
+    userMemoryIndex: SqliteMemoryIndex,
+    projectMemory: MemoryController,
+    userMemory: MemoryController,
+    userMemoryStore: SqliteEventStore,
   ) {
     this.sessionId = options.sessionId ?? (createId("ses") as SessionId);
     this.#verificationManifest = undefined;
@@ -195,6 +225,13 @@ export class TuiRuntime {
     this.#codeactRuntime = undefined;
     this.#workspaceRoot = resolve(options.workspaceRoot);
     this.#dataRoot = resolve(options.dataRoot);
+    this.#projectId = options.projectId ?? workspaceProjectId(options.workspaceRoot);
+    this.#memoryEnabled = options.memoryEnabled ?? true;
+    this.#projectMemoryIndex = projectMemoryIndex;
+    this.#userMemoryIndex = userMemoryIndex;
+    this.#projectMemory = projectMemory;
+    this.#userMemory = userMemory;
+    this.#userMemoryStore = userMemoryStore;
     this.#model = options.model;
     this.#modelPort = options.modelPort;
     this.#resolveModel = options.resolveModel ?? (() => this.#model);
@@ -309,6 +346,38 @@ export class TuiRuntime {
     void prewarmTrustedExecutables(options.workspaceRoot);
     grantBaseRuntimeLeases(broker, subject);
     const registry = new ToolRegistry(broker);
+    const projectId = options.projectId ?? workspaceProjectId(options.workspaceRoot);
+    const projectMemoryIndex = new SqliteMemoryIndex(resolve(stateRoot, "memory.sqlite"));
+    for (const summary of eventStore.listSessions()) {
+      projectMemoryIndex.applyBatch(eventStore.read(summary.sessionId).events);
+    }
+    const qiHome = resolve(options.qiHome ?? resolve(dataRoot, ".user"));
+    const userState = qiStatePaths(qiHome);
+    await mkdir(userState.stateRoot, { recursive: true });
+    const userMemoryStore = new SqliteEventStore(userState.continuityDatabaseFile);
+    const userMemoryIndex = new SqliteMemoryIndex(userState.memoryFile);
+    const continuitySessionId = "ses_continuity_local" as SessionId;
+    if (!userMemoryStore.load(continuitySessionId)) {
+      new EventWriter(userMemoryStore, continuitySessionId).append(
+        "session.created",
+        { title: "Qi user continuity" },
+        { kind: "runtime", id: "qi" },
+      );
+    }
+    userMemoryIndex.applyBatch(userMemoryStore.read(continuitySessionId).events);
+    const projectMemory = new MemoryController(eventStore, projectMemoryIndex, runtimeSessionId, {
+      ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
+    });
+    const userMemory = new MemoryController(userMemoryStore, userMemoryIndex, continuitySessionId, {
+      provenanceResolver: {
+        resolve: (reference) => {
+          if (reference.projectId !== undefined && reference.projectId !== projectId) return undefined;
+          return eventStore.read(reference.sessionId).events.find(
+            (candidate) => candidate.eventId === reference.eventId && candidate.sequence === reference.sequence,
+          );
+        },
+      },
+    });
     const skills = new SkillCatalog({
       workspaceRoot: options.workspaceRoot,
       ...(options.userHome === undefined ? {} : { userHome: options.userHome }),
@@ -333,6 +402,15 @@ export class TuiRuntime {
     registry.register("skill", createTuiSkillTool(skills, options.workspaceRoot));
     registry.register("qi_introspect", createQiIntrospectionTool());
     registry.register("qi_session_inspect", createQiSessionInspectionTool(eventStore, runtimeSessionId));
+    if (options.memoryEnabled ?? true) {
+      registry.register("memory", createMemoryTool({
+        eventStore,
+        projectId,
+        projectMemory,
+        userMemory,
+        autoAcceptProject: options.memoryAutoAcceptProject ?? true,
+      }));
+    }
     const humanControl = new HumanControlService({
       eventStore,
       ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
@@ -379,6 +457,11 @@ export class TuiRuntime {
       skills,
       skillSnapshot,
       processTasks,
+      projectMemoryIndex,
+      userMemoryIndex,
+      projectMemory,
+      userMemory,
+      userMemoryStore,
     );
     await runtime.applyCapabilities({
       write: options.allowWrite ?? false,
@@ -845,6 +928,7 @@ export class TuiRuntime {
         mode,
         this.#mounts,
       );
+      if (this.#memoryEnabled) contextBlocks.push(...this.#memoryContextBlocks(options.input));
       const result = await this.#supervisor.exclusive(this.sessionId, () => this.#loop.run({
         sessionId: this.sessionId,
         title: "Qi TUI",
@@ -888,8 +972,267 @@ export class TuiRuntime {
   async close(): Promise<void> {
     this.cancel("TUI closed");
     await this.#processTasks.close(this.sessionId);
+    this.#projectMemoryIndex.close();
+    this.#userMemoryIndex.close();
+    this.#userMemoryStore.close();
     this.#ownedStore?.close();
     this.#effectJournal.close();
+  }
+
+  listMemories(options: MemoryListOptions = {}): IndexedMemoryClaim[] {
+    return [...this.#projectMemory.list(options), ...this.#userMemory.list(options)]
+      .sort((left, right) =>
+        right.validFrom.localeCompare(left.validFrom) || left.memoryId.localeCompare(right.memoryId));
+  }
+
+  pendingMemoryCountForLatestRun(): number {
+    const trigger = [...this.events()].reverse().find((event) => event.type === "run.triggered");
+    if (!trigger) return 0;
+    return this.listMemories({ statuses: ["candidate"], limit: 500 }).filter(
+      (claim) =>
+        claim.validFrom >= trigger.occurredAt
+        && claim.provenance.some((source) => source.sessionId === this.sessionId),
+    ).length;
+  }
+
+  acceptMemory(memoryId: string): IndexedMemoryClaim {
+    return this.#memoryControllerFor(memoryId).accept(memoryId as never, { kind: "user", id: "local" });
+  }
+
+  forgetMemory(memoryId: string, reason = "User requested forgetting"): IndexedMemoryClaim {
+    return this.#memoryControllerFor(memoryId).forget(memoryId as never, reason, "local");
+  }
+
+  correctMemory(memoryId: string, statement: string): IndexedMemoryClaim {
+    const controller = this.#memoryControllerFor(memoryId);
+    const current = controller.list({ limit: 500 }).find((claim) => claim.memoryId === memoryId);
+    if (!current) throw new Error(`Memory ${memoryId} does not exist`);
+    const source = this.#recordUserAssertion(
+      statement,
+      current.scope,
+      this.#memoryOperationId("correct", statement, memoryId),
+    );
+    return controller.correct(memoryId as never, {
+      layer: current.layer,
+      statement,
+      provenance: [source],
+      confidence: 1,
+      sensitivity: current.sensitivity,
+      requiresConfirmation: true,
+    }, "local");
+  }
+
+  setMemoryActivation(memoryId: string, activation: "relevant" | "always"): IndexedMemoryClaim {
+    return this.#userMemory.setActivation(memoryId as never, activation, "local");
+  }
+
+  rememberMemory(
+    statement: string,
+    scopeKind: "session" | "project" | "user",
+    activation: "relevant" | "always" = "relevant",
+  ): IndexedMemoryClaim {
+    if (activation === "always" && scopeKind !== "user") {
+      throw new Error("Always activation is only available for User Memory");
+    }
+    const scope = scopeKind === "session"
+      ? { kind: "session" as const, sessionId: this.sessionId }
+      : scopeKind === "project"
+        ? { kind: "project" as const, projectId: this.#projectId }
+        : { kind: "user" as const, userId: "local" as const };
+    const controller = scopeKind === "user" ? this.#userMemory : this.#projectMemory;
+    const normalizedStatement = statement.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+    const duplicate = controller.list({
+      scopes: [scope],
+      statuses: ["candidate", "accepted"],
+      limit: 500,
+    }).find((claim) =>
+      claim.statement.trim().replace(/\s+/g, " ").toLocaleLowerCase() === normalizedStatement);
+    if (duplicate) {
+      const accepted = duplicate.status === "candidate"
+        ? controller.accept(duplicate.memoryId, { kind: "user", id: "local" })
+        : duplicate;
+      if (activation !== "always" || accepted.activation === "always") return accepted;
+      this.#assertAlwaysMemoryAvailable(accepted.statement);
+      return this.#userMemory.setActivation(accepted.memoryId, "always", "local");
+    }
+    if (activation === "always") this.#assertAlwaysMemoryAvailable(statement);
+    const operationId = this.#memoryOperationId("remember", statement, memoryScopeKey(scope));
+    const source = this.#recordUserAssertion(statement, scope, operationId);
+    const claim = controller.propose({
+      operationId,
+      layer: "semantic",
+      statement,
+      scope,
+      provenance: [source],
+      confidence: 1,
+      sensitivity: scopeKind === "user" ? "private" : "public",
+      requiresConfirmation: scopeKind === "user",
+    }, { actorId: "local", autoAccept: scopeKind !== "user" });
+    const accepted = claim.status === "candidate"
+      ? controller.accept(claim.memoryId, { kind: "user", id: "local" })
+      : claim;
+    return activation === "always"
+      ? controller.setActivation(accepted.memoryId, "always", "local")
+      : accepted;
+  }
+
+  promoteMemory(memoryId: string, activation: "relevant" | "always" = "relevant"): IndexedMemoryClaim {
+    const sourceClaim = this.#projectMemory.list({ limit: 500 }).find((claim) => claim.memoryId === memoryId);
+    if (
+      !sourceClaim
+      || sourceClaim.status !== "accepted"
+      || typeof sourceClaim.scope === "string"
+      || sourceClaim.scope.kind !== "project"
+    ) {
+      throw new Error(`Accepted project Memory ${memoryId} not found`);
+    }
+    const existing = this.#userMemory.list({ limit: 500 }).find(
+      (claim) => claim.operationId === `promote:${memoryId}`,
+    );
+    if (existing?.status === "accepted") {
+      if (activation !== "always" || existing.activation === "always") return existing;
+      this.#assertAlwaysMemoryAvailable(existing.statement);
+      return this.#userMemory.setActivation(existing.memoryId, "always", "local");
+    }
+    if (activation === "always") this.#assertAlwaysMemoryAvailable(sourceClaim.statement);
+    const claim = this.#userMemory.propose({
+      operationId: `promote:${memoryId}`,
+      layer: sourceClaim.layer,
+      statement: sourceClaim.statement,
+      scope: { kind: "user", userId: "local" },
+      provenance: sourceClaim.provenance.map((source) => ({ ...source })),
+      confidence: sourceClaim.confidence,
+      sensitivity: sourceClaim.sensitivity === "public" ? "private" : sourceClaim.sensitivity,
+      derivedFromMemoryId: sourceClaim.memoryId,
+      requiresConfirmation: true,
+    }, { actorId: "local" });
+    const accepted = claim.status === "candidate"
+      ? this.#userMemory.accept(claim.memoryId, { kind: "user", id: "local" })
+      : claim;
+    return activation === "always"
+      ? this.#userMemory.setActivation(accepted.memoryId, "always", "local")
+      : accepted;
+  }
+
+  #memoryControllerFor(memoryId: string): MemoryController {
+    if (this.#projectMemory.list({ limit: 500 }).some((claim) => claim.memoryId === memoryId)) {
+      return this.#projectMemory;
+    }
+    if (this.#userMemory.list({ limit: 500 }).some((claim) => claim.memoryId === memoryId)) {
+      return this.#userMemory;
+    }
+    throw new Error(`Memory ${memoryId} does not exist`);
+  }
+
+  #assertAlwaysMemoryAvailable(statement: string): void {
+    if (statement.length > 1_000) {
+      throw new Error("Always-active User Memory is limited to 1,000 characters");
+    }
+    const count = this.#userMemory.list({
+      scopes: [{ kind: "user", userId: "local" }],
+      statuses: ["accepted"],
+      limit: 500,
+    }).filter((claim) => claim.activation === "always").length;
+    if (count >= 4) throw new Error("At most four User Memories may be always active");
+  }
+
+  #recordUserAssertion(
+    statement: string,
+    scope: IndexedMemoryClaim["scope"],
+    operationId = this.#memoryOperationId("assert", statement, memoryScopeKey(scope)),
+  ): { projectId: string; sessionId: SessionId; eventId: string; sequence: number } {
+    if (redactSensitiveValue(statement).redactions.length > 0) {
+      throw new Error("Memory contains credential-like secret material and was not recorded");
+    }
+    this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
+    if (typeof scope === "string") throw new Error("Legacy memory scope cannot receive a new user assertion");
+    for (const session of this.#eventStore.listSessions()) {
+      const existing = this.#eventStore.read(session.sessionId).events.find(
+        (event) =>
+          event.type === "memory.user.asserted"
+          && event.data.operationId === operationId,
+      );
+      if (existing?.type === "memory.user.asserted") {
+        this.#projectMemoryIndex.apply(existing);
+        return {
+          projectId: this.#projectId,
+          sessionId: existing.sessionId,
+          eventId: existing.eventId,
+          sequence: existing.sequence,
+        };
+      }
+    }
+    const event = new EventWriter(this.#eventStore, this.sessionId).append(
+      "memory.user.asserted",
+      { operationId, statement, scope },
+      { kind: "user", id: "local" },
+    );
+    this.#projectMemoryIndex.apply(event);
+    return {
+      projectId: this.#projectId,
+      sessionId: event.sessionId,
+      eventId: event.eventId,
+      sequence: event.sequence,
+    };
+  }
+
+  #memoryOperationId(kind: string, statement: string, subject: string): string {
+    const digest = createHash("sha256")
+      .update(`${kind}\0${subject}\0${statement.trim().replace(/\s+/g, " ").toLocaleLowerCase()}`)
+      .digest("hex");
+    return `${kind}:${digest}`;
+  }
+
+  #memoryContextBlocks(input: string): TuiContextBlock[] {
+    const userScope = { kind: "user" as const, userId: "local" as const };
+    const pinned = this.#userMemory.retrieve({
+      scopes: [userScope],
+      activation: "always",
+      maximumSensitivity: "secret",
+      limit: 4,
+    });
+    const relevant = [
+      ...this.#projectMemory.retrieve({
+        scopes: [
+          { kind: "session", sessionId: this.sessionId },
+          { kind: "project", projectId: this.#projectId },
+        ],
+        query: input,
+        maximumSensitivity: "secret",
+        limit: 12,
+      }),
+      ...this.#userMemory.retrieve({
+        scopes: [userScope],
+        query: input,
+        activation: "relevant",
+        maximumSensitivity: "secret",
+        limit: 4,
+      }),
+    ];
+    const seen = new Set<string>();
+    const rankedRelevant = relevant.sort((left, right) =>
+      memoryRelevanceScore(right, input) - memoryRelevanceScore(left, input)
+      || right.confidence - left.confidence
+      || (right.acceptedAt ?? right.validFrom).localeCompare(left.acceptedAt ?? left.validFrom)
+      || left.memoryId.localeCompare(right.memoryId));
+    return [...pinned, ...rankedRelevant]
+      .filter((claim) => {
+        const key = claim.statement.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 12)
+      .map((claim) => ({
+        id: `memory:${claim.memoryId}`,
+        kind: "memory" as const,
+        source: `memory:${claim.memoryId}`,
+        role: "system" as const,
+        content: claim.statement,
+        priority: claim.activation === "always" ? 85 : 60,
+        required: false,
+        retentionReason: `${claim.activation === "always" ? "Always-active" : "Relevant"} accepted ${claim.layer} memory`,
+      }));
   }
 
   async flushMountsToProjectConfig(): Promise<void> {
@@ -949,7 +1292,7 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
     {
       leaseId: "lea_tui_read",
       subject,
-      tools: ["read", "list", "search", "find", "tree", "git", "skill", "qi_introspect", "qi_session_inspect"],
+      tools: ["read", "list", "search", "find", "tree", "git", "skill", "qi_introspect", "qi_session_inspect", "memory"],
       effects: ["read"],
       resources: [
         "file:**",
@@ -960,6 +1303,7 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
         "qi:self-model:**",
         "qi:session-catalog",
         "qi:session:**",
+        "memory:propose:**",
       ],
       expiresAt,
     },

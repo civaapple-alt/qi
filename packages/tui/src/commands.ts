@@ -39,6 +39,13 @@ export interface TuiCommandDefinition {
 export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "help", descriptionKey: "cmd.help", argumentHint: "[command|advanced]", category: "inspect", visibility: "primary", panel: "help" },
   { name: "settings", descriptionKey: "cmd.settings", category: "inspect", visibility: "primary" },
+  {
+    name: "memory",
+    descriptionKey: "cmd.memory",
+    argumentHint: "[list|remember|accept|correct|forget|promote|pin|unpin]",
+    category: "manage",
+    visibility: "primary",
+  },
   { name: "mode", descriptionKey: "cmd.mode", argumentHint: "[ask|plan|agent]", category: "control", visibility: "primary" },
   {
     name: "ask",

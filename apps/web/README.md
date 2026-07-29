@@ -53,6 +53,10 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
 - Missing Goal, control receipt, evidence, or accepted memory is an explicit, explanatory empty state. When a
   Formal Plan or Work Plan is bound, the Contract pane surfaces that binding instead of leading with “No formal
   Goal”. The Web surface never fabricates those contracts from conversational behavior.
+- Projects mode reads the project Memory projection plus `$QI_HOME/state/memory.sqlite` read-only and shows
+  Session/Project/User scope, provenance links, lifecycle, activation, and the exact `memory:<id>` blocks included
+  or omitted by each committed `context.compiled`. Single-database mode reports that the User index is
+  unavailable instead of implying an empty global history.
 
 The raw history and committed SSE endpoints remain available for consumers that need protocol events directly.
 

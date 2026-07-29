@@ -37,6 +37,7 @@ Qi 0.6 uses layout generation 2:
 $QI_HOME/
   layout.json
   config.toml
+  state/{continuity.sqlite,memory.sqlite}
   credentials/{master.key,store.json}
   resources/{skills,prompts,themes,agents,workflows,mcp}/
   packages/{installed.toml,lock.json,store,cache,staging}/
@@ -46,6 +47,11 @@ $QI_HOME/
     state/{qi.sqlite,effects.sqlite,memory.sqlite,scheduler.sqlite}
     artifacts/ plans/<plan-id>/<sha256>.md tasks/ packages/activation.json cache/ tmp/
 ```
+
+Project `memory.sqlite` indexes only that project's Session/Project claims. The fixed local-user Continuity
+Session in `state/continuity.sqlite` is the global fact stream for explicitly confirmed User Memory, projected
+into `state/memory.sqlite`. Both indexes are versioned, transactional, and rebuildable from their event streams;
+claim text is plaintext inside these machine-private databases.
 
 `projectPaths()`, `ensureQiLayout()`, and `ensureProjectLayout()` are the only path/layout implementation used
 by CLI and Web. Existing non-empty pre-0.6 homes fail without migration or deletion. Private roots cannot be

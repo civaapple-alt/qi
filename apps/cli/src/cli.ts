@@ -35,6 +35,8 @@ export interface TuiCliOptions {
   allowNetwork: boolean;
   allowBackground: boolean;
   allowDelegate: boolean;
+  memoryEnabled: boolean;
+  memoryAutoAcceptProject: boolean;
   /** CLI `--allow-*` / `--safe` only; re-applied when refreshing project/user policy mid-process. */
   capabilityOverrides: CapabilityOverrides;
   /** True when launched with `--no-config` (skip user/project TOML on refresh). */
@@ -208,6 +210,8 @@ export async function parseTuiCliArguments(
       language: resolveLanguage(loaded.config),
       theme: resolveTheme(loaded.config),
       ...capabilities,
+      memoryEnabled: loaded.config.memory?.enabled ?? true,
+      memoryAutoAcceptProject: loaded.config.memory?.autoAcceptProject ?? true,
       capabilityOverrides: overrides,
       noConfig: flags.has("--no-config"),
       ...(shell === undefined ? {} : { shell }),

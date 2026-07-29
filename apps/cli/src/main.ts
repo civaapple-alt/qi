@@ -12,6 +12,11 @@ import { persistLoginProviderDefaults } from "./login-persist.js";
 import { parseTuiCliArguments, qiCliVersion, refreshLaunchCapabilities, type TuiCliOptions } from "./cli.js";
 import { commandHelp, parseSkillInstallCommand, parseTaskStopCommand, parseTuiCommand, tuiCommands } from "./commands.js";
 import { InteractiveTui } from "./interactive.js";
+import {
+  formatMemoryClaims,
+  memoryUsageInLatestRun,
+  parseMemoryCommand,
+} from "./memory-command.js";
 import { TuiPresenter, type TuiLaunchInfo } from "./presenter.js";
 import { LineInputBatcher } from "./input-batcher.js";
 import { discoveryAcceleratorTip, missingDiscoveryAccelerators } from "./discovery-tools.js";
@@ -37,10 +42,11 @@ async function main(): Promise<void> {
     return;
   }
   const options = parsed.options;
-  await ensureProjectLayout(projectPaths({
+  const paths = projectPaths({
     workspaceRoot: options.workspaceRoot,
     dataRoot: options.dataRoot,
-  }));
+  });
+  await ensureProjectLayout(paths);
   const rich = process.stdin.isTTY === true && process.stdout.isTTY === true && process.env.TERM !== "dumb";
   let runtime: TuiRuntime | undefined;
   let presenter: TuiPresenter | undefined;
@@ -81,6 +87,10 @@ async function main(): Promise<void> {
       runtime = await TuiRuntime.create({
         workspaceRoot: options.workspaceRoot,
         dataRoot: options.dataRoot,
+        qiHome: paths.qiHome,
+        projectId: paths.projectId,
+        memoryEnabled: options.memoryEnabled,
+        memoryAutoAcceptProject: options.memoryAutoAcceptProject,
         modelPort: new AuthBackedModelPort(auth),
         model: { provider: auth.config.provider, model: auth.config.model },
         resolveModel: () => ({
@@ -154,6 +164,10 @@ async function main(): Promise<void> {
   runtime = await TuiRuntime.create({
     workspaceRoot: options.workspaceRoot,
     dataRoot: options.dataRoot,
+    qiHome: paths.qiHome,
+    projectId: paths.projectId,
+    memoryEnabled: options.memoryEnabled,
+    memoryAutoAcceptProject: options.memoryAutoAcceptProject,
     modelPort: new AuthBackedModelPort(auth),
     model: { provider: options.provider.provider, model: options.provider.model },
     resolveModel: () => ({
@@ -194,7 +208,7 @@ async function main(): Promise<void> {
         ? []
         : [`verify ${runtime.verificationManifest.origin} ${runtime.verificationManifest.path} · ${runtime.verificationManifest.profiles.join(", ")}`]),
       ...(presenter.discoveryTip() === undefined ? [] : [presenter.discoveryTip()!]),
-      "commands /help · /settings · /login · /ask · /mode · /plan · /next · /tasks · /skills · /mounts · /permissions · /verify · /runs · /sessions · /steer <text> · /cancel · /quit",
+      "commands /help · /settings · /memory · /login · /ask · /mode · /plan · /next · /tasks · /skills · /mounts · /permissions · /verify · /runs · /sessions · /steer <text> · /cancel · /quit",
       "",
     ].join("\n"),
   );
@@ -272,6 +286,64 @@ async function main(): Promise<void> {
           if (!closing) readline.prompt();
         });
       active.add(task);
+      return;
+    }
+    if (command?.name === "memory") {
+      let request;
+      try {
+        request = parseMemoryCommand(command.argument);
+      } catch (error) {
+        process.stderr.write(`${message(error)}\n`);
+        if (!closing) readline.prompt();
+        return;
+      }
+      if (request.mode === "list") {
+        const usage = memoryUsageInLatestRun(runtime.events());
+        const claims = runtime.listMemories().filter((claim) => {
+          if (!request.scope) return true;
+          if (request.scope === "pending") return claim.status === "candidate";
+          if (request.scope === "project") {
+            return typeof claim.scope !== "string" &&
+              (claim.scope.kind === "session" || claim.scope.kind === "project");
+          }
+          return typeof claim.scope !== "string" && claim.scope.kind === request.scope;
+        });
+        process.stdout.write(`${formatMemoryClaims(claims, {
+          usedMemoryIds: usage.included,
+          omittedMemoryIds: usage.omitted,
+        }).join("\n")}\n`);
+        if (!closing) readline.prompt();
+        return;
+      }
+      if (runtime.active || active.size > 0) {
+        process.stderr.write("A Run or CLI operation is active; wait before changing Memory.\n");
+        if (!closing) readline.prompt();
+        return;
+      }
+      try {
+        const claim = request.mode === "remember"
+          ? runtime.rememberMemory(request.statement, request.scope, request.activation)
+          : request.mode === "accept"
+            ? runtime.acceptMemory(request.memoryId)
+            : request.mode === "correct"
+              ? runtime.correctMemory(request.memoryId, request.statement)
+              : request.mode === "forget"
+                ? runtime.forgetMemory(request.memoryId, request.reason)
+                : request.mode === "promote"
+                  ? runtime.promoteMemory(request.memoryId, request.activation)
+                  : runtime.setMemoryActivation(
+                    request.memoryId,
+                    request.mode === "pin" ? "always" : "relevant",
+                  );
+        presenter?.update(runtime.events(), runtime.view());
+        process.stdout.write(
+          `Memory ${claim.memoryId} · ${claim.status} · ` +
+          `${typeof claim.scope === "string" ? `legacy:${claim.scope}` : claim.scope.kind} · ${claim.statement}\n`,
+        );
+      } catch (error) {
+        process.stderr.write(`memory error: ${message(error)}\n`);
+      }
+      if (!closing) readline.prompt();
       return;
     }
     if (command?.name === "tasks" || command?.name === "task") {

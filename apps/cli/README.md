@@ -54,6 +54,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | --- | --- |
 | `/help [command\|advanced]` | Shortcuts + common commands; `advanced` lists aliases |
 | `/settings` | Settings hub: mode, **permissions**, providers, config, context, theme, **language**, status |
+| `/memory [list\|remember\|accept\|correct\|forget\|promote\|pin\|unpin]` | Inspect actual Run injection, pending candidates, Project/User boundaries and provenance; explicitly manage the full Memory lifecycle |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
 | `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek`). For **OpenAI Compatible**, also set a **Name** (e.g. `qianwenai` / `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
@@ -83,6 +84,22 @@ Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, 
 
 UI language defaults to Chinese. Set `language = "zh"` or `language = "en"` in `~/.qi/config.toml`, or
 change it under `/settings` → Language (persists to the same file).
+
+Memory capture and retrieval default to enabled:
+
+```toml
+[memory]
+enabled = true
+auto_accept_project = true
+```
+
+The model-visible `memory` Tool can only propose a claim with an exact quote from the current user input or a
+completed Action result; Qi binds the concrete scope IDs. Public, non-relational Session/Project proposals at
+confidence ≥ 0.8 may be accepted without another model call. User, private/secret, relational, correction and
+promotion paths wait for an explicit user action. `/memory remember` opens the rich Add Memory form; line mode
+supports the same verbs. `--always`/pin is User-only and capped at four. Disabling Memory stops capture and
+context injection but keeps list and forget management available. Stored text is plaintext in machine-private
+SQLite; credential-like material is rejected before any Memory/source event is written.
 
 Use `/help` in the application for the localized categorized list. The default surface is a compact chat
 transcript: a Qi welcome (or short header), full-width user message bars (with vertical padding), plain

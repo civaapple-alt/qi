@@ -34,6 +34,11 @@ export interface QiShellConfig {
   readonly allowed?: readonly ConfigShellProfileId[];
 }
 
+export interface QiMemoryConfig {
+  readonly enabled?: boolean;
+  readonly autoAcceptProject?: boolean;
+}
+
 /** Non-secret OpenAI-compatible endpoint catalog entry (secrets stay sealed). */
 export interface CompatibleEndpoint {
   readonly name: string;
@@ -56,6 +61,7 @@ export interface QiUserConfig {
   readonly maxSteps?: number;
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
+  readonly memory?: QiMemoryConfig;
 }
 
 export interface LoadedUserConfig {
@@ -166,6 +172,7 @@ export async function persistUserProviderDefaults(
     ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
+    ...(loaded.config.memory === undefined ? {} : { memory: loaded.config.memory }),
   };
   await saveUserConfig(absolute, next);
   return { path: absolute, exists: true, config: next };
@@ -224,6 +231,7 @@ export async function removeCompatibleEndpoint(
     ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
+    ...(loaded.config.memory === undefined ? {} : { memory: loaded.config.memory }),
   };
   await saveUserConfig(absolute, next);
   return { path: absolute, exists: true, config: next };
@@ -328,6 +336,16 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
               ...(config.shell.allowed === undefined ? {} : { allowed: [...config.shell.allowed] }),
             },
           }),
+      ...(config.memory === undefined
+        ? {}
+        : {
+            memory: {
+              ...(config.memory.enabled === undefined ? {} : { enabled: config.memory.enabled }),
+              ...(config.memory.autoAcceptProject === undefined
+                ? {}
+                : { auto_accept_project: config.memory.autoAcceptProject }),
+            },
+          }),
     },
     absolute,
   );
@@ -355,6 +373,16 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
           shell: {
             ...config.shell,
             ...(config.shell.allowed === undefined ? {} : { allowed: [...config.shell.allowed] }),
+          },
+        }),
+    ...(config.memory === undefined
+      ? {}
+      : {
+          memory: {
+            ...(config.memory.enabled === undefined ? {} : { enabled: config.memory.enabled }),
+            ...(config.memory.autoAcceptProject === undefined
+              ? {}
+              : { auto_accept_project: config.memory.autoAcceptProject }),
           },
         }),
   });
@@ -411,6 +439,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "max_steps",
     "capabilities",
     "shell",
+    "memory",
   ], path);
   const version = root.version ?? 1;
   if (version !== 1) throw new TypeError(`${path}: version must be 1`);
@@ -472,6 +501,20 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
       ...(allowed === undefined ? {} : { allowed }),
     };
   }
+  let memory: QiMemoryConfig | undefined;
+  if (root.memory !== undefined) {
+    const table = requireTable(root.memory, `${path}: memory`);
+    assertOnlyKeys(table, ["enabled", "auto_accept_project"], `${path}: memory`);
+    const enabled = optionalBooleanField(table.enabled, `${path}: memory.enabled`);
+    const autoAcceptProject = optionalBooleanField(
+      table.auto_accept_project,
+      `${path}: memory.auto_accept_project`,
+    );
+    memory = {
+      ...(enabled === undefined ? {} : { enabled }),
+      ...(autoAcceptProject === undefined ? {} : { autoAcceptProject }),
+    };
+  }
   return {
     version: 1,
     ...(language === undefined ? {} : { language }),
@@ -486,6 +529,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(shell === undefined ? {} : { shell }),
+    ...(memory === undefined ? {} : { memory }),
   };
 }
 
@@ -564,6 +608,12 @@ function booleanField(
   if (value === undefined) return {};
   if (typeof value !== "boolean") throw new TypeError(`${path}: capabilities.${name} must be boolean`);
   return { [name]: value };
+}
+
+function optionalBooleanField(value: unknown, label: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new TypeError(`${label} must be boolean`);
+  return value;
 }
 
 function requireTable(value: unknown, label: string): Record<string, unknown> {

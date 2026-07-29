@@ -7,11 +7,19 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+- Added end-to-end Memory capture and management: structured Session/Project/User scopes, provenance-backed
+  `memory` proposals, `/memory` rich and line-mode lifecycle commands, explicit User promotion/pinning, and
+  read-only Web provenance/usage audit.
+- Added machine-wide local-user continuity under `$QI_HOME/state`, transactional/versioned Memory indexes,
+  exact-scope and CJK retrieval, activation limits, and startup projection recovery.
 - Session extract reports may emit `CLAIMED_MUTATION_WITHOUT_ACTIONS` when a responded Run claims a Workspace
   mutation in prose without any completed write Action (diagnostic only; Run completion is unchanged).
 
 ### Changed
 
+- Memory capture and retrieval now default on for new Runs without historical conversation backfill. Project
+  claims remain project-local; only explicitly confirmed User claims cross projects. Context compilation
+  considers at most 12 optional Memory blocks and records actual inclusion/omission through existing block IDs.
 - `qi_session_inspect` / `inspectQiSession` and extract-session `--all` now surface Formal Plan short titles and
   bindings, Work Plan snapshots, bounded `modelReasoning`, write/read `actionFacts`, and file-vs-Git diff / process
   summaries; `analyze-qi-session` Skill 1.3.0 documents those diagnostic fields.
@@ -51,7 +59,13 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Security
 
+- Credential-like Memory is rejected before source or candidate persistence, model-provided scope identifiers
+  are ignored, and Agents cannot accept, promote, activate, correct, or forget User Memory.
+
 ### Documentation
+
+- Documented Memory scope, storage, lifecycle, recovery, CLI/Web behavior, and corrected the
+  `SqliteMemoryIndex` import path.
 
 ## [0.7.0] - 2026-07-28
 

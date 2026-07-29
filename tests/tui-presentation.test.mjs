@@ -81,6 +81,24 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.equal(parseTaskStopCommand("stop abc"), "abc");
 });
 
+test("Memory tool has a dedicated lifecycle card", () => {
+  const card = stripVTControlCharacters(renderToolCard({
+    actionId: "act_memory_card",
+    toolName: "memory",
+    status: "completed",
+    input: { statement: "The project uses pnpm.", scope: "project" },
+    output: {
+      memoryId: "mem_memory_card",
+      status: "candidate",
+      scope: "project",
+      requiresConfirmation: true,
+    },
+  }).join("\n"));
+  assert.match(card, /Memory · project/);
+  assert.match(card, /The project uses pnpm/);
+  assert.match(card, /pending user confirmation/);
+});
+
 test("TUI reconciles effective mounts into Session audit events across restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-mount-reconcile-"));
   const workspace = join(root, "workspace");

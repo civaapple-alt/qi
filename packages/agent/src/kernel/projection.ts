@@ -4,6 +4,8 @@ import type {
   EvaluationId,
   GoalId,
   MemoryId,
+  MemoryActivation,
+  MemoryScope,
   PlanId,
   PlanItemId,
   QuestionId,
@@ -151,17 +153,20 @@ export type MemoryStatus = "candidate" | "accepted" | "disputed" | "forgotten";
 
 export interface MemoryClaimView {
   memoryId: MemoryId;
+  operationId?: string;
   layer: MemoryLayer;
   statement: string;
-  scope: string;
-  provenance: Array<{ sessionId: SessionId; eventId: string; sequence: number }>;
+  scope: MemoryScope | string;
+  provenance: Array<{ projectId?: string; sessionId: SessionId; eventId: string; sequence: number }>;
   confidence: number;
   sensitivity: "public" | "private" | "secret";
   validFrom: string;
   expiresAt?: string;
   contradictionOf?: MemoryId;
+  derivedFromMemoryId?: MemoryId;
   requiresConfirmation: boolean;
   status: MemoryStatus;
+  activation: MemoryActivation;
   confirmedBy?: string;
   statusReason?: string;
   correctionMemoryId?: MemoryId;
@@ -456,6 +461,7 @@ export const KERNEL_ASK_MODE_TOOLS = [
   "artifact",
   "qi_introspect",
   "qi_session_inspect",
+  "memory",
 ] as const;
 
 /** Plan-only tools beyond {@link KERNEL_ASK_MODE_TOOLS}. */
@@ -989,28 +995,50 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       view.currentWorkPlanId = event.data.workPlanId;
       break;
     }
+    case "memory.user.asserted":
+      break;
     case "memory.candidate.created": {
       if (view.memories[event.data.memoryId]) fail("MEMORY_ALREADY_EXISTS", `Memory ${event.data.memoryId} exists`);
-      if ((event.data.layer === "relational" || event.data.sensitivity !== "public") && !event.data.requiresConfirmation) {
+      const userScope = typeof event.data.scope !== "string" && event.data.scope.kind === "user";
+      if (
+        typeof event.data.scope !== "string"
+        && event.data.provenance.some((reference) => reference.projectId === undefined)
+      ) {
+        fail("MEMORY_PROJECT_PROVENANCE_REQUIRED", "Structured Memory provenance requires an origin project");
+      }
+      if (
+        (
+          event.data.layer === "relational"
+          || event.data.sensitivity !== "public"
+          || userScope
+          || event.data.contradictionOf !== undefined
+        )
+        && !event.data.requiresConfirmation
+      ) {
         fail("MEMORY_CONFIRMATION_REQUIRED", "Relational and sensitive memories require confirmation");
       }
       if (event.data.contradictionOf) {
         const previous = view.memories[event.data.contradictionOf];
-        if (previous && previous.scope !== event.data.scope) fail("MEMORY_SCOPE_MISMATCH", "A correction must retain the original scope");
+        if (previous && !sameMemoryScope(previous.scope, event.data.scope)) {
+          fail("MEMORY_SCOPE_MISMATCH", "A correction must retain the original scope");
+        }
       }
       view.memories[event.data.memoryId] = {
         memoryId: event.data.memoryId,
+        ...(event.data.operationId === undefined ? {} : { operationId: event.data.operationId }),
         layer: event.data.layer,
         statement: event.data.statement,
-        scope: event.data.scope,
+        scope: typeof event.data.scope === "string" ? event.data.scope : { ...event.data.scope },
         provenance: event.data.provenance.map((reference) => ({ ...reference })),
         confidence: event.data.confidence,
         sensitivity: event.data.sensitivity,
         validFrom: event.data.validFrom,
         ...(event.data.expiresAt === undefined ? {} : { expiresAt: event.data.expiresAt }),
         ...(event.data.contradictionOf === undefined ? {} : { contradictionOf: event.data.contradictionOf }),
+        ...(event.data.derivedFromMemoryId === undefined ? {} : { derivedFromMemoryId: event.data.derivedFromMemoryId }),
         requiresConfirmation: event.data.requiresConfirmation,
         status: "candidate",
+        activation: "relevant",
       };
       view.memoryOrder.push(event.data.memoryId);
       break;
@@ -1020,7 +1048,8 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       if (!memory) fail("MEMORY_NOT_FOUND", event.data.memoryId);
       if (memory.status !== "candidate") fail("MEMORY_NOT_CANDIDATE", `Memory ${memory.memoryId} is ${memory.status}`);
       if (event.actor.kind === "agent") fail("AGENT_CANNOT_ACCEPT_MEMORY", "An Agent cannot accept its own memory candidate");
-      if (memory.requiresConfirmation && (event.actor.kind !== "user" || event.actor.id !== event.data.confirmedBy)) {
+      const userScope = typeof memory.scope !== "string" && memory.scope.kind === "user";
+      if ((memory.requiresConfirmation || userScope) && (event.actor.kind !== "user" || event.actor.id !== event.data.confirmedBy)) {
         fail("MEMORY_CONFIRMATION_REQUIRED", `Memory ${memory.memoryId} requires explicit user confirmation`);
       }
       memory.status = "accepted";
@@ -1030,6 +1059,9 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
     case "memory.disputed": {
       const memory = view.memories[event.data.memoryId];
       if (!memory) fail("MEMORY_NOT_FOUND", event.data.memoryId);
+      if (event.actor.kind !== "user") {
+        fail("MEMORY_DISPUTE_REQUIRES_USER", "Only the user may dispute or correct memory");
+      }
       if (memory.status === "forgotten") fail("MEMORY_ALREADY_FORGOTTEN", memory.memoryId);
       memory.status = "disputed";
       memory.statusReason = event.data.reason;
@@ -1042,6 +1074,26 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       if (event.actor.kind === "agent") fail("AGENT_CANNOT_FORGET_MEMORY", "An Agent cannot erase memory provenance");
       memory.status = "forgotten";
       memory.statusReason = event.data.reason;
+      break;
+    }
+    case "memory.activation.changed": {
+      const memory = view.memories[event.data.memoryId];
+      if (!memory) fail("MEMORY_NOT_FOUND", event.data.memoryId);
+      if (event.actor.kind !== "user") fail("MEMORY_ACTIVATION_REQUIRES_USER", "Only the user changes memory activation");
+      if (memory.status !== "accepted") fail("MEMORY_NOT_ACCEPTED", `Memory ${memory.memoryId} is ${memory.status}`);
+      if (typeof memory.scope === "string" || memory.scope.kind !== "user") {
+        fail("MEMORY_ACTIVATION_SCOPE", "Only user-scoped memory can be always active");
+      }
+      if (event.data.activation === "always") {
+        if (memory.statement.length > 1_000) {
+          fail("MEMORY_ALWAYS_TOO_LARGE", "Always-active memory is limited to 1000 characters");
+        }
+        const activeCount = Object.values(view.memories)
+          .filter((claim) => claim.memoryId !== memory.memoryId && claim.activation === "always" && claim.status === "accepted")
+          .length;
+        if (activeCount >= 4) fail("MEMORY_ALWAYS_LIMIT", "At most four user memories may be always active");
+      }
+      memory.activation = event.data.activation;
       break;
     }
     case "attention.policy.set":
@@ -1715,6 +1767,14 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
   }
 
   return view;
+}
+
+function sameMemoryScope(left: MemoryScope | string, right: MemoryScope | string): boolean {
+  if (typeof left === "string" || typeof right === "string") return left === right;
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "session" && right.kind === "session") return left.sessionId === right.sessionId;
+  if (left.kind === "project" && right.kind === "project") return left.projectId === right.projectId;
+  return left.kind === "user" && right.kind === "user" && left.userId === right.userId;
 }
 
 export function replaySession(events: readonly unknown[]): SessionView {

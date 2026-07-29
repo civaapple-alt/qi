@@ -13,6 +13,7 @@ const askTools = new Set([
   "artifact",
   "qi_introspect",
   "qi_session_inspect",
+  "memory",
 ]);
 const planExtraTools = new Set(["plan_document", "ask_question", "delegate"]);
 

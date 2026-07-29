@@ -26,6 +26,11 @@ npm install @civaapple/qi-agent @civaapple/qi-ai @civaapple/qi-protocol
 projections. `agent/loop` produces events and persists authority plus `ActionStarted` before executor entry.
 Concrete SQLite storage and SSE transport belong to `@civaapple/qi-node`.
 
+Memory is a portable policy/state-machine boundary: `MemoryController` validates provenance, batches candidate
+and lifecycle facts, requires a user for User/sensitive/relational claims, and exposes only optional
+`ContextBlock`s. Session and Project scope cannot be widened by an Agent. User `always` activation is limited to
+four accepted, bounded claims. SQLite projection and machine paths remain Node responsibilities.
+
 Redacted model text and reasoning may also pass through the bounded process-local `RuntimeActivity` channel for
 live presentation. Terminal text and reasoning are committed once in `model.completed`; reasoning is
 explanatory model output, not completion evidence.
