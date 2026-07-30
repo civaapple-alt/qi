@@ -30,7 +30,8 @@ const expectedRuntimeExports = {
   "@civaapple/qi-agent/kernel": [
     "ConcurrencyError", "InMemoryEventStore", "KERNEL_ASK_MODE_TOOLS",
     "KERNEL_PLAN_MODE_EXTRA_TOOLS", "StateTransitionError", "applySessionEvent",
-    "replaySession", "sessionArchiveBlockers",
+    "isBootstrapSessionTitle", "replaySession", "sessionArchiveBlockers",
+    "SESSION_TITLE_MAX_CHARS", "sessionTitleFromUserInput",
   ],
   "@civaapple/qi-ai": [
     "BUILTIN_PROVIDER_PROFILES", "ModelContentPartSchema", "ModelEventSchema",
@@ -45,7 +46,7 @@ const expectedRuntimeExports = {
   "@civaapple/qi-agent/loop": [
     "ASK_MODE_TOOLS", "EventWriter", "HumanControlService", "PLAN_MODE_EXTRA_TOOLS",
     "SESSION_MODES", "SessionSupervisor", "SteeringMailbox", "TurnLoop",
-    "firstIncompleteItem", "formatModeLabel", "formatPlanItemInput", "formatRunHistoryFacts", "isToolAllowedInMode",
+    "firstIncompleteItem", "formatModeLabel", "formatPlanItemInput", "formatRunHistoryFacts", "isBatchWriteConflictResource", "isToolAllowedInMode",
     "latestTerminalPlanBoundRun", "nextSessionMode", "toolsForMode",
   ],
   "@civaapple/qi-agent/tools": [

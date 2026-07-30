@@ -26,6 +26,30 @@ test("@ mentions normalize files/directories and reject missing, escaping, and p
   }
 });
 
+test("@ mentions leave absent npm-style @scope/pkg tokens as plain text", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-mentions-pkg-"));
+  try {
+    await mkdir(join(root, "packages", "shared-types"), { recursive: true });
+    assert.equal(
+      await validateWorkspaceMentions(
+        "接入 workspace 与 @memo/shared-types；再看 @packages/shared-types",
+        root,
+      ),
+      "接入 workspace 与 @memo/shared-types；再看 @packages/shared-types/",
+    );
+    await assert.rejects(
+      () => validateWorkspaceMentions("typo @packages/missing-pkg", root),
+      /does not exist/,
+    );
+    await assert.rejects(
+      () => validateWorkspaceMentions("missing file @docs/guide.md", root),
+      /does not exist/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("slash completion before existing text inserts a command line and preserves the draft", () => {
   const provider = new WorkspaceAutocompleteProvider(
     [{ name: "model", description: "model" }],

@@ -20,6 +20,10 @@ const alreadyRedacted = /^\[REDACTED:[a-z-]+\]$/i;
  * Removes extremely high-confidence credential literals without retaining the matched value.
  * Source-code assignment forms are intentionally left alone so authorized file reads can round-trip
  * into precise edit. Sensitive Workspace paths are gated by human grants instead (ADR-0001).
+ *
+ * `Authorization: Bearer` values are not rewritten: agents often mint and reuse them while debugging
+ * services they just created, and a dead `[REDACTED:authorization]` placeholder breaks that loop.
+ * The `authorization` kind remains in the schema for historical `safety.redaction.applied` facts.
  */
 export function redactSensitiveText(input: string): RedactionResult<string> {
   const counts = new Map<SensitiveDataKind, number>();
@@ -29,10 +33,6 @@ export function redactSensitiveText(input: string): RedactionResult<string> {
   };
 
   let value = input;
-  value = value.replace(/(authorization\s*:\s*bearer\s+)([^\s,;]{8,4096})/gi, (match, prefix: string, candidate: string) => {
-    if (alreadyRedacted.test(candidate.trim())) return match;
-    return `${prefix}${record("authorization")}`;
-  });
   value = value.replace(/\b((?:https?|wss?):\/\/[^\s\/:@]+:)([^\s\/@]+)(@)/gi, (match, prefix: string, secret: string, suffix: string) => {
     if (alreadyRedacted.test(secret.trim())) return match;
     return `${prefix}${record("url-credential")}${suffix}`;

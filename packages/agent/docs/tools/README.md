@@ -78,14 +78,14 @@ automatic inference path, so a hand-picked manifest is exactly as trustworthy as
   closed; returned page text remains explicitly untrusted.
 - Shell arguments are not interpolated through an ambient shell and globs, pipes, and redirection are not
   expanded. Windows PATH/PATHEXT shims are resolved explicitly; `.cmd`/`.bat` invocation rejects shell
-  metacharacters before entering the trusted command processor. Advertised guidance tells the model to use at
-  most one `shell`/`script` Action per workdir per Step and to probe multiple host tools in one `script` Action
-  when a profile is available, matching the Loop's same-resource `BATCH_WRITE_CONFLICT` rule.
+  metacharacters before entering the trusted command processor. Multiple `shell`/`script` Actions may share a
+  workdir in one Step; `BATCH_WRITE_CONFLICT` applies to overlapping `file:*` / `artifact-store:*` mutations,
+  not host execute resources. Prefer one `script` Action when builtins, pipes, or multi-statement logic help.
 - Shell and declared verification timeouts or non-zero exits are failed Actions, not successful settlements with
   an error-shaped payload. Failure details retain bounded process evidence for the next Step.
 - In Git Workspaces, shell execution records before/after state hashes and a bounded tracked diff when that
   command changed Git state; an unchanged command does not repeat a pre-existing diff as its own mutation.
-- Tool output may still pass through narrow literal redaction (provider tokens, PEM blocks, Bearer values, URL
+- Tool output may still pass through narrow literal redaction (provider tokens, PEM blocks, URL
   userinfo) before Effect Journal completion, model feedback, and Session settlement. Source-code assignment
   forms are not rewritten; sensitive Workspace paths are gated by human content grants instead.
 - Optional process activity callbacks receive only redacted bounded snapshots; they are provisional observation,

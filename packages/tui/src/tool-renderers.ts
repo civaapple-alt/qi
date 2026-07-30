@@ -11,6 +11,10 @@ export interface ToolCardModel {
   input?: unknown;
   output?: Record<string, unknown>;
   errorCode?: string;
+  /** Human-readable settlement evidence (e.g. indeterminate reason). */
+  detail?: string;
+  /** Optional recovery guidance shown with indeterminate/cancelled cards. */
+  hint?: string;
   elapsed?: string;
   resources?: readonly string[];
   liveTail?: { stream: "stdout" | "stderr" | "model"; text: string; droppedLines: number };
@@ -125,6 +129,7 @@ function renderProcess(model: ToolCardModel, options: ToolCardOptions): string[]
   if (options.summaryOnly) {
     const lines = [title];
     if (model.status !== "completed") appendProcessTail(lines, streamLines, 3);
+    if (model.status === "indeterminate" && model.detail) lines.push(`  ${oneLine(model.detail, 110)}`);
     return lines;
   }
   const lines = [title];
@@ -153,6 +158,12 @@ function renderProcess(model: ToolCardModel, options: ToolCardOptions): string[]
 
   if (options.expanded) {
     if (workdir && workdir !== ".") lines.push(`  cwd ${workdir}`);
+    if (model.detail && (model.status === "indeterminate" || model.status === "cancelled" || model.status === "failed")) {
+      lines.push(`  ${oneLine(model.detail, 110)}`);
+    }
+    if (model.hint && model.status === "indeterminate") {
+      lines.push(`  ${oneLine(model.hint, 110)}`);
+    }
     appendBounded(lines, stderr, options.outputLines ?? 12, "stderr");
     appendBounded(lines, stdout, options.outputLines ?? 12, "stdout");
     if (!stderr && !stdout) appendBounded(lines, message, options.outputLines ?? 12, "message");
@@ -189,6 +200,10 @@ function renderMutation(model: ToolCardModel, options: ToolCardOptions): string[
     appendDiffPreview(lines, diff, limit);
   }
   if (options.expanded && typeof output?.backupRef === "string") lines.push(`  recovery ${output.backupRef}`);
+  if (model.detail && (model.status === "indeterminate" || model.status === "cancelled" || model.status === "failed")) {
+    lines.push(`  ${oneLine(model.detail, 110)}`);
+  }
+  if (model.hint && model.status === "indeterminate") lines.push(`  ${oneLine(model.hint, 110)}`);
   return lines;
 }
 
@@ -474,8 +489,16 @@ function renderAskQuestion(model: ToolCardModel, options: ToolCardOptions): stri
 
 function renderGeneric(model: ToolCardModel, options: ToolCardOptions): string[] {
   const summary = oneLine(JSON.stringify(model.input ?? {}), 100);
-  if (options.summaryOnly) return [header(model, summary, model.errorCode)];
+  if (options.summaryOnly) {
+    const lines = [header(model, summary, model.errorCode)];
+    if (model.status === "indeterminate" && model.detail) lines.push(`  ${oneLine(model.detail, 110)}`);
+    return lines;
+  }
   const lines = [header(model, summary, model.errorCode)];
+  if (model.detail && (model.status === "indeterminate" || model.status === "cancelled" || model.status === "failed")) {
+    lines.push(`  ${oneLine(model.detail, 110)}`);
+  }
+  if (model.hint && model.status === "indeterminate") lines.push(`  ${oneLine(model.hint, 110)}`);
   if (model.liveTail?.text) {
     lines.push(...tailLines(model.liveTail.text, options.outputLines ?? 5).map((line) => `  ${line}`));
     lines.push(

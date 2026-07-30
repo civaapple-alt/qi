@@ -18,7 +18,7 @@ import {
 const bearer = "bearer-value-12345678";
 const providerToken = "sk-abcdefghijklmnopqrstuvwxyz012345";
 
-test("redaction keeps source assignments and still strips high-confidence literals", () => {
+test("redaction keeps Bearer values and source assignments while stripping other high-confidence literals", () => {
   const text = [
     `"password": "fixture-password-9274"`,
     "password: &str",
@@ -32,9 +32,9 @@ test("redaction keeps source assignments and still strips high-confidence litera
   assert.match(result.value, /password: &str/);
   assert.match(result.value, /jwt_secret: env::var/);
   assert.match(result.value, /process\.env\.OPENAI_API_KEY/);
-  assert.doesNotMatch(result.value, new RegExp(bearer));
+  assert.match(result.value, new RegExp(bearer));
+  assert.doesNotMatch(result.value, /REDACTED:authorization/);
   assert.doesNotMatch(result.value, new RegExp(providerToken));
-  assert.match(result.value, /REDACTED:authorization/);
   assert.match(result.value, /REDACTED:provider-token/);
   assert.equal(
     redactSensitiveText(result.value).value,
@@ -49,7 +49,7 @@ test("EventWriter redacts durable event data and appends a value-free safety aud
   writer.append("session.created", { title: "redaction test" }, { kind: "runtime", id: "test" });
   writer.append(
     "run.triggered",
-    { runId: "run_redaction_writer", trigger: "user", input: `Authorization: Bearer ${bearer}` },
+    { runId: "run_redaction_writer", trigger: "user", input: `token ${providerToken}` },
     { kind: "user", id: "user" },
   );
   const events = store.read("ses_redaction_writer").events;
@@ -58,8 +58,23 @@ test("EventWriter redacts durable event data and appends a value-free safety aud
     "safety.redaction.applied",
     "run.triggered",
   ]);
-  assert.doesNotMatch(JSON.stringify(events), new RegExp(bearer));
+  assert.doesNotMatch(JSON.stringify(events), new RegExp(providerToken));
   assert.equal(events[1].data.boundary, "event-store");
+});
+
+test("EventWriter preserves Authorization Bearer values in durable events", () => {
+  const store = new InMemoryEventStore();
+  const writer = new EventWriter(store, "ses_bearer_keep");
+  writer.append("session.created", { title: "bearer keep" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "run.triggered",
+    { runId: "run_bearer_keep", trigger: "user", input: `Authorization: Bearer ${bearer}` },
+    { kind: "user", id: "user" },
+  );
+  const events = store.read("ses_bearer_keep").events;
+  assert.deepEqual(events.map((event) => event.type), ["session.created", "run.triggered"]);
+  assert.match(JSON.stringify(events), new RegExp(bearer));
+  assert.doesNotMatch(JSON.stringify(events), /safety\.redaction\.applied/);
 });
 
 test("sensitive path classifier recognizes env and example exclusions", () => {

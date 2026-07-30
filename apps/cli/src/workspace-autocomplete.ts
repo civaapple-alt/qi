@@ -87,7 +87,9 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
 /** Validate and normalize explicit @ references without reading or injecting their content. */
 export async function validateWorkspaceMentions(input: string, workspaceRoot: string): Promise<string> {
   const root = await realpath(resolve(workspaceRoot));
-  const pattern = /(?<!\S)@(?:"([^"\r\n]+)"|([^\s\r\n]+))/g;
+  // Unquoted mentions are path/token shaped (ASCII path chars). Quoted @"…" keeps spaces and
+  // non-ASCII names. Stopping before CJK punctuation avoids swallowing `；` / `。` after @scope/pkg.
+  const pattern = /(?<!\S)@(?:"([^"\r\n]+)"|([A-Za-z0-9._~+/-][A-Za-z0-9._~+/\\-]*))/g;
   let output = "";
   let cursor = 0;
   for (const match of input.matchAll(pattern)) {
@@ -100,6 +102,9 @@ export async function validateWorkspaceMentions(input: string, workspaceRoot: st
     try {
       info = await lstat(absolute);
     } catch {
+      // npm-style @scope/pkg (e.g. @memo/shared-types) collides with @path mentions.
+      // Leave absent scoped-package lookalikes as plain text so continue messages can submit.
+      if (await isAbsentScopedPackageStyle(root, normalizedRaw)) continue;
       throw new Error(`Workspace mention does not exist: @${raw}`);
     }
     if (info.isSymbolicLink()) throw new Error(`Workspace mention must not be a symbolic link: @${raw}`);
@@ -238,4 +243,19 @@ function assertMentionScope(root: string, absolute: string, raw: string): void {
   if (rel === ".." || rel.startsWith(`..${sep}`)) {
     throw new Error(`Workspace mention escapes the current Workspace: @${raw}`);
   }
+}
+
+/**
+ * True when `scope/name` looks like an npm scoped package and `scope` is not a Workspace root entry.
+ * File-like second segments (e.g. guide.md) stay path mentions and still fail when missing.
+ */
+async function isAbsentScopedPackageStyle(root: string, normalizedRaw: string): Promise<boolean> {
+  const parts = normalizedRaw.split("/");
+  if (parts.length !== 2) return false;
+  const [scope, name] = parts;
+  if (!scope || !name) return false;
+  if (!/^[a-z0-9][\w.~-]*$/i.test(scope) || !/^[a-z0-9][\w.~-]*$/i.test(name)) return false;
+  if (/\.[a-z0-9]{1,12}$/i.test(name)) return false;
+  const scopeInfo = await lstat(resolve(root, scope)).catch(() => undefined);
+  return scopeInfo === undefined;
 }

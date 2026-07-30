@@ -111,18 +111,18 @@ is not portable. Programs that explicitly discard output use the host null devic
 The same direct-vector rule applies to ordinary utilities: `command: "mkdir -p pepsi-3d-2/src"` is invalid
 because it combines the executable, flags, and operand. Prefer `write`, which creates the parent directories for
 the file being written; host-specific directory utilities are not a portable substitute. Explicit executable
-paths are validated as files before spawn. A malformed/unavailable command or a confirmed process-start error
-is a deterministic failed settlement, not an indeterminate effect; only failures after effect entry whose
-settlement cannot be established remain indeterminate.
+paths are validated as files before spawn. A malformed/unavailable command, a missing or non-directory
+`workdir`, or a confirmed process-start error is a deterministic failed settlement, not an indeterminate
+effect; only failures after effect entry whose settlement cannot be established remain indeterminate.
 
 Authorized script profiles (`pwsh`, `cmd`, `bash`) are a separate `script` tool. They require matching
 `shell-profile:<name>` resources, are probed at runtime startup, and never replace `shell` based on command text.
 `pwsh` runs with `-NoLogo -NoProfile -NonInteractive` and receives the script on stdin; `bash` uses
 `--noprofile --norc -s`; `cmd` runs a temporary script through the trusted system processor. Profile scripts inherit
-a credential-scrubbed environment and terminate process trees on timeout or cancel. Prefer one `script` Action to
-probe multiple host tools or run multi-statement logic. Do not request more than one `shell` or `script` Action
-targeting the same `workdir` in a single Step: both declare `host-workspace:<workdir>` (and `shell` also declares
-`shell-profile:direct`), so a later same-Step overlap fails closed as `BATCH_WRITE_CONFLICT`.
+a credential-scrubbed environment and terminate process trees on timeout or cancel. Prefer one `script` Action when you need builtins, pipes, or multi-statement logic. Multiple `shell` or
+`script` Actions may share a `workdir` in one Step: host resources (`host-workspace:*`, `host-process:*`,
+`shell-profile:*`) do not participate in same-Step `BATCH_WRITE_CONFLICT`. That conflict remains reserved for
+overlapping `file:*` / `artifact-store:*` mutations (and edit freshness rebasing).
 Allowed profiles are configured only in `$QI_HOME/config.toml` (first-run auto-detect writes installed candidates;
 `/shell` hot-applies without restart). Project `policy.toml` `[shell]` is ignored.
 Host-process environments

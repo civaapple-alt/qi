@@ -22,9 +22,10 @@ Delegation intersects the requested child scope with the parent. `CredentialHand
 subject and intent while the secret stays behind the broker.
 
 `redactSensitiveText()` and `redactSensitiveValue()` provide a last-resort literal scrubber for extremely
-high-confidence credential shapes (Bearer values, provider tokens, URL userinfo, PEM blocks). Sensitive
-Workspace paths are gated by human content grants before file bodies reach the model; ordinary authorized
-reads round-trip as raw text for precise edit.
+high-confidence credential shapes (provider tokens, URL userinfo, PEM blocks). `Authorization: Bearer` values
+are left intact so agents can reuse tokens while debugging services they create. Sensitive Workspace paths are
+gated by human content grants before file bodies reach the model; ordinary authorized reads round-trip as raw
+text for precise edit.
 
 ## Behavioral invariants
 
@@ -34,8 +35,9 @@ reads round-trip as raw text for precise edit.
 - Delegation only narrows scope and emits an inspectable policy trace.
 - Credential material is not serialized into Session, context, or tool catalogs.
 - Sensitive Workspace paths require an explicit human grant before content-exposing file tools return bodies.
-- Extremely high-confidence credential literals (provider tokens, PEM blocks, Bearer values, URL userinfo) may
-  still be redacted before provider reuse or durable persistence; source-code assignment forms are not rewritten.
+- Extremely high-confidence credential literals (provider tokens, PEM blocks, URL userinfo) may still be
+  redacted before provider reuse or durable persistence; `Authorization: Bearer` values and source-code
+  assignment forms are not rewritten.
 
 ## Failure semantics
 

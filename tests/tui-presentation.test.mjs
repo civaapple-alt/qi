@@ -2687,6 +2687,136 @@ test("parked budget handoff shows reason and continue guidance", () => {
   assert.equal(presenter.selectedRunFailureDetail(), "budget: Reached maxSteps=20");
 });
 
+test("parked indeterminate handoff surfaces Action evidence and no-retry guidance", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "park-indet-v1",
+    capabilities: ["write", "host execute"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  const actor = { kind: "runtime", id: "qi" };
+  presenter.update([
+    {
+      eventId: "evt_proposed",
+      sessionId: "ses_indet",
+      sequence: 1,
+      type: "action.proposed",
+      occurredAt,
+      actor,
+      data: {
+        runId: "run_1",
+        stepId: "stp_1",
+        actionId: "act_1",
+        toolName: "shell",
+        effect: "execute",
+        input: {
+          command: "pnpm",
+          args: ["create", "tauri-app", "desktop"],
+          workdir: "apps",
+        },
+      },
+    },
+    {
+      eventId: "evt_indet",
+      sessionId: "ses_indet",
+      sequence: 2,
+      type: "action.indeterminate",
+      occurredAt,
+      actor,
+      data: {
+        runId: "run_1",
+        stepId: "stp_1",
+        actionId: "act_1",
+        reason: "ENOENT: no such file or directory, realpath 'D:\\\\code\\\\qi-ws\\\\qi-notebook\\\\apps'",
+        reconciliationHint: "Inspect the Effect Journal before retrying this action",
+      },
+    },
+    {
+      eventId: "evt_park",
+      sessionId: "ses_indet",
+      sequence: 3,
+      type: "run.parked",
+      occurredAt,
+      actor,
+      data: {
+        runId: "run_1",
+        reason: "indeterminate-effect",
+        detail: "Tool settlement could not be confirmed",
+      },
+    },
+  ], {
+    sessionId: "ses_indet",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "parked",
+        input: "scaffold tauri",
+        stepOrder: ["stp_1"],
+        steps: {
+          stp_1: { stepId: "stp_1", status: "completed", finishReason: "actions" },
+        },
+        actions: {
+          act_1: {
+            actionId: "act_1",
+            stepId: "stp_1",
+            toolName: "shell",
+            effect: "execute",
+            status: "indeterminate",
+            terminalDetail: "ENOENT: no such file or directory, realpath 'D:\\\\code\\\\qi-ws\\\\qi-notebook\\\\apps'",
+            resources: ["host-workspace:apps", "shell-profile:direct"],
+          },
+        },
+        actionOrder: ["act_1"],
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: {
+          type: "parked",
+          reason: "indeterminate-effect",
+          detail: "Tool settlement could not be confirmed",
+        },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "Run parked" },
+  });
+  const rendered = presenter.render().join("\n");
+  assert.match(rendered, /Status\s+parked|状态\s+已暂停/);
+  assert.match(rendered, /indeterminate-effect: shell: ENOENT/);
+  assert.match(rendered, /realpath/);
+  assert.match(rendered, /Do not auto-retry|不要自动重试/);
+  assert.match(rendered, /ENOENT: no such file or directory/);
+  assert.match(rendered, /Inspect the Effect Journal|Effect Journal/);
+  assert.match(
+    presenter.selectedRunFailureDetail() ?? "",
+    /indeterminate-effect: shell: ENOENT/,
+  );
+});
+
 test("pending Formal Plan Review shows the complete bounded plan before its choices", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",

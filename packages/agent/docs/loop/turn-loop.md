@@ -38,7 +38,9 @@ After a successful edit, a later same-Step edit of the same single resource may 
 latest digest when its proposed digest belongs to that edit chain. The Loop appends
 `action.freshness.rebased` before requesting authority, and the Effect Journal sees the re-inspected input.
 There is no fuzzy merge: target and freshness errors stay determinate failures, while mixed or unrelated
-same-resource writes remain `BATCH_WRITE_CONFLICT`.
+same-resource `file:*` / `artifact-store:*` writes remain `BATCH_WRITE_CONFLICT`. Host execute resources
+(`host-process:*`, `host-workspace:*`, `shell-profile:*`) do not enter that conflict table, so sequential
+shells may share a workdir in one Step.
 
 If an advertised tool's input fails schema validation, or Ask/Plan mode forbids the tool/effect after inspect,
 the Loop records `model.action.rejected`, returns a structured `TOOL_INPUT` result in assistant source order, and

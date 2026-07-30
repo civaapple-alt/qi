@@ -22,6 +22,7 @@ import type {
 import { parseSessionEvent } from "@civaapple/qi-protocol";
 import type { ContextBlockStats } from "@civaapple/qi-ai/context";
 import { StateTransitionError } from "./errors.js";
+import { isBootstrapSessionTitle, sessionTitleFromUserInput } from "./session-title.js";
 
 export type SessionMode = "ask" | "plan" | "agent";
 export type SessionLifecycle = "active" | "archive_pending" | "archived" | "restore_pending";
@@ -1414,6 +1415,10 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       }
       if (event.data.planBinding) {
         assertPlanBindingLegal(view, event.data.planBinding, mode);
+      }
+      if (event.data.trigger === "user" && isBootstrapSessionTitle(view.title)) {
+        const derived = sessionTitleFromUserInput(event.data.input ?? "");
+        if (derived) view.title = derived;
       }
       view.runs[event.data.runId] = {
         runId: event.data.runId,

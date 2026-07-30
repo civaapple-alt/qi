@@ -25,6 +25,13 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Changed
 
+- Same-Step `BATCH_WRITE_CONFLICT` now applies only to overlapping `file:*` / `artifact-store:*` mutations.
+  Host execute resources (`host-process:*`, `host-workspace:*`, `shell-profile:*`) no longer conflict, so
+  sequential `shell`/`script` Actions may share a workdir in one Step. File edit freshness rebasing is unchanged.
+- Session lists (TUI `/sessions` and qi:web) now show a truncated first user message as the title when the
+  Session still carried the bootstrap `Qi TUI` placeholder; later messages and `›` previews are unchanged.
+  Explicit non-bootstrap `session.created` titles are preserved. SQLite `listSessions` reads the projected title
+  instead of only `sequence = 1`.
 - Kimi K3 now advertises its 1,048,576-token window, image input, `max`-only thinking effort, and `max` default.
   Legacy K3 low/high effort settings fall back to `max`; custom OpenAI-compatible endpoints remain text-only
   unless their `[[compatible]]` entry sets `image_input = true`.
@@ -38,9 +45,8 @@ steps and investigation history belong in pull requests, not release notes.
   `Permissions disabled` partition after `--safe`, config, and CLI overrides.
 - ADR-0001 now gates sensitive Workspace paths with human content grants instead of rewriting source-code
   assignment forms before they reach the model; authorized file bodies round-trip for precise `edit`.
-- Host-execute guidance now tells the model to use at most one `shell`/`script` Action per workdir per Step and
-  to probe multiple host tools in one authorized `script` Action, reducing same-Step `BATCH_WRITE_CONFLICT`
-  from parallel version probes.
+- Host-execute guidance prefers one `script` Action for builtins/pipes/multi-statement logic, while allowing
+  multiple sequential `shell`/`script` Actions that share a workdir in one Step.
 - Shell profiles are user-global only under `$QI_HOME/config.toml`; project `policy.toml` `[shell]` is no longer
   merged into launch authority (ADR-0015).
 
@@ -50,6 +56,13 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- Composer `@` mention validation no longer blocks submit when the token is an absent npm-style
+  `@scope/package` (for example `@memo/shared-types`); real missing Workspace paths still fail closed.
+- Indeterminate-effect parking now carries tool name and Action evidence in `run.parked.detail`, and the TUI
+  handoff/tool card surfaces that reason plus explicit no-auto-retry guidance instead of only
+  "Tool settlement could not be confirmed".
+- Missing or non-directory shell/script `workdir` paths now settle as deterministic `ToolFailure`
+  (`PATH_NOT_FOUND` / `NOT_A_DIRECTORY`) instead of parking the Run with an indeterminate effect.
 - Plan-mode `ask_question` panels now hard-wrap long CJK prompts by display column width so rich-TTY rendering
   no longer crashes with `Rendered line exceeds terminal width`.
 - `/config` cmd profile versions no longer show OEM-codepage mojibake from localized `ver` output; the probe keeps
@@ -64,6 +77,10 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Security
 
+- Last-resort literal redaction no longer rewrites `Authorization: Bearer` values in Session events, tool
+  feedback, or model context, so agents can reuse tokens while debugging services they create. Provider tokens,
+  PEM private-key blocks, and URL userinfo remain redacted. Historical `safety.redaction.applied` facts with
+  kind `authorization` stay valid.
 - Sensitive Workspace paths (for example `.env`) now require an explicit human grant before file bodies reach the
   model. Project `sensitive_path_grants` / `[sensitive_paths]` load at CLI startup, rehydrate as Session audit
   facts, and drive a Ctrl+G allow/deny panel on `SENSITIVE_PATH_GRANT_REQUIRED` without collapsing into mount

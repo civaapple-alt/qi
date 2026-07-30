@@ -23,7 +23,6 @@ interface EventRow {
 interface SessionSummaryRow {
   session_id: string;
   version: number;
-  title: string | null;
   updated_at: string;
 }
 
@@ -158,21 +157,22 @@ export class SqliteEventStore implements EventStore {
     const rows = this.#database.prepare(`
       SELECT streams.session_id,
              streams.version,
-             json_extract(created.event_json, '$.data.title') AS title,
              json_extract(latest.event_json, '$.occurredAt') AS updated_at
       FROM session_streams AS streams
-      JOIN session_events AS created
-        ON created.session_id = streams.session_id AND created.sequence = 1
       JOIN session_events AS latest
         ON latest.session_id = streams.session_id AND latest.sequence = streams.version
       ORDER BY updated_at DESC, streams.session_id ASC
     `).all() as unknown as SessionSummaryRow[];
-    return rows.map((row) => ({
-      sessionId: row.session_id as SessionId,
-      title: row.title ?? row.session_id,
-      version: row.version,
-      updatedAt: row.updated_at,
-    }));
+    return rows.map((row) => {
+      const sessionId = row.session_id as SessionId;
+      const view = this.#projection(sessionId, row.version);
+      return {
+        sessionId,
+        title: view.title ?? sessionId,
+        version: row.version,
+        updatedAt: row.updated_at,
+      };
+    });
   }
 
   close(): void {

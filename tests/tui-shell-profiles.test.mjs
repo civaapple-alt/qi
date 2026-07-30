@@ -34,11 +34,11 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
     assert.match(directPrompt, new RegExp(`platform=.*${process.platform}`));
     assert.match(directPrompt, /bash=disallowed/);
     assert.match(directPrompt, /does not interpret pipes/);
-    assert.match(directPrompt, /Do not request more than one shell or script Action/);
+    assert.match(directPrompt, /Multiple shell or script Actions may share a workdir/);
     assert.match(directPrompt, /BATCH_WRITE_CONFLICT/);
     assert.match(directPrompt, /do not repeat the same unsupported assumption/);
     const shellDescription = directModel.requests[0].tools.find((tool) => tool.name === "shell")?.description ?? "";
-    assert.match(shellDescription, /BATCH_WRITE_CONFLICT/);
+    assert.match(shellDescription, /Multiple shell Actions may share a workdir/);
     assert.match(shellDescription, /one authorized script Action/);
     if (process.platform === "win32") {
       assert.match(directPrompt, /Do not attempt POSIX-only bash, lsof, xargs/);
@@ -67,9 +67,10 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("\n");
-      assert.match(scriptPrompt, /probe multiple host tools or run chained statements in one script Action/);
+      assert.match(scriptPrompt, /prefer one script for builtins, pipes, or multi-statement logic/);
       const scriptDescription = scriptModel.requests[0].tools.find((tool) => tool.name === "script")?.description ?? "";
-      assert.match(scriptDescription, /probe multiple host tools/);
+      assert.match(scriptDescription, /multi-statement logic/);
+      assert.match(scriptDescription, /may share a workdir/);
     } else {
       assert.equal(scriptTools.includes("script"), false);
     }

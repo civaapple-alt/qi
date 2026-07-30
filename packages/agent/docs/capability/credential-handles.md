@@ -31,7 +31,7 @@ Opaque handles cannot protect a password that already exists in a Workspace file
 4. Returns authorized file bodies as raw text so precise `edit` can round-trip.
 
 Last-resort content redaction remains only for extremely high-confidence literals (provider API tokens, PEM
-private-key blocks, URL userinfo, Bearer authorization values). It must not rewrite source-code assignment
+private-key blocks, URL userinfo). It does not rewrite `Authorization: Bearer` values or source-code assignment
 forms such as `password: &str`, and it is not a substitute for path grants.
 
 Existing Session databases are not retroactively rewritten; exposure response still requires rotating the

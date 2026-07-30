@@ -31,7 +31,11 @@ to full history. There is no separate mutation API.
 Derived views may cache convenient status or indexes, but the value must be completely determined by prior events.
 Never add current time, random selection, network lookup, or provider cache access to projection.
 
+Bootstrap Session titles such as `Qi TUI` are replaced by a truncated first-line form of the first user
+`run.triggered` input (72 characters max). Explicit non-bootstrap titles from `session.created` are kept.
+
 ## Evidence
 
 `tests/slice0.test.mjs` provides the transition matrix in executable form. `tests/sqlite-store.test.mjs` proves
-that restart and durable replay produce the same projection.
+that restart and durable replay produce the same projection. `tests/session-title.test.mjs` covers bootstrap
+title replacement from the first user message and SQLite list projection.

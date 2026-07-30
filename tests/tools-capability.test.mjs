@@ -85,15 +85,16 @@ test("shell catalog guidance is platform-aware and prefers direct package-manage
   assert.match(shellTool.description, /workdir/);
   assert.match(shellTool.description, /command npm/);
   assert.match(shellTool.description, /NUL instead of \/dev\/null/);
-  assert.match(shellTool.description, /BATCH_WRITE_CONFLICT/);
+  assert.match(shellTool.description, /Multiple shell Actions may share a workdir/);
   assert.match(shellTool.description, /one authorized script Action/);
 });
 
-test("script catalog guidance prefers one multi-tool probe over same-Step shell batches", () => {
+test("script catalog guidance prefers script for multi-statement logic without host BATCH_WRITE_CONFLICT", () => {
   const script = createScriptTool([
     { id: "pwsh", executable: "pwsh", status: "available", version: "7.0" },
   ]);
-  assert.match(script.description, /probe multiple host tools/);
+  assert.match(script.description, /multi-statement logic/);
+  assert.match(script.description, /may share a workdir/);
   assert.match(script.description, /BATCH_WRITE_CONFLICT/);
   assert.match(script.description, /Prefer dedicated file tools/);
 });
@@ -971,6 +972,89 @@ test("shell command-line strings fail deterministically instead of becoming inde
       const key = effectIdempotencyKey("run_tools_001", "shell", input, resources);
       assert.equal(journal.get(key)?.status, "failed");
       assert.equal(await stat(join(root, "pepsi-3d-2")).catch(() => undefined), undefined);
+    } finally {
+      journal.close();
+    }
+  });
+});
+
+test("shell missing workdir fails deterministically instead of becoming indeterminate effects", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("shell", shellTool);
+    const journal = new SqliteEffectJournal(join(root, "effects.sqlite"));
+    const input = {
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('should-not-run')"],
+      workdir: "apps",
+    };
+    const resources = [
+      `host-process:${process.execPath}`,
+      "host-workspace:apps",
+      "shell-profile:direct",
+    ];
+
+    try {
+      await assert.rejects(
+        registry.execute(
+          "shell",
+          identity(registry, "shell"),
+          input,
+          { ...context(root, artifactStore, "act_shell_missing_workdir"), effectJournal: journal },
+        ),
+        (error) => {
+          assert.ok(error instanceof ToolFailure);
+          assert.equal(error.code, "PATH_NOT_FOUND");
+          assert.match(error.message, /Path not found: apps/);
+          return true;
+        },
+      );
+      const key = effectIdempotencyKey("run_tools_001", "shell", input, resources);
+      assert.equal(journal.get(key)?.status, "failed");
+    } finally {
+      journal.close();
+    }
+  });
+});
+
+test("shell workdir that is a file fails deterministically instead of becoming indeterminate effects", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    await writeFile(join(root, "apps"), "not a directory\n");
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("shell", shellTool);
+    const journal = new SqliteEffectJournal(join(root, "effects.sqlite"));
+    const input = {
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('should-not-run')"],
+      workdir: "apps",
+    };
+    const resources = [
+      `host-process:${process.execPath}`,
+      "host-workspace:apps",
+      "shell-profile:direct",
+    ];
+
+    try {
+      await assert.rejects(
+        registry.execute(
+          "shell",
+          identity(registry, "shell"),
+          input,
+          { ...context(root, artifactStore, "act_shell_file_workdir"), effectJournal: journal },
+        ),
+        (error) => {
+          assert.ok(error instanceof ToolFailure);
+          assert.equal(error.code, "NOT_A_DIRECTORY");
+          assert.match(error.message, /apps is not a directory/);
+          return true;
+        },
+      );
+      const key = effectIdempotencyKey("run_tools_001", "shell", input, resources);
+      assert.equal(journal.get(key)?.status, "failed");
     } finally {
       journal.close();
     }

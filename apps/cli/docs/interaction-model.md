@@ -143,7 +143,10 @@ every column useful, the renderer switches to a per-row vertical field layout so
 
 - Shell/script/verify: a settled success is one compact `$ command duration` line (or script/verify equivalent).
   Expansion or diagnostic density reveals cwd and a bounded stdout/stderr window. A failure automatically keeps
-  at most three evidence lines; timeout remains explicit. Elapsed time comes only from committed event timestamps.
+  at most three evidence lines; timeout remains explicit. Indeterminate cards also keep the durable settlement
+  reason and reconciliation hint (for example a missing `workdir` path), and parked-run handoff text prefers
+  that Action evidence over a bare "settlement could not be confirmed" phrase. Elapsed time comes only from
+  committed event timestamps.
   Live tails use a flat `·` prefix (also up to three lines) rather than box-drawing chrome.
 - Read: header-only (`path · N lines`); file contents are never echoed into the transcript.
 - Write/edit: completed cards read `Edited <path> +N -M` (Cursor-style). The body uses a `▎` gutter, shows

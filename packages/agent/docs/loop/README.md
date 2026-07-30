@@ -48,7 +48,8 @@ runtime lifecycles such as ProcessTasks can interleave facts without stale seque
 - Settled tool exchanges remain complete for their first consumer, then compact deterministically under pressure
   into a causal summary and Artifact-backed `context.compacted` checkpoint.
 - Consecutive same-resource `edit` calls in one Step may use a durable, pre-authority freshness rebase after the
-  prior edit settles successfully. Other repeated writes fail closed as `BATCH_WRITE_CONFLICT`.
+  prior edit settles successfully. Other repeated `file:*` / `artifact-store:*` writes fail closed as
+  `BATCH_WRITE_CONFLICT`. Host execute resources are excluded from that conflict table.
 - Hard budgets and repeated equivalent failures converge to a parked Run instead of spinning.
 - Portable messages are redacted before provider entry, Tool feedback is already sanitized, and EventWriter
   applies a final persistence guard with value-free safety audit events.

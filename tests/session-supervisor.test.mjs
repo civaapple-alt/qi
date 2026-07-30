@@ -41,6 +41,10 @@ test("SessionSupervisor parks a crashed running Action as indeterminate after SQ
     assert.equal(recovery.reason, "indeterminate-effect");
     assert.equal(recovery.view.runs[runId].actions[actionId].status, "indeterminate");
     assert.equal(recovery.view.runs[runId].status, "parked");
+    assert.match(
+      recovery.view.runs[runId].terminal?.detail ?? "",
+      /write: Process restarted after executor entry but before settlement/,
+    );
     assert.equal(reopened.read(sessionId).version, before + 2);
     assert.equal(supervisor.recover(sessionId).recovered, false);
   } finally {

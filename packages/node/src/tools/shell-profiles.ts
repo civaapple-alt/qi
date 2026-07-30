@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
@@ -133,7 +133,7 @@ export function createScriptTool(profiles: readonly AvailableScriptProfile[]): A
   }
   return defineTool({
     description:
-      `Run one explicitly authorized shell-profile script (${names.join(", ")}). Prefer one script Action to probe multiple host tools or run multi-statement logic when a profile is available, instead of multiple same-Step shell Actions that share a workdir. Prefer dedicated file tools for Workspace mutation. Profiles are never auto-selected from command text; choose the profile name explicitly. At most one script Action per Step for a given workdir (same-Step host-workspace overlap fails with BATCH_WRITE_CONFLICT). Non-zero exits and timeouts fail the Action.`,
+      `Run one explicitly authorized shell-profile script (${names.join(", ")}). Prefer one script Action when you need shell builtins, pipes, or multi-statement logic; multiple shell/script Actions may share a workdir in one Step and still run sequentially. Prefer dedicated file tools for Workspace mutation. Profiles are never auto-selected from command text; choose the profile name explicitly. Same-Step file/artifact mutations still fail closed with BATCH_WRITE_CONFLICT. Non-zero exits and timeouts fail the Action.`,
     input: Type.Object(
       {
         profile: names.length === 1
@@ -183,7 +183,11 @@ export function createScriptTool(profiles: readonly AvailableScriptProfile[]): A
       if (request.script.includes("\0")) {
         throw new ToolFailure("INVALID_SCRIPT", "Shell profile scripts may not contain NUL bytes");
       }
-      const cwd = await resolveWorkspacePath(context.workspaceRoot, request.workdir ?? ".");
+      const workdir = request.workdir ?? ".";
+      const cwd = await resolveWorkspacePath(context.workspaceRoot, workdir);
+      if (!(await stat(cwd)).isDirectory()) {
+        throw new ToolFailure("NOT_A_DIRECTORY", `${workdir} is not a directory`);
+      }
       const invocation = await buildScriptInvocation(profile, request.script, context.workspaceRoot);
       try {
         const { stdoutFull, stderrFull, ...result } = await runHostProcess(invocation.command, invocation.args, {

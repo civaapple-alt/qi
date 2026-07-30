@@ -7,7 +7,6 @@ import { Type } from "@sinclair/typebox";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
-import { TurnLoop, formatRunHistoryFacts } from "@civaapple/qi-agent/loop";
 import {
   FileArtifactStore,
   ToolRegistry,
@@ -16,8 +15,10 @@ import {
   editTool,
   readTool,
   searchTool,
+  shellTool,
   writeTool,
 } from "@civaapple/qi-node/tools";
+import { TurnLoop, formatRunHistoryFacts, isBatchWriteConflictResource } from "@civaapple/qi-agent/loop";
 import { effectIdempotencyKey } from "@civaapple/qi-node/workspace";
 
 function delayedReadTool(activity) {
@@ -948,11 +949,11 @@ test("TurnLoop settles unstarted batch actions before parking an indeterminate e
     assert.equal(putCalls, 1);
     const actions = Object.values(result.view.runs[result.runId].actions);
     assert.deepEqual(actions.map((action) => action.status), ["indeterminate", "denied"]);
-    assert.deepEqual(result.view.runs[result.runId].terminal, {
-      type: "parked",
-      reason: "indeterminate-effect",
-      detail: "Tool settlement could not be confirmed",
-    });
+    const terminal = result.view.runs[result.runId].terminal;
+    assert.equal(terminal?.type, "parked");
+    assert.equal(terminal?.reason, "indeterminate-effect");
+    assert.match(terminal?.detail ?? "", /artifact: storage connection disappeared/);
+    assert.match(terminal?.detail ?? "", /do not auto-retry/);
   });
 });
 
@@ -1319,6 +1320,53 @@ test("TurnLoop keeps mixed same-resource mutations behind BATCH_WRITE_CONFLICT",
     assert.equal(actions[1].terminalDetail, "BATCH_WRITE_CONFLICT");
     assert.equal(actions[2].terminalDetail, "BATCH_WRITE_CONFLICT");
     assert.equal(store.read("ses_turn_test").events.some((event) => event.type === "action.freshness.rebased"), false);
+  });
+});
+
+test("TurnLoop allows multiple same-workdir shell Actions in one Step", async () => {
+  assert.equal(isBatchWriteConflictResource("shell-profile:direct"), false);
+  assert.equal(isBatchWriteConflictResource("host-workspace:."), false);
+  assert.equal(isBatchWriteConflictResource("host-process:node"), false);
+  assert.equal(isBatchWriteConflictResource("file:src/a.ts"), true);
+  assert.equal(isBatchWriteConflictResource("artifact-store:local:abc"), true);
+
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_multi_shell",
+      subject: "agent_main",
+      tools: ["shell"],
+      effects: ["execute"],
+      resources: ["host-process:**", "host-workspace:**", "shell-profile:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("shell", shellTool);
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call-shell-1",
+          name: "shell",
+          input: { command: process.execPath, args: ["-e", "process.stdout.write('one')"], workdir: "." },
+        },
+        {
+          type: "action.requested",
+          callId: "call-shell-2",
+          name: "shell",
+          input: { command: process.execPath, args: ["-e", "process.stdout.write('two')"], workdir: "." },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [{ type: "text.delta", delta: "Both shells settled." }, { type: "completed", finishReason: "stop" }],
+    ]);
+    const result = await new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry })
+      .run(turnRequest(root, artifactStore, { maxSteps: 2 }));
+    assert.equal(result.status, "completed");
+    const actions = Object.values(result.view.runs[result.runId].actions);
+    assert.deepEqual(actions.map((action) => action.status), ["completed", "completed"]);
+    assert.equal(actions.some((action) => action.terminalDetail === "BATCH_WRITE_CONFLICT"), false);
   });
 });
 

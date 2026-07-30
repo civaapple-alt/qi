@@ -1802,7 +1802,10 @@ export class TuiPresenter {
     const budgetNext = run.status === "parked" && run.terminal?.reason === "budget"
       ? t(locale, "handoff.next.budget")
       : undefined;
-    lines.push(`  ${capabilityNext ?? budgetNext ?? t(locale, "handoff.next")}`);
+    const indeterminateNext = run.status === "parked" && run.terminal?.reason === "indeterminate-effect"
+      ? t(locale, "handoff.next.indeterminate")
+      : undefined;
+    lines.push(`  ${capabilityNext ?? budgetNext ?? indeterminateNext ?? t(locale, "handoff.next")}`);
     return lines;
   }
 
@@ -1917,6 +1920,16 @@ export class TuiPresenter {
       ...(events.proposed?.data.input === undefined ? {} : { input: events.proposed.data.input }),
       ...(output === undefined ? {} : { output }),
       ...(events.terminal?.type === "action.failed" ? { errorCode: events.terminal.data.errorCode } : {}),
+      ...(events.terminal?.type === "action.indeterminate"
+        ? {
+          errorCode: "indeterminate",
+          detail: events.terminal.data.reason,
+          ...(events.terminal.data.reconciliationHint
+            ? { hint: events.terminal.data.reconciliationHint }
+            : {}),
+        }
+        : {}),
+      ...(events.terminal?.type === "action.cancelled" ? { detail: events.terminal.data.reason } : {}),
       ...(duration === undefined ? {} : { elapsed: duration }),
       resources: action.resources,
       ...(activity === undefined ? {} : {
@@ -2099,20 +2112,29 @@ function runDisplayStatus(run: RunView): string {
 
 function runOutcomeDetail(run: RunView, events: readonly SessionEvent[]): string | undefined {
   if (run.status === "parked") {
+    let detail: string | undefined;
     if (run.terminal?.detail) {
-      return run.terminal.reason
+      detail = run.terminal.reason
         ? `${run.terminal.reason}: ${run.terminal.detail}`
         : run.terminal.detail;
+    } else if (run.terminal?.reason) {
+      detail = run.terminal.reason;
+    } else {
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+        if (event?.type !== "run.parked" || event.data.runId !== run.runId) continue;
+        detail = event.data.detail
+          ? `${event.data.reason}: ${event.data.detail}`
+          : event.data.reason;
+        break;
+      }
     }
-    if (run.terminal?.reason) return run.terminal.reason;
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
-      if (event?.type !== "run.parked" || event.data.runId !== run.runId) continue;
-      return event.data.detail
-        ? `${event.data.reason}: ${event.data.detail}`
-        : event.data.reason;
+    const reason = run.terminal?.reason
+      ?? (detail?.startsWith("indeterminate-effect") ? "indeterminate-effect" : undefined);
+    if (reason === "indeterminate-effect") {
+      return enrichIndeterminateHandoffDetail(run, detail);
     }
-    return undefined;
+    return detail;
   }
   if (run.status !== "failed") return undefined;
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -2122,6 +2144,26 @@ function runOutcomeDetail(run: RunView, events: readonly SessionEvent[]): string
     return decoded ? `${event.data.code}: ${decoded}` : event.data.code;
   }
   return run.terminal?.reason;
+}
+
+/** Prefer Action terminal evidence when park detail is still the generic settlement phrase. */
+function enrichIndeterminateHandoffDetail(run: RunView, detail: string | undefined): string {
+  const actions = Object.values(run.actions).filter((action) => action.status === "indeterminate");
+  const evidence = actions
+    .map((action) => {
+      const reason = action.terminalDetail?.trim();
+      return reason ? `${action.toolName}: ${reason}` : action.toolName;
+    })
+    .filter(Boolean)
+    .join("; ");
+  if (!evidence) {
+    return detail ?? "indeterminate-effect: Tool settlement could not be confirmed";
+  }
+  const generic = !detail
+    || /Tool settlement could not be confirmed/i.test(detail)
+    || /external effect cannot be confirmed/i.test(detail);
+  if (!generic) return detail.startsWith("indeterminate-effect") ? detail : `indeterminate-effect: ${detail}`;
+  return `indeterminate-effect: ${oneLine(evidence, 200)}`;
 }
 
 /** Maps optional tools to launch capability labels (see TuiRuntime.capabilityLabels). */

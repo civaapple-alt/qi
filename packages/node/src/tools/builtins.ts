@@ -666,7 +666,7 @@ export const treeTool = defineTool({
 
 export const shellTool = defineTool({
   description:
-    "Execute one program with a direct argument vector in the Workspace; command contains only the executable name or path, while every flag and path operand is a separate args item. Do not put a whole command line such as mkdir -p pepsi-3d-2/src in command; use write to create files and their parent directories. Shell interpolation, wildcard/glob expansion, pipes, and redirection are not available. Pass the target directory through workdir and invoke package managers directly (for example command npm with args [\"run\",\"build\"]), rather than wrapping the command in bash, cmd, or PowerShell. On Windows, programs that need the null device must use NUL instead of /dev/null. Request at most one shell Action per Step for a given workdir: a later same-Step shell sharing host-workspace/shell-profile:direct fails with BATCH_WRITE_CONFLICT. To probe several host tools or run multi-statement logic, use one authorized script Action instead of multiple shells. Use find/search/read for file inspection, qi_session_inspect for Session diagnostics, and an authorized script profile instead of a long node -e program. Non-zero exits, unavailable executables, process-start failures, and timeouts fail the Action. In a Git Workspace, Qi records bounded before/after state fingerprints and the resulting tracked diff.",
+    "Execute one program with a direct argument vector in the Workspace; command contains only the executable name or path, while every flag and path operand is a separate args item. Do not put a whole command line such as mkdir -p pepsi-3d-2/src in command; use write to create files and their parent directories. Shell interpolation, wildcard/glob expansion, pipes, and redirection are not available. Pass the target directory through workdir and invoke package managers directly (for example command npm with args [\"run\",\"build\"]), rather than wrapping the command in bash, cmd, or PowerShell. On Windows, programs that need the null device must use NUL instead of /dev/null. Multiple shell Actions may share a workdir in one Step (they still run sequentially). Prefer one authorized script Action when you need shell builtins, pipes, or multi-statement logic. Use find/search/read for file inspection, qi_session_inspect for Session diagnostics, and an authorized script profile instead of a long node -e program. Non-zero exits, unavailable executables, process-start failures, and timeouts fail the Action. In a Git Workspace, Qi records bounded before/after state fingerprints and the resulting tracked diff.",
   input: Type.Object(
     {
       command: Type.String({ minLength: 1 }),
@@ -709,7 +709,11 @@ export const shellTool = defineTool({
   },
   async execute(input, context) {
     const request = input as { command: string; args: string[]; workdir?: string; timeoutMs?: number };
-    const cwd = await resolveWorkspacePath(context.workspaceRoot, request.workdir ?? ".");
+    const workdir = request.workdir ?? ".";
+    const cwd = await resolveWorkspacePath(context.workspaceRoot, workdir);
+    if (!(await stat(cwd)).isDirectory()) {
+      throw new ToolFailure("NOT_A_DIRECTORY", `${workdir} is not a directory`);
+    }
     const executable = await resolveShellExecutable(request.command, context.workspaceRoot, cwd);
     const invocation = await windowsCommandInvocation(
       executable,

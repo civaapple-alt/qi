@@ -2,6 +2,7 @@ import type { EventStore, SessionView } from "@civaapple/qi-agent/kernel";
 import type { RunView } from "@civaapple/qi-agent/kernel";
 import type { SessionEvent, SessionId } from "@civaapple/qi-protocol";
 import { EventWriter } from "./event-writer.js";
+import { formatIndeterminateParkDetail } from "./indeterminate-detail.js";
 
 export interface RecoveryResult {
   recovered: boolean;
@@ -195,13 +196,17 @@ export class SessionSupervisor {
     }
 
     const reason = indeterminate ? "indeterminate-effect" : "review";
+    const parkedRun = writer.view?.runs[run.runId] ?? run;
     writer.append(
       "run.parked",
       {
         runId: run.runId,
         reason,
         detail: indeterminate
-          ? "Recovery found an Action whose external effect cannot be confirmed"
+          ? formatIndeterminateParkDetail(
+            parkedRun,
+            "Recovery found an Action whose external effect cannot be confirmed",
+          )
           : "Recovery paused the abandoned Run at a durable boundary",
       },
       { kind: "runtime", id: "session_supervisor" },

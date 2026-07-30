@@ -168,21 +168,23 @@ async function resolveUnderRoot(
     assertNotProtected(rootReal, targetReal, allowProtected);
     return targetReal;
   } catch (error) {
-    if (!allowMissing || !isMissing(error)) throw error;
-    let parent = resolve(lexical, "..");
-    while (true) {
-      try {
-        const parentReal = await realpath(parent);
-        assertWithin(rootReal, parentReal);
-        assertNotProtected(rootReal, parentReal, allowProtected);
-        return lexical;
-      } catch (parentError) {
-        if (!isMissing(parentError)) throw parentError;
-        const next = resolve(parent, "..");
-        if (next === parent) throw new ToolFailure("PATH_OUTSIDE_WORKSPACE", "No Workspace parent exists");
-        parent = next;
+    if (allowMissing && isMissing(error)) {
+      let parent = resolve(lexical, "..");
+      while (true) {
+        try {
+          const parentReal = await realpath(parent);
+          assertWithin(rootReal, parentReal);
+          assertNotProtected(rootReal, parentReal, allowProtected);
+          return lexical;
+        } catch (parentError) {
+          if (!isMissing(parentError)) throw mapPathResolutionError(parentError, requested);
+          const next = resolve(parent, "..");
+          if (next === parent) throw new ToolFailure("PATH_OUTSIDE_WORKSPACE", "No Workspace parent exists");
+          parent = next;
+        }
       }
     }
+    throw mapPathResolutionError(error, requested);
   }
 }
 
@@ -213,4 +215,23 @@ function assertNotProtected(root: string, target: string, allowProtected: boolea
 
 function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function isNotDirectory(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOTDIR";
+}
+
+/**
+ * Confirmed path-resolution failures must be ToolFailure so Effect Journal settles `failed`
+ * (not indeterminate) before any host process starts.
+ */
+function mapPathResolutionError(error: unknown, requested: string): never {
+  if (error instanceof ToolFailure) throw error;
+  if (isMissing(error)) {
+    throw new ToolFailure("PATH_NOT_FOUND", `Path not found: ${requested || "."}`);
+  }
+  if (isNotDirectory(error)) {
+    throw new ToolFailure("NOT_A_DIRECTORY", `${requested || "."} is not a directory`);
+  }
+  throw error;
 }

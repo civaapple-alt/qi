@@ -1821,12 +1821,12 @@ async function buildTuiContextBlocks(
   const scriptNames = shellProfiles.available.map((profile) => profile.id);
   const executionGuidance = [
     ...(shellProfiles.directEnabled
-      ? ["shell only for one finite direct executable+argv command per workdir per Step when that profile is authorized"]
+      ? ["shell for finite direct executable+argv commands when that profile is authorized"]
       : []),
     ...(scriptNames.length > 0
       ? [
-        `script for one ${scriptNames.join("/")} profile script per workdir per Step when authorized and probed ` +
-          "(prefer one script to probe multiple host tools or chain statements; never batch multiple shells for the same workdir)",
+        `script for ${scriptNames.join("/")} profile scripts when authorized and probed ` +
+          "(prefer one script for builtins, pipes, or multi-statement logic; multiple shells may share a workdir in one Step)",
       ]
       : []),
     ...(codeactRuntime
@@ -1873,7 +1873,7 @@ async function buildTuiContextBlocks(
       source: "qi:host-environment",
       role: "system",
       content:
-        `Host execution facts: platform=${hostPlatform}; shell profiles: ${profileFacts}. The shell tool executes one direct executable plus argv and does not interpret pipes, redirection, command chaining, variable expansion, or shell builtins. The script tool accepts only these currently probed profiles: ${availableProfiles.length > 0 ? availableProfiles.join(", ") : "none"}. Do not request more than one shell or script Action targeting the same workdir in a single Step; same-Step host-workspace/shell-profile overlap fails with BATCH_WRITE_CONFLICT. When a script profile is available, probe multiple host tools or run chained statements in one script Action rather than multiple shells. ${platformGuidance} Treat a missing executable or unavailable-profile ToolFailure as an environment fact for the remainder of the Run: change approach and do not repeat the same unsupported assumption unless new probe evidence appears. These facts are regenerated from startup probes for every Run, so they take precedence over remembered shell assumptions from earlier conversations.`,
+        `Host execution facts: platform=${hostPlatform}; shell profiles: ${profileFacts}. The shell tool executes one direct executable plus argv and does not interpret pipes, redirection, command chaining, variable expansion, or shell builtins. The script tool accepts only these currently probed profiles: ${availableProfiles.length > 0 ? availableProfiles.join(", ") : "none"}. Multiple shell or script Actions may share a workdir in one Step; they still execute sequentially. Prefer one script Action when you need builtins, pipes, or multi-statement logic. Same-Step overlapping file or artifact mutations still fail with BATCH_WRITE_CONFLICT. ${platformGuidance} Treat a missing executable or unavailable-profile ToolFailure as an environment fact for the remainder of the Run: change approach and do not repeat the same unsupported assumption unless new probe evidence appears. These facts are regenerated from startup probes for every Run, so they take precedence over remembered shell assumptions from earlier conversations.`,
       priority: 98,
       required: true,
       retentionReason: "Probed host execution environment",

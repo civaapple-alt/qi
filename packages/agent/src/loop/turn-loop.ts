@@ -41,6 +41,7 @@ import {
 } from "@civaapple/qi-agent/tools";
 import type { EffectJournal } from "@civaapple/qi-agent/effects";
 import { EventWriter } from "./event-writer.js";
+import { formatIndeterminateParkDetail } from "./indeterminate-detail.js";
 import type { RuntimeActivity } from "./runtime-activity.js";
 import { isToolAllowedInMode, toolsForMode } from "./session-mode.js";
 import { SteeringMailbox } from "./steering.js";
@@ -142,6 +143,20 @@ interface StepMutationAttempt {
   actionId: string;
   toolName: string;
   status: "completed" | "failed" | "denied";
+}
+
+/**
+ * Same-Step BATCH_WRITE_CONFLICT only applies to content-bearing mutation resources.
+ * Host execute resources (`host-process:*`, `host-workspace:*`, `shell-profile:*`, …) are excluded so
+ * sequential shells/scripts in one Step can share a workdir without a false conflict; file/artifact
+ * freshness rules stay fail-closed.
+ */
+export function isBatchWriteConflictResource(resource: string): boolean {
+  return resource.startsWith("file:") || resource.startsWith("artifact-store:");
+}
+
+function conflictResources(resources: readonly string[]): string[] {
+  return resources.filter((resource) => isBatchWriteConflictResource(resource));
 }
 
 interface RejectedModelCall {
@@ -818,10 +833,11 @@ export class TurnLoop {
       while (candidateIndex < candidates.length) {
         const candidate = candidates[candidateIndex];
         if (!candidate) throw new Error(`Missing candidate at index ${candidateIndex}`);
-        // Non-read (write/execute/publish/spend) Actions stay strictly one-at-a-time: BATCH_WRITE_CONFLICT
-        // detection, edit freshness-chain rebasing, and "stop the batch on an indeterminate settlement" all
-        // depend on `successfulWrites`/`lastMutationAttempts` reflecting every earlier write in this Step
-        // before the next one is inspected.
+        // Non-read (write/execute/publish/spend) Actions stay strictly one-at-a-time: file/artifact
+        // BATCH_WRITE_CONFLICT detection, edit freshness-chain rebasing, and "stop the batch on an
+        // indeterminate settlement" all depend on `successfulWrites`/`lastMutationAttempts` reflecting
+        // every earlier content-bearing write in this Step before the next one is inspected.
+        // Host execute resources are excluded from that conflict table so sequential shells may share a workdir.
         if (candidate.inspected.effect !== "read") {
           const outcome = await this.#executeCandidate(candidate, candidateExecutionArgs);
           if (outcome === "cancelled") {
@@ -849,7 +865,11 @@ export class TurnLoop {
             );
             writer.append(
               "run.parked",
-              { runId, reason: "indeterminate-effect", detail: "Tool settlement could not be confirmed" },
+              {
+                runId,
+                reason: "indeterminate-effect",
+                detail: parkDetailForIndeterminate(writer.view?.runs[runId]),
+              },
               { kind: "runtime", id: "qi" },
             );
             return this.#result(writer, request.sessionId, runId, "parked", finalText);
@@ -898,7 +918,11 @@ export class TurnLoop {
           );
           writer.append(
             "run.parked",
-            { runId, reason: "indeterminate-effect", detail: "Tool settlement could not be confirmed" },
+            {
+              runId,
+              reason: "indeterminate-effect",
+              detail: parkDetailForIndeterminate(writer.view?.runs[runId]),
+            },
             { kind: "runtime", id: "qi" },
           );
           return this.#result(writer, request.sessionId, runId, "parked", finalText);
@@ -963,7 +987,7 @@ export class TurnLoop {
     let rebaseFailure: ToolFailure | undefined;
     const priorWrites = inspected.effect === "read"
       ? []
-      : inspected.resources
+      : conflictResources(inspected.resources)
           .map((resource) => ({ resource, write: successfulWrites.get(resource) }))
           .filter((entry): entry is { resource: string; write: SuccessfulStepWrite } => entry.write !== undefined);
     if (
@@ -1058,7 +1082,7 @@ export class TurnLoop {
         isError: true,
       });
       if (inspected.effect !== "read") {
-        for (const resource of inspected.resources) {
+        for (const resource of conflictResources(inspected.resources)) {
           lastMutationAttempts.set(resource, {
             actionId: candidate.actionId,
             toolName: inspected.name,
@@ -1089,7 +1113,7 @@ export class TurnLoop {
     try {
       if (rebaseFailure) throw rebaseFailure;
       if (inspected.effect !== "read") {
-        const overlap = inspected.resources.filter((resource) => successfulWrites.has(resource));
+        const overlap = conflictResources(inspected.resources).filter((resource) => successfulWrites.has(resource));
         if (overlap.length > 0 && !chainedEdit) {
           throw new ToolFailure(
             "BATCH_WRITE_CONFLICT",
@@ -1120,7 +1144,7 @@ export class TurnLoop {
       if (inspected.effect !== "read") {
         const input = objectRecord(inspected.input);
         const output = objectRecord(settlement.output);
-        for (const resource of inspected.resources) {
+        for (const resource of conflictResources(inspected.resources)) {
           const prior = successfulWrites.get(resource);
           const expectedSha256 = typeof input?.expectedSha256 === "string" ? input.expectedSha256 : undefined;
           const latestSha256 = typeof output?.sha256 === "string" ? output.sha256 : undefined;
@@ -1183,7 +1207,7 @@ export class TurnLoop {
           isError: true,
         });
         if (inspected.effect !== "read") {
-          for (const resource of inspected.resources) {
+          for (const resource of conflictResources(inspected.resources)) {
             lastMutationAttempts.set(resource, {
               actionId: candidate.actionId,
               toolName: inspected.name,
@@ -1731,6 +1755,11 @@ function compactInputLocator(input: unknown): string {
 function truncateSummary(value: string, maximum: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length <= maximum ? normalized : `${normalized.slice(0, maximum - 1)}…`;
+}
+
+function parkDetailForIndeterminate(run: RunView | undefined): string {
+  if (!run) return "Tool settlement could not be confirmed";
+  return formatIndeterminateParkDetail(run);
 }
 
 /** Least-information write settlement for the Runtime-owned restored-history ContextBlock. */
