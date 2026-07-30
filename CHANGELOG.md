@@ -12,6 +12,12 @@ steps and investigation history belong in pull requests, not release notes.
 - Added end-to-end image input for Kimi K3 and other image-capable models: rich-TTY clipboard paste, safe image
   URL ingestion, bounded preprocessing, content-addressed original/prepared Artifacts, ordered Session replay,
   and an authorized `read_image` crop/detail Tool.
+- Project layout version 2 stores each Session as a self-contained directory under `sessions/<session-id>/`
+  (event DB, Effect Journal, Artifacts, Plans, Tasks) with recoverable hard archive under `archives/`, plus
+  `/sessions` Active/Archived views, `/reset-workspace`, and Kernel lifecycle events
+  (`session.archive.*` / `session.restore.*`).
+- Workspace `@path` autocomplete validates mentions before submit; slash commands may preserve a multi-line draft
+  on the first editor line (`draftPolicy`), and `/model` / `/effort` reconfigure routing without re-entering secrets.
 
 ### Changed
 
@@ -22,6 +28,11 @@ steps and investigation history belong in pull requests, not release notes.
   provider data URLs. Image context cost uses dimensions rather than base64 length.
 - Agent Runs now receive an explicit Workspace Write permission fact. When Write is disabled, the model is told
   to request `/permissions` instead of using machine-private Artifacts as a substitute for project files.
+- Legacy shared project `state/qi.sqlite` / root-level artifacts layouts are rejected without migration; Web and
+  session analysis resolve Session databases under `sessions/` then `archives/`.
+- Rich TUI welcome and line-mode startup headers show the complete complementary `Permissions enabled` /
+  `Permissions disabled` partition after `--safe`, config, and CLI overrides.
+
 ### Deprecated
 
 ### Removed

@@ -60,7 +60,17 @@ export interface PanelFlowContext {
       model?: string;
       reasoningEffort?: string;
       contextWindowTokens?: number;
+      imageInput?: boolean;
     },
+  ) => void;
+  readonly configureModel: (
+    routing: {
+      model: string;
+      reasoningEffort?: string;
+      contextWindowTokens: number;
+      imageInput?: boolean;
+    },
+    persistence: "account" | "session",
   ) => void;
   readonly startLoginApiKey: (
     provider: string,
@@ -99,6 +109,8 @@ export interface PanelFlowContext {
   readonly currentSessionId: () => string;
   readonly workspaceRoot: () => string;
   readonly resumeSession: (sessionId: SessionId) => void;
+  readonly archiveSession: (sessionId: SessionId) => void;
+  readonly restoreSession: (sessionId: SessionId) => void;
   readonly startNewSession: () => void;
   readonly render: () => void;
 }
@@ -976,6 +988,33 @@ export function openSessionsPanel(ctx: PanelFlowContext): void {
     ...(currentIndex > 0 ? { initialSelected: currentIndex } : {}),
     maxVisible: Math.max(3, Math.floor(maxVisible(ctx.terminalRows) / 2)),
     onClose: ctx.panels.dismiss,
+    onArchive: (item) => {
+      const sessionId = (item.sessionId ?? item.id) as SessionId;
+      ctx.panels.push(new ListPanel({
+        title: locale === "zh" ? "确认归档 Session" : "Confirm Session archive",
+        hints: locale === "zh" ? "Enter 确认 · Esc 取消" : "Enter confirm · Esc cancel",
+        items: [
+          {
+            id: "archive",
+            label: locale === "zh" ? "归档（可恢复）" : "Archive (restorable)",
+            description: sessionId,
+          },
+          {
+            id: "cancel",
+            label: locale === "zh" ? "取消" : "Cancel",
+          },
+        ],
+        onClose: ctx.panels.dismiss,
+        onSelect: (choice) => {
+          if (choice.id === "cancel") {
+            ctx.panels.dismiss();
+            return;
+          }
+          ctx.panels.closeAll();
+          ctx.archiveSession(sessionId);
+        },
+      }));
+    },
     onSelect: (item) => {
       if (item.id === NEW_SESSION_ID || item.isNew) {
         ctx.panels.closeAll();
@@ -983,6 +1022,11 @@ export function openSessionsPanel(ctx: PanelFlowContext): void {
         return;
       }
       const sessionId = (item.sessionId ?? item.id) as SessionId;
+      if (item.location === "archived") {
+        ctx.panels.closeAll();
+        ctx.restoreSession(sessionId);
+        return;
+      }
       if (sessionId === ctx.currentSessionId()) {
         ctx.presenter.setNotice(t(locale, "sessions.already"));
         ctx.panels.dismiss();
@@ -991,6 +1035,109 @@ export function openSessionsPanel(ctx: PanelFlowContext): void {
       }
       ctx.panels.closeAll();
       ctx.resumeSession(sessionId);
+    },
+  }));
+}
+
+export function openModelConfigurationPanel(ctx: PanelFlowContext): void {
+  const auth = ctx.auth;
+  if (!auth) {
+    ctx.presenter.setNotice("Auth session is unavailable in this TUI mode.");
+    ctx.render();
+    return;
+  }
+  const status = auth.status();
+  const profile = listProviderProfiles().find((candidate) => candidate.id === status.provider);
+  if (!profile) return;
+  const locale = ctx.locale();
+  const modelProfile = profile.models?.find((candidate) => candidate.id === status.model);
+  const efforts = modelProfile?.thinking?.mode === "toggle"
+    ? ["none", modelProfile.thinking.defaultEffort ?? "high"]
+    : [...(modelProfile?.thinking?.supportedEfforts ?? [])];
+  const fields: FormField[] = [
+    {
+      id: "model",
+      label: "Model",
+      initialValue: status.model,
+      required: true,
+      ...(profile.models?.length
+        ? {
+            options: profile.models.map((model) => ({
+              value: model.id,
+              label: model.displayName,
+              description: `${model.id} · ${formatContextWindow(model.contextTokens)}`,
+            })),
+          }
+        : {}),
+    },
+    ...(efforts.length > 0
+      ? [{
+          id: "reasoningEffort",
+          label: "Thinking effort",
+          initialValue: status.reasoningEffort ?? efforts[0]!,
+          required: true,
+          options: efforts.map((effort) => ({ value: effort, label: effort })),
+        } satisfies FormField]
+      : []),
+    {
+      id: "contextWindowTokens",
+      label: locale === "zh" ? "上下文窗口（tokens）" : "Context window (tokens)",
+      initialValue: String(status.contextWindowTokens),
+      required: true,
+    },
+    ...(status.provider === "compatible"
+      ? [{
+          id: "imageInput",
+          label: locale === "zh" ? "图片输入" : "Image input",
+          initialValue: status.imageInput ? "true" : "false",
+          required: true,
+          options: [
+            { value: "false", label: locale === "zh" ? "关闭" : "Disabled" },
+            { value: "true", label: locale === "zh" ? "启用" : "Enabled" },
+          ],
+        } satisfies FormField]
+      : []),
+    {
+      id: "persistence",
+      label: locale === "zh" ? "保存范围" : "Save scope",
+      initialValue: "account",
+      required: true,
+      options: [
+        { value: "account", label: locale === "zh" ? "账户默认（推荐）" : "Account default (recommended)" },
+        { value: "session", label: locale === "zh" ? "仅当前 Session" : "Current Session only" },
+      ],
+    },
+  ];
+  ctx.panels.push(new FormPanel({
+    title: locale === "zh" ? "配置模型（无需重新登录）" : "Configure model (no re-login)",
+    description: status.baseURL
+      ? `${status.provider}:${status.accountAlias} · endpoint ${status.baseURL} (read-only)`
+      : `${status.provider}:${status.accountAlias}`,
+    fields,
+    onChange: (fieldId, value) => {
+      if (fieldId !== "model" || !value) return;
+      const next = profile.models?.find((candidate) => candidate.id === value);
+      return {
+        contextWindowTokens: String(providerModelContextTokens(profile, value)),
+        ...(next?.thinking?.defaultEffort === undefined
+          ? {}
+          : { reasoningEffort: next.thinking.defaultEffort }),
+      };
+    },
+    submitLabel: locale === "zh" ? "应用" : "Apply",
+    onClose: ctx.panels.dismiss,
+    onSubmit: (values) => {
+      ctx.panels.closeAll();
+      ctx.configureModel({
+        model: (values.model ?? "").trim(),
+        ...(values.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: values.reasoningEffort }),
+        contextWindowTokens: parseLoginContextWindow(values.contextWindowTokens),
+        ...(status.provider === "compatible"
+          ? { imageInput: values.imageInput === "true" }
+          : {}),
+      }, values.persistence === "session" ? "session" : "account");
     },
   }));
 }
@@ -1026,6 +1173,15 @@ async function openProviderAuthPanel(ctx: PanelFlowContext, providerId: string):
         label: locale === "zh" ? "当前已生效" : "Already active",
         description: `${status.model}${status.baseURL ? ` · ${status.baseURL}` : ""}`,
       }]
+      : []),
+    ...(primary && isCurrent
+      ? [{
+          id: "configure",
+          label: locale === "zh" ? "配置模型（无需重新登录）" : "Configure model (no re-login)",
+          description: locale === "zh"
+            ? "修改 model / effort / context / 图片能力，不读取密钥"
+            : "Change model / effort / context / image capability without reading the secret",
+        }]
       : []),
     ...(profile.authSchemes.includes("api-key")
       ? [{
@@ -1073,6 +1229,10 @@ async function openProviderAuthPanel(ctx: PanelFlowContext, providerId: string):
           ...(primary.model === undefined ? {} : { model: primary.model }),
           ...(primary.baseURL === undefined ? {} : { baseURL: primary.baseURL }),
         });
+        return;
+      }
+      if (item.id === "configure") {
+        openModelConfigurationPanel(ctx);
         return;
       }
       if (item.id === "api-key") {

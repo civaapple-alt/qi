@@ -10,6 +10,8 @@ export interface SessionEntry {
   readonly updatedAt: string;
   readonly workspaceRoot: string;
   readonly preview: string;
+  readonly location: "active" | "archived";
+  readonly lifecycle: string;
 }
 
 /** Collapse whitespace and truncate for session list previews. */
@@ -76,5 +78,9 @@ export function buildSessionEntries(
     updatedAt: summary.updatedAt,
     workspaceRoot: options.workspaceRoot,
     preview: sessionPreviewText(options.readEvents(summary.sessionId)),
+    location: "location" in summary && summary.location === "archived" ? "archived" : "active",
+    lifecycle: "lifecycle" in summary && typeof summary.lifecycle === "string"
+      ? summary.lifecycle
+      : "active",
   }));
 }

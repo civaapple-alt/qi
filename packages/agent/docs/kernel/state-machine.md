@@ -21,6 +21,18 @@ decide which explicit recovery events to append after observing durable state.
 
 Recovery never edits or deletes the earlier fact. It appends another event that explains the reconciliation.
 
+## Session archive / restore lifecycle
+
+```text
+active → session.archive.requested → archive_pending → session.archived → archived
+archived → session.restore.requested → restore_pending → session.restored → active
+```
+
+Ordinary Session events are allowed only while `lifecycle === active`. `session.archive.requested` is the only
+lifecycle event accepted from `active`; restore events require `archived`. Busy Runs, unsettled Actions,
+pending Questions/Delegations, ProcessTasks, and Watchers block archive before the transition is accepted.
+Physical directory moves and `archive.json` verification belong to Node `SessionRepository`, not the Kernel.
+
 ## Edit freshness rebase
 
 An `action.freshness.rebased` transition is legal only while the current Action is proposed, after another

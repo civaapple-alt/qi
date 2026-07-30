@@ -24,6 +24,18 @@ import type { ContextBlockStats } from "@civaapple/qi-ai/context";
 import { StateTransitionError } from "./errors.js";
 
 export type SessionMode = "ask" | "plan" | "agent";
+export type SessionLifecycle = "active" | "archive_pending" | "archived" | "restore_pending";
+
+export interface SessionModelConfiguration {
+  provider: string;
+  accountAlias: string;
+  model: string;
+  reasoningEffort?: "low" | "high" | "max" | "none";
+  contextWindowTokens: number;
+  imageInput: boolean;
+  persistence: "account" | "session";
+  configuredAt: string;
+}
 
 export type RunStatus = "triggered" | "active" | "parked" | "completed" | "failed" | "cancelled";
 export type StepStatus = "running" | "completed";
@@ -352,7 +364,10 @@ export interface SessionView {
   title?: string;
   createdAt: string;
   version: number;
+  lifecycle: SessionLifecycle;
+  lifecycleOperationId?: string;
   mode: SessionMode;
+  modelConfiguration?: SessionModelConfiguration;
   mounts: Record<string, WorkspaceMountView>;
   mountOrder: string[];
   currentRunId?: RunId;
@@ -446,6 +461,36 @@ function requireRunSettled(run: RunView): void {
 function hasActiveTopLevelRun(view: SessionView): boolean {
   const current = view.currentRunId ? view.runs[view.currentRunId] : undefined;
   return current !== undefined && (current.status === "triggered" || current.status === "active");
+}
+
+/** Deterministic stream-owned blockers. Node adds external Watcher checks. */
+export function sessionArchiveBlockers(view: SessionView): string[] {
+  const blockers: string[] = [];
+  for (const runId of view.runOrder) {
+    const run = view.runs[runId];
+    if (!run) continue;
+    if (run.status === "triggered" || run.status === "active") {
+      blockers.push(`Run ${runId} is ${run.status}`);
+    }
+    if (run.pendingQuestionSetId) blockers.push(`Run ${runId} has a pending Question`);
+    for (const action of Object.values(run.actions)) {
+      if (!terminalActionStatuses.has(action.status) || action.status === "indeterminate") {
+        blockers.push(`Action ${action.actionId} is ${action.status}`);
+      }
+    }
+    for (const delegation of Object.values(run.delegations)) {
+      if (delegation.status === "running") blockers.push(`Delegation ${delegation.delegationId} is running`);
+    }
+  }
+  if (view.pendingQuestion?.status === "pending") blockers.push("Session has a pending control Question");
+  if (view.pendingReview?.status === "pending") blockers.push("Session has a pending Plan review");
+  for (const taskId of view.taskOrder) {
+    const task = view.tasks[taskId];
+    if (task?.status === "running" || task?.status === "stopping") {
+      blockers.push(`ProcessTask ${taskId} is ${task.status}`);
+    }
+  }
+  return blockers;
 }
 
 /**
@@ -612,6 +657,7 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       ...(event.data.title === undefined ? {} : { title: event.data.title }),
       createdAt: event.occurredAt,
       version: 1,
+      lifecycle: "active",
       mode: event.data.mode ?? "agent",
       mounts: {},
       mountOrder: [],
@@ -642,11 +688,76 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
   if (event.type === "session.created") {
     fail("SESSION_ALREADY_CREATED", `Session ${current.sessionId} is already created`);
   }
+  const lifecycleEvents = new Set<SessionEvent["type"]>([
+    "session.archive.requested",
+    "session.archived",
+    "session.restore.requested",
+    "session.restored",
+  ]);
+  const lifecycleAllowed: Record<SessionLifecycle, readonly SessionEvent["type"][]> = {
+    active: ["session.archive.requested"],
+    archive_pending: ["session.archived"],
+    archived: ["session.restore.requested"],
+    restore_pending: ["session.restored"],
+  };
+  if (current.lifecycle !== "active") {
+    if (!lifecycleAllowed[current.lifecycle].includes(event.type)) {
+      fail("SESSION_NOT_ACTIVE", `Session is ${current.lifecycle}; ${event.type} is not allowed`);
+    }
+  } else if (lifecycleEvents.has(event.type) && !lifecycleAllowed.active.includes(event.type)) {
+    fail("SESSION_NOT_ACTIVE", `Session is active; ${event.type} is not allowed`);
+  }
 
   const view = clone(current);
   view.version = event.sequence;
 
   switch (event.type) {
+    case "session.archive.requested": {
+      const blockers = sessionArchiveBlockers(view);
+      if (blockers.length > 0) fail("SESSION_ARCHIVE_BLOCKED", blockers.join("; "));
+      view.lifecycle = "archive_pending";
+      view.lifecycleOperationId = event.data.operationId;
+      break;
+    }
+    case "session.archived": {
+      if (view.lifecycleOperationId !== event.data.operationId) {
+        fail("SESSION_OPERATION_MISMATCH", "Archive operation ID does not match");
+      }
+      view.lifecycle = "archived";
+      delete view.lifecycleOperationId;
+      break;
+    }
+    case "session.restore.requested": {
+      view.lifecycle = "restore_pending";
+      view.lifecycleOperationId = event.data.operationId;
+      break;
+    }
+    case "session.restored": {
+      if (view.lifecycleOperationId !== event.data.operationId) {
+        fail("SESSION_OPERATION_MISMATCH", "Restore operation ID does not match");
+      }
+      view.lifecycle = "active";
+      delete view.lifecycleOperationId;
+      break;
+    }
+    case "session.model.configured": {
+      if (hasActiveTopLevelRun(view)) {
+        fail("MODEL_CHANGE_WHILE_RUN_ACTIVE", "Cannot change model while a Run is active");
+      }
+      view.modelConfiguration = {
+        provider: event.data.provider,
+        accountAlias: event.data.accountAlias,
+        model: event.data.model,
+        ...(event.data.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: event.data.reasoningEffort }),
+        contextWindowTokens: event.data.contextWindowTokens,
+        imageInput: event.data.imageInput,
+        persistence: event.data.persistence,
+        configuredAt: event.occurredAt,
+      };
+      break;
+    }
     case "session.mode.changed": {
       if (event.data.from !== view.mode) {
         fail("MODE_FROM_MISMATCH", `Session mode is ${view.mode}, not ${event.data.from}`);

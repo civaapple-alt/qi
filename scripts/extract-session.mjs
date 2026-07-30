@@ -36,9 +36,10 @@ Do NOT write:  node --workspace-root DIR scripts/extract-session.mjs
 Do NOT pass Qi flags through bare npm without \`--\` (npm's own --workspace steals them).
 
 Database resolution for --workspace-root (first existing path wins):
-  1. $QI_HOME/projects/<project-id>/state/qi.sqlite (TUI default)
+  1. $QI_HOME/projects/<project-id>/sessions/<session-id>/state/qi.sqlite
+  2. $QI_HOME/projects/<project-id>/archives/<session-id>/state/qi.sqlite
 --workspace is accepted as an alias of --workspace-root (same placement rules).
---project uses $QI_HOME/projects/<project-id>/state/qi.sqlite directly.
+--project resolves the requested Session inside that project.
 --url may include ?project=<project-id> for local SQLite fallback when Web is down.
 Or set QI_WORKSPACE to the Workspace root instead of passing --workspace-root.
 `);
@@ -189,6 +190,7 @@ export function defaultQiHome(environment = process.env, homeDirectory = homedir
 }
 
 export function candidateSessionDatabases({
+  sessionId,
   workspace,
   db,
   projectSlug,
@@ -199,10 +201,15 @@ export function candidateSessionDatabases({
   const candidates = [];
   const slug = projectSlug
     ?? (workspace ? workspaceProjectSlug(workspace) : undefined);
-  if (slug) {
+  if (slug && sessionId) {
+    const projectRoot = resolve(defaultQiHome(environment, homeDirectory), "projects", slug);
     candidates.push({
-      kind: "qi-home",
-      path: resolve(defaultQiHome(environment, homeDirectory), "projects", slug, "state", "qi.sqlite"),
+      kind: "qi-home-active",
+      path: resolve(projectRoot, "sessions", sessionId, "state", "qi.sqlite"),
+    });
+    candidates.push({
+      kind: "qi-home-archive",
+      path: resolve(projectRoot, "archives", sessionId, "state", "qi.sqlite"),
     });
   }
   return candidates;
@@ -234,7 +241,7 @@ async function loadFromUrl(value, environment = process.env) {
     return await loadFromWebApi(root, sessionId);
   } catch (error) {
     if (!projectSlug) throw error;
-    const database = resolveSessionDatabase({ projectSlug, environment });
+    const database = resolveSessionDatabase({ sessionId, projectSlug, environment });
     const loaded = loadFromDatabase(sessionId, database);
     return {
       ...loaded,

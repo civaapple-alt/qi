@@ -14,7 +14,12 @@ import {
 } from "@civaapple/qi-agent/memory";
 import { probeContainerRuntime } from "@civaapple/qi-node/codeact";
 import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-agent/extensions";
-import type { EventStore, SessionSummary, SessionView } from "@civaapple/qi-agent/kernel";
+import {
+  sessionArchiveBlockers,
+  type EventStore,
+  type SessionSummary,
+  type SessionView,
+} from "@civaapple/qi-agent/kernel";
 import type { ModelCapabilities, ModelPort, ModelRef } from "@civaapple/qi-ai";
 import {
   HumanControlService,
@@ -41,8 +46,19 @@ import {
   createReadImageTool,
   detectImageUrlCandidates,
 } from "@civaapple/qi-node/media";
-import { SqliteEventStore, SqliteMemoryIndex } from "@civaapple/qi-node/storage";
-import { qiStatePaths, workspaceProjectId } from "@civaapple/qi-node/paths";
+import {
+  SessionRepository,
+  SqliteEventStore,
+  SqliteMemoryIndex,
+  type SessionCatalogEntry,
+} from "@civaapple/qi-node/storage";
+import {
+  ensureProjectSessionLayout,
+  projectPaths,
+  projectSessionPaths,
+  qiStatePaths,
+  workspaceProjectId,
+} from "@civaapple/qi-node/paths";
 import { SkillCatalog, type CatalogSkill, type SkillScope } from "@civaapple/qi-node/skills";
 import {
   FileArtifactStore,
@@ -175,7 +191,7 @@ export class TuiRuntime {
   readonly #maxSteps: number;
   readonly #subject: string;
   readonly #eventStore: EventStore;
-  readonly #ownedStore: SqliteEventStore | undefined;
+  readonly #ownedStore: SessionRepository | undefined;
   readonly #artifactStore: FileArtifactStore;
   readonly #imageIngest: ImageIngestService;
   readonly #readImageByteBudget: number | undefined;
@@ -216,7 +232,7 @@ export class TuiRuntime {
   private constructor(
     options: TuiRuntimeOptions,
     eventStore: EventStore,
-    ownedStore: SqliteEventStore | undefined,
+    ownedStore: SessionRepository | undefined,
     artifactStore: FileArtifactStore,
     effectJournal: SqliteEffectJournal,
     shellProfiles: ShellProfileSnapshot,
@@ -354,11 +370,19 @@ export class TuiRuntime {
     const stateRoot = resolve(dataRoot, "state");
     const runtimeSessionId = options.sessionId ?? (createId("ses") as SessionId);
     await mkdir(stateRoot, { recursive: true });
-    const ownedStore = options.eventStore ? undefined : new SqliteEventStore(resolve(stateRoot, "qi.sqlite"));
+    const project = projectPaths({
+      workspaceRoot: options.workspaceRoot,
+      dataRoot,
+      ...(options.qiHome === undefined ? {} : { environment: { QI_HOME: options.qiHome } }),
+    });
+    const session = projectSessionPaths(project, runtimeSessionId);
+    await ensureProjectSessionLayout(session);
+    const ownedStore = options.eventStore ? undefined : new SessionRepository(project);
+    await ownedStore?.recover();
     const eventStore = options.eventStore ?? ownedStore;
     if (!eventStore) throw new Error("EventStore construction failed");
-    const artifactStore = new FileArtifactStore(resolve(dataRoot, "artifacts"));
-    const effectJournal = new SqliteEffectJournal(resolve(stateRoot, "effects.sqlite"));
+    const artifactStore = new FileArtifactStore(session.artifactsRoot);
+    const effectJournal = new SqliteEffectJournal(session.effectsFile);
     const broker = new InMemoryCapabilityBroker();
     const subject = options.subject ?? "main-agent";
     // Fire-and-forget: warms the trusted-executable cache for this Workspace's language stack so the
@@ -369,9 +393,9 @@ export class TuiRuntime {
     const registry = new ToolRegistry(broker);
     const projectId = options.projectId ?? workspaceProjectId(options.workspaceRoot);
     const projectMemoryIndex = new SqliteMemoryIndex(resolve(stateRoot, "memory.sqlite"));
-    for (const summary of eventStore.listSessions()) {
-      projectMemoryIndex.applyBatch(eventStore.read(summary.sessionId).events);
-    }
+    projectMemoryIndex.rebuild(eventStore.listSessions().flatMap(
+      (summary) => eventStore.read(summary.sessionId).events,
+    ));
     const qiHome = resolve(options.qiHome ?? resolve(dataRoot, ".user"));
     const userState = qiStatePaths(qiHome);
     await mkdir(userState.stateRoot, { recursive: true });
@@ -408,7 +432,7 @@ export class TuiRuntime {
     const skillSnapshot = await skills.discover();
     const processTasks = new ProcessTaskManager({
       workspaceRoot: options.workspaceRoot,
-      dataRoot,
+      dataRoot: session.root,
       eventStore,
       ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
       ...(options.onActivity === undefined ? {} : { onActivity: options.onActivity }),
@@ -438,7 +462,7 @@ export class TuiRuntime {
     });
     const runQuestions = new RunQuestionCoordinator(humanControl);
     registry.register("plan_document", createPlanDocumentTool({
-      dataRoot,
+      dataRoot: session.root,
       artifactStore,
       humanControl,
     }));
@@ -503,8 +527,8 @@ export class TuiRuntime {
       ...(this.#allowWrite ? ["write"] : []),
       ...(this.#allowVerify ? ["verify"] : []),
       ...(this.#allowNetwork ? ["network"] : []),
-      ...(this.#allowExecute ? ["host execute"] : []),
-      ...(this.#allowBackground ? ["background tasks"] : []),
+      ...(this.#allowExecute ? ["execute"] : []),
+      ...(this.#allowBackground ? ["background"] : []),
       ...(this.#allowDelegate ? ["delegate"] : []),
     ];
   }
@@ -717,9 +741,31 @@ export class TuiRuntime {
     return this.#eventStore.listSessions();
   }
 
-  /** Read events for any Session in the shared store (used for list previews). */
+  listSessionCatalog(): SessionCatalogEntry[] {
+    return this.#ownedStore?.listCatalog() ?? this.listSessions().map((entry) => ({
+      ...entry,
+      location: "active" as const,
+      lifecycle: this.#eventStore.load(entry.sessionId)?.lifecycle ?? "active",
+    }));
+  }
+
+  sessionArchiveBlockers(sessionId: SessionId): string[] {
+    if (this.#ownedStore) return this.#ownedStore.archiveBlockers(sessionId);
+    const view = this.#eventStore.load(sessionId);
+    return view ? sessionArchiveBlockers(view) : [`Session ${sessionId} does not exist`];
+  }
+
+  workspaceResetBlockers(): string[] {
+    return this.listSessions().flatMap((session) =>
+      this.sessionArchiveBlockers(session.sessionId).map((reason) => `${session.sessionId}: ${reason}`));
+  }
+
+  /** Read events for an active or archived Session (used for list previews). */
   readSessionEvents(sessionId: SessionId): readonly SessionEvent[] {
-    return this.#eventStore.read(sessionId).events;
+    const catalog = this.#ownedStore?.listCatalog().find((entry) => entry.sessionId === sessionId);
+    return catalog?.location === "archived"
+      ? this.#ownedStore!.readArchived(sessionId).events
+      : this.#eventStore.read(sessionId).events;
   }
 
   get workspaceRoot(): string {
@@ -893,6 +939,27 @@ export class TuiRuntime {
       input,
       ...(content === undefined ? {} : { content }),
     });
+  }
+
+  recordModelConfiguration(
+    configuration: {
+      provider: string;
+      accountAlias: string;
+      model: string;
+      reasoningEffort?: "low" | "high" | "max" | "none";
+      contextWindowTokens: number;
+      imageInput: boolean;
+    },
+    persistence: "account" | "session",
+  ): SessionView {
+    if (this.active) throw new Error("Cannot change model while a Run is active");
+    this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
+    new EventWriter(this.#eventStore, this.sessionId).append(
+      "session.model.configured",
+      { ...configuration, persistence },
+      { kind: "user", id: "tui-user" },
+    );
+    return this.#eventStore.load(this.sessionId)!;
   }
 
   async ingestClipboardImage(bytes: Uint8Array): Promise<RunImagePart> {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
 import { SqliteEventStore } from "@civaapple/qi-node/storage";
+import { projectPaths, projectSessionPaths } from "@civaapple/qi-node/paths";
 import { renderEvent, renderStatus, TuiRuntime } from "../apps/cli/dist/index.js";
 
 test("Memory persists across Sessions and only explicit User Memory crosses projects", async () => {
@@ -412,7 +413,9 @@ test("basic TUI completes a code task with durable action and diff evidence", as
     runtime.close();
   }
 
-  const reopened = new SqliteEventStore(join(dataRoot, "state", "qi.sqlite"));
+  const reopened = new SqliteEventStore(
+    projectSessionPaths(projectPaths({ workspaceRoot: root, dataRoot }), sessionId).databaseFile,
+  );
   try {
     const recovered = reopened.load(sessionId);
     assert.equal(recovered.currentRunId, recovered.runOrder[0]);

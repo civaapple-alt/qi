@@ -30,7 +30,7 @@ const expectedRuntimeExports = {
   "@civaapple/qi-agent/kernel": [
     "ConcurrencyError", "InMemoryEventStore", "KERNEL_ASK_MODE_TOOLS",
     "KERNEL_PLAN_MODE_EXTRA_TOOLS", "StateTransitionError", "applySessionEvent",
-    "replaySession",
+    "replaySession", "sessionArchiveBlockers",
   ],
   "@civaapple/qi-ai": [
     "BUILTIN_PROVIDER_PROFILES", "ModelContentPartSchema", "ModelEventSchema",
@@ -67,13 +67,15 @@ const expectedRuntimeExports = {
   ],
   "@civaapple/qi-node/scheduler": ["SessionEventTriggerSink", "SqliteWatcherScheduler"],
   "@civaapple/qi-node/storage": [
-    "EncryptedFileCredentialStore", "SqliteEventStore", "SqliteMemoryIndex",
+    "EncryptedFileCredentialStore", "SessionArchiveBlockedError", "SessionRepository",
+    "SqliteEventStore", "SqliteMemoryIndex",
   ],
   "@civaapple/qi-node": [
-    "QI_LAYOUT_GENERATION", "QI_LAYOUT_VERSION", "assertSafePrivateRoot",
+    "QI_LAYOUT_GENERATION", "QI_LAYOUT_VERSION", "QI_PROJECT_LAYOUT_VERSION", "assertSafePrivateRoot",
     "canonicalWorkspacePath", "defaultProjectConfigPath", "defaultProjectsRoot",
     "defaultQiHome", "defaultSessionDataRoot", "discoverProjects", "ensureProjectLayout",
-    "ensureQiLayout", "projectPaths", "qiStatePaths", "workspaceProjectId",
+    "ensureProjectSessionLayout", "ensureQiLayout", "projectPaths", "projectSessionPaths",
+    "qiStatePaths", "workspaceProjectId",
   ],
   "@civaapple/qi-node/extensions": [
     "DeclarativePackageStore", "WORKSPACE_QI_DIRECTORIES", "WORKSPACE_QI_FILES",

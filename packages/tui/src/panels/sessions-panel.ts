@@ -20,6 +20,7 @@ export interface SessionsPanelItem {
   readonly preview?: string;
   readonly current?: boolean;
   readonly isNew?: boolean;
+  readonly location?: "active" | "archived";
 }
 
 export interface SessionsPanelOptions {
@@ -32,6 +33,7 @@ export interface SessionsPanelOptions {
   readonly initialSelected?: number;
   readonly maxVisible?: number;
   readonly onSelect: (item: SessionsPanelItem) => void;
+  readonly onArchive?: (item: SessionsPanelItem) => void;
   readonly onClose: () => void;
 }
 
@@ -46,22 +48,25 @@ export class SessionsPanel implements PanelComponent, Focusable {
   readonly #showingLabel: SessionsPanelOptions["showingLabel"];
   readonly #maxVisible: number;
   readonly #onSelect: (item: SessionsPanelItem) => void;
+  readonly #onArchive: ((item: SessionsPanelItem) => void) | undefined;
   readonly #onClose: () => void;
   readonly #search: Input;
   #filtered: SessionsPanelItem[];
   #selected = 0;
   #query = "";
+  #location: "active" | "archived" = "active";
 
   constructor(options: SessionsPanelOptions) {
     this.title = options.title;
     this.#all = options.items;
-    this.#filtered = [...options.items];
+    this.#filtered = options.items.filter((item) => item.location !== "archived");
     this.#hints = options.hints;
     this.#emptyLabel = options.emptyLabel;
     this.#currentMark = options.currentMark;
     this.#showingLabel = options.showingLabel;
     this.#maxVisible = Math.max(3, options.maxVisible ?? 8);
     this.#onSelect = options.onSelect;
+    this.#onArchive = options.onArchive;
     this.#onClose = options.onClose;
     this.#search = new Input();
     this.#search.focused = false;
@@ -96,6 +101,20 @@ export class SessionsPanel implements PanelComponent, Focusable {
       if (item) this.#onSelect(item);
       return;
     }
+    if (matchesKey(data, Key.tab)) {
+      this.#location = this.#location === "active" ? "archived" : "active";
+      this.#query = "";
+      this.#search.setValue("");
+      this.#selected = 0;
+      this.#applyFilter();
+      return;
+    }
+    // Archive shortcut only when the filter is empty so typing "a" into search still works.
+    if (data === "a" && !this.#query && this.#location === "active") {
+      const item = this.#filtered[this.#selected];
+      if (item && !item.isNew && item.location !== "archived") this.#onArchive?.(item);
+      return;
+    }
     this.#search.handleInput(data);
     this.#query = this.#search.getValue();
     this.#applyFilter();
@@ -103,7 +122,8 @@ export class SessionsPanel implements PanelComponent, Focusable {
 
   render(width: number): string[] {
     const safe = Math.max(20, width);
-    const lines = [...panelHeader(this.title, this.#hints, safe), ""];
+    const viewTitle = `${this.title} · ${this.#location === "active" ? "Active" : "Archived"}`;
+    const lines = [...panelHeader(viewTitle, this.#hints, safe), ""];
     if (this.#query) {
       lines.push(truncateToWidth(theme.fg("textDim", ` filter: ${this.#query}`), safe, "…"), "");
     }
@@ -129,7 +149,11 @@ export class SessionsPanel implements PanelComponent, Focusable {
 
   #renderItem(item: SessionsPanelItem, selected: boolean, width: number): string[] {
     const age = item.updatedAt ? `  ${formatRelativeTime(item.updatedAt)}` : "";
-    const mark = item.current ? theme.fg("primary", ` ${this.#currentMark}`) : "";
+    const mark = item.current
+      ? theme.fg("primary", ` ${this.#currentMark}`)
+      : item.location === "archived"
+        ? theme.fg("textMuted", " [Archived]")
+        : "";
     const title = selected ? theme.bold(item.title) : item.title;
     const titleLine = truncateToWidth(
       `${pointer(selected)}${title}${theme.fg("textDim", age)}${mark}`,
@@ -156,9 +180,13 @@ export class SessionsPanel implements PanelComponent, Focusable {
 
   #applyFilter(): void {
     const needle = this.#query.trim().toLowerCase();
+    const located = this.#all.filter((item) =>
+      this.#location === "active"
+        ? item.location !== "archived"
+        : item.location === "archived");
     this.#filtered = needle
-      ? this.#all.filter((item) => matchesSessionItem(item, needle))
-      : [...this.#all];
+      ? located.filter((item) => matchesSessionItem(item, needle))
+      : located;
     this.#selected = Math.min(this.#selected, Math.max(0, this.#filtered.length - 1));
   }
 }
@@ -178,6 +206,7 @@ export function sessionEntriesToPanelItems(
       workspaceRoot: entry.workspaceRoot,
       preview: entry.preview,
       current: entry.sessionId === currentSessionId,
+      location: entry.location,
     })),
   ];
 }

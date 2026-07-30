@@ -10,6 +10,7 @@ export {
   openHistoryListPanel,
   openLanguagePanel,
   openModePanel,
+  openModelConfigurationPanel,
   openMountsPanel,
   openPermissionsPanel,
   openProvidersPanel,

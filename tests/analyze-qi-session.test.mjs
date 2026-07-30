@@ -62,26 +62,29 @@ test("analyze-qi-session accepts --workspace-root and QI_WORKSPACE", () => {
   );
 });
 
-test("analyze-qi-session resolves only the QI_HOME private project database", async () => {
+test("analyze-qi-session resolves the active Session database before its archive", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-extract-db-"));
   try {
     const workspace = join(root, "lab");
     const qiHome = join(root, "home");
     const slug = workspaceProjectSlug(workspace);
-    const homeDb = join(qiHome, "projects", slug, "state", "qi.sqlite");
+    const sessionId = "ses_extract_active";
+    const homeDb = join(qiHome, "projects", slug, "sessions", sessionId, "state", "qi.sqlite");
     await mkdir(join(homeDb, ".."), { recursive: true });
     await writeFile(homeDb, "");
 
     const candidates = candidateSessionDatabases({
+      sessionId,
       workspace,
       environment: { QI_HOME: qiHome },
     });
     assert.deepEqual(
       candidates.map((item) => item.kind),
-      ["qi-home"],
+      ["qi-home-active", "qi-home-archive"],
     );
 
     const resolved = resolveSessionDatabase({
+      sessionId,
       workspace,
       environment: { QI_HOME: qiHome },
     });
@@ -98,6 +101,7 @@ test("analyze-qi-session never falls back to Workspace-local runtime state", asy
     const qiHome = join(root, "home");
     assert.throws(
       () => resolveSessionDatabase({
+        sessionId: "ses_extract_missing",
         workspace,
         environment: { QI_HOME: qiHome },
       }),
@@ -112,10 +116,20 @@ test("analyze-qi-session resolves by project ID alone", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-extract-slug-"));
   try {
     const qiHome = join(root, "home");
-    const db = join(qiHome, "projects", "lab-123456789abc", "state", "qi.sqlite");
+    const sessionId = "ses_extract_project";
+    const db = join(
+      qiHome,
+      "projects",
+      "lab-123456789abc",
+      "archives",
+      sessionId,
+      "state",
+      "qi.sqlite",
+    );
     await mkdir(join(db, ".."), { recursive: true });
     await writeFile(db, "");
     const resolved = resolveSessionDatabase({
+      sessionId,
       projectSlug: "lab-123456789abc",
       environment: { QI_HOME: qiHome },
     });

@@ -46,14 +46,16 @@ npm exec extract-session --workspace <workspace-root>
 
 With `--workspace-root`, the extractor resolves `qi.sqlite` in this order (first existing path wins):
 
-1. `$QI_HOME/projects/<project-name>-<path-hash>/state/qi.sqlite` — TUI default (`QI_HOME` or `~/.qi`)
-2. An explicit `--db` path supplied by the human.
+1. `$QI_HOME/projects/<project-name>-<path-hash>/sessions/<session-id>/state/qi.sqlite` — active Session
+2. `$QI_HOME/projects/<project-name>-<path-hash>/archives/<session-id>/state/qi.sqlite` — hard-archived Session
+3. An explicit `--db` path supplied by the human.
 
-`--project <project-id>` opens `$QI_HOME/projects/<project-id>/state/qi.sqlite` directly. Use `--db`
-only when you already know the exact database path.
+`--project <project-id>` resolves the requested Session under that project's `sessions/` then `archives/`.
+Use `--db` only when you already know the exact database path.
 
 The URL path first requests the Web `/workbench` projection; if that fails and the URL includes
-`?project=<slug>`, it falls back to the matching QI_HOME project database. Extracted JSON is bounded and
+`?project=<slug>`, it falls back to the matching QI_HOME Session database under `sessions/` or `archives/`.
+Extracted JSON is bounded and
 passed through Qi's high-confidence secret redaction before output. Do not copy, edit, migrate, or
 compact the source database.
 

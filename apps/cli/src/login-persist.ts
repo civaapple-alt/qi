@@ -18,6 +18,7 @@ export async function persistLoginProviderDefaults(
       ...(status.contextWindowTokensOverride
         ? { contextWindowTokens: status.contextWindowTokens }
         : {}),
+      ...(status.provider === "compatible" ? { imageInput: status.imageInput } : {}),
     },
     configPath,
   );

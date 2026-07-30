@@ -483,16 +483,17 @@ execute = true
     const configured = await launchTui(root, config, []);
     assert.match(configured.stdout, /model xai\/grok-config via https:\/\/api\.x\.ai\/v1/);
     assert.match(configured.stdout, /context 240000 prompt \+ 16000 output reserve \/ 256000 window/);
-    assert.match(configured.stdout, /control read \+ write \+ network \+ host execute/);
+    assert.match(configured.stdout, /Permissions enabled: read, write, network, execute/);
+    assert.match(configured.stdout, /Permissions disabled: verify, background, delegate/);
     assert.match(configured.stdout, new RegExp(`config ${escapeRegex(config)}`));
 
     const safe = await launchTui(root, config, ["--safe"]);
-    assert.match(safe.stdout, /control read\r?\n/);
-    assert.doesNotMatch(safe.stdout, /control read \+/);
+    assert.match(safe.stdout, /Permissions enabled: read\r?\n/);
+    assert.match(safe.stdout, /Permissions disabled: write, verify, network, execute, background, delegate/);
 
     const narrowed = await launchTui(root, config, ["--no-network", "--no-execute"]);
-    assert.match(narrowed.stdout, /control read \+ write\r?\n/);
-    assert.doesNotMatch(narrowed.stdout, /\+ network|\+ host execute/);
+    assert.match(narrowed.stdout, /Permissions enabled: read, write\r?\n/);
+    assert.match(narrowed.stdout, /Permissions disabled: verify, network, execute, background, delegate/);
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(`${root}-state`, { recursive: true, force: true });

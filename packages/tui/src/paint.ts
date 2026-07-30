@@ -15,5 +15,7 @@ export function eventAffectsTranscript(event: SessionEvent): boolean {
   if (type.startsWith("workspace.mount.")) return false;
   if (type.startsWith("memory.")) return false;
   if (type.startsWith("presence.")) return false;
+  if (type.startsWith("session.archive") || type.startsWith("session.restore")) return false;
+  if (type === "session.model.configured") return false;
   return true;
 }

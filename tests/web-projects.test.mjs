@@ -8,30 +8,34 @@ import { EventWriter } from "@civaapple/qi-agent/loop";
 import { MemoryController } from "@civaapple/qi-agent/memory";
 import { SqliteEventStore, SqliteMemoryIndex } from "@civaapple/qi-node/storage";
 
-test("listWebProjects discovers state/qi.sqlite under project IDs", async () => {
+test("listWebProjects discovers session-first project databases", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-web-projects-"));
   try {
     const newer = join(root, "Z-newer");
     const older = join(root, "A-older");
     await mkdir(newer);
     await mkdir(older);
-    await mkdir(join(older, "state"));
+    const olderDb = join(older, "sessions", "ses_web_older", "state", "qi.sqlite");
+    await mkdir(join(olderDb, ".."), { recursive: true });
     await writeFile(join(older, "project.json"), JSON.stringify({
+      schemaVersion: 2,
       projectId: "A-older",
       workspaceRoot: join(root, "older-workspace"),
     }));
-    await writeFile(join(older, "state", "qi.sqlite"), "");
+    await writeFile(olderDb, "");
     await new Promise((resolve) => setTimeout(resolve, 20));
-    await mkdir(join(newer, "state"));
+    const newerDb = join(newer, "archives", "ses_web_newer", "state", "qi.sqlite");
+    await mkdir(join(newerDb, ".."), { recursive: true });
     await writeFile(join(newer, "project.json"), JSON.stringify({
+      schemaVersion: 2,
       projectId: "Z-newer",
       workspaceRoot: join(root, "newer-workspace"),
     }));
-    await writeFile(join(newer, "state", "qi.sqlite"), "");
+    await writeFile(newerDb, "");
     await mkdir(join(root, "empty"));
     const projects = await listWebProjects(root);
     assert.deepEqual(projects.map((item) => item.id), ["Z-newer", "A-older"]);
-    assert.equal(projects[0]?.dbPath, join(newer, "state", "qi.sqlite"));
+    assert.equal(projects[0]?.sessionsPath, join(newer, "sessions"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -43,17 +47,27 @@ test("Web workbench projects mode lists projects and switches Sessions", async (
     const projectsRoot = join(root, "projects");
     const project = join(projectsRoot, "D-demo-workspace");
     await mkdir(project, { recursive: true });
-    const dbPath = join(project, "state", "qi.sqlite");
     await mkdir(join(project, "state"));
     await writeFile(join(project, "project.json"), JSON.stringify({
+      schemaVersion: 2,
       projectId: "D-demo-workspace",
       workspaceRoot: join(root, "workspace"),
     }));
-    const store = new SqliteEventStore(dbPath);
     const first = "ses_web_project_a";
     const second = "ses_web_project_b";
-    new EventWriter(store, first).append("session.created", { title: "Older" }, { kind: "runtime", id: "test" });
+    const firstDb = join(project, "sessions", first, "state", "qi.sqlite");
+    const secondDb = join(project, "sessions", second, "state", "qi.sqlite");
+    await mkdir(join(firstDb, ".."), { recursive: true });
+    await mkdir(join(secondDb, ".."), { recursive: true });
+    const firstStore = new SqliteEventStore(firstDb);
+    new EventWriter(firstStore, first).append(
+      "session.created",
+      { title: "Older" },
+      { kind: "runtime", id: "test" },
+    );
+    firstStore.close();
     await new Promise((resolve) => setTimeout(resolve, 20));
+    const store = new SqliteEventStore(secondDb);
     const source = new EventWriter(store, second).append(
       "session.created",
       { title: "Newer" },

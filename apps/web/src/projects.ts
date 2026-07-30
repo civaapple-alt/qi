@@ -1,14 +1,15 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { EventStore, SessionSummary } from "@civaapple/qi-agent/kernel";
-import { SqliteEventStore } from "@civaapple/qi-node/storage";
+import { projectPaths } from "@civaapple/qi-node/paths";
+import { SessionRepository } from "@civaapple/qi-node/storage";
 
-export const PROJECT_DB_NAME = "state/qi.sqlite";
+export const PROJECT_SESSIONS_DIRECTORY = "sessions";
 
 export interface WebProjectSummary {
   readonly id: string;
   readonly path: string;
-  readonly dbPath: string;
+  readonly sessionsPath: string;
   readonly updatedAt: string;
 }
 
@@ -25,20 +26,29 @@ export async function listWebProjects(projectsRoot: string): Promise<WebProjectS
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
     const path = join(root, entry.name);
-    const dbPath = join(path, "state", "qi.sqlite");
     try {
       const descriptor = JSON.parse(await readFile(join(path, "project.json"), "utf8")) as {
+        schemaVersion?: unknown;
         projectId?: unknown;
         workspaceRoot?: unknown;
       };
-      if (descriptor.projectId !== entry.name || typeof descriptor.workspaceRoot !== "string") continue;
-      const info = await stat(dbPath);
-      if (!info.isFile()) continue;
+      if (
+        descriptor.schemaVersion !== 2
+        || descriptor.projectId !== entry.name
+        || typeof descriptor.workspaceRoot !== "string"
+      ) continue;
+      const sessionsPath = join(path, PROJECT_SESSIONS_DIRECTORY);
+      const databaseFiles = [
+        ...await sessionDatabaseFiles(sessionsPath),
+        ...await sessionDatabaseFiles(join(path, "archives")),
+      ];
+      if (databaseFiles.length === 0) continue;
+      const mtimes = await Promise.all(databaseFiles.map(async (file) => (await stat(file)).mtimeMs));
       projects.push({
         id: entry.name,
         path,
-        dbPath,
-        updatedAt: info.mtime.toISOString(),
+        sessionsPath,
+        updatedAt: new Date(Math.max(...mtimes)).toISOString(),
       });
     } catch (error) {
       if (isMissing(error)) continue;
@@ -54,7 +64,7 @@ export async function listWebProjects(projectsRoot: string): Promise<WebProjectS
 /** Opens and caches read-only Sqlite stores for project databases under one root. */
 export class ProjectEventStoreRegistry {
   readonly #root: string;
-  readonly #stores = new Map<string, SqliteEventStore>();
+  readonly #stores = new Map<string, SessionRepository>();
 
   constructor(projectsRoot: string) {
     this.#root = resolve(projectsRoot);
@@ -74,7 +84,13 @@ export class ProjectEventStoreRegistry {
     const projects = await this.list();
     const project = projects.find((candidate) => candidate.id === projectId);
     if (!project) throw new TypeError(`Unknown project: ${projectId}`);
-    const store = new SqliteEventStore(project.dbPath, { readonly: true });
+    const descriptor = JSON.parse(await readFile(join(project.path, "project.json"), "utf8")) as {
+      workspaceRoot: string;
+    };
+    const store = new SessionRepository(projectPaths({
+      workspaceRoot: descriptor.workspaceRoot,
+      dataRoot: project.path,
+    }));
     this.#stores.set(projectId, store);
     return store;
   }
@@ -92,4 +108,24 @@ export class ProjectEventStoreRegistry {
 
 function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+async function sessionDatabaseFiles(root: string): Promise<string[]> {
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const files: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || !entry.name.startsWith("ses_")) continue;
+      const file = join(root, entry.name, "state", "qi.sqlite");
+      try {
+        if ((await stat(file)).isFile()) files.push(file);
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+      }
+    }
+    return files;
+  } catch (error) {
+    if (isMissing(error)) return [];
+    throw error;
+  }
 }

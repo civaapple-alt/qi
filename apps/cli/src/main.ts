@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { RuntimeActivity } from "@civaapple/qi-agent/loop";
 import type { SessionEvent } from "@civaapple/qi-protocol";
 import { ensureProjectLayout, projectPaths } from "@civaapple/qi-node/paths";
+import { SessionRepository } from "@civaapple/qi-node/storage";
 import { AuthSession, parseLoginCommand } from "./auth.js";
 import { AuthBackedModelPort } from "./auth-model-port.js";
 import { defaultUserConfigPath, findCompatibleEndpoint, loadUserConfig, removeCompatibleEndpoint } from "./config.js";
@@ -66,6 +67,31 @@ async function main(): Promise<void> {
     let sessionId = options.sessionId;
     let pendingNotice: string | undefined;
     for (;;) {
+      const currentAuth = auth.status();
+      if (currentAuth.authStatus === "ready") {
+        await auth.useAccount(currentAuth.provider, currentAuth.accountAlias, undefined, "session");
+      }
+      if (sessionId) {
+        const repository = new SessionRepository(paths);
+        try {
+          await repository.recover();
+          const configured = repository.load(sessionId)?.modelConfiguration;
+          if (configured) {
+            await auth.useAccount(configured.provider, configured.accountAlias, {
+              model: configured.model,
+              ...(configured.reasoningEffort === undefined
+                ? {}
+                : { reasoningEffort: configured.reasoningEffort }),
+              contextWindowTokens: configured.contextWindowTokens,
+              ...(configured.provider === "compatible"
+                ? { imageInput: configured.imageInput }
+                : {}),
+            }, "session");
+          }
+        } finally {
+          repository.close();
+        }
+      }
       const authStatus = auth.status();
       const contextWindowTokens = authStatus.contextWindowTokens;
       const outputReserveTokens = Math.min(
@@ -145,6 +171,7 @@ async function main(): Promise<void> {
       eventConsumer = (event) => interactive.onEvent(event);
       activityConsumer = (activity) => interactive.onActivity(activity);
       const exit = await interactive.run();
+      const currentSessionId = runtime.sessionId;
       await runtime.close();
       runtime = undefined;
       if (exit.kind === "resume") {
@@ -155,6 +182,29 @@ async function main(): Promise<void> {
       if (exit.kind === "new-session") {
         sessionId = undefined;
         pendingNotice = t(options.language, "sessions.resumed");
+        continue;
+      }
+      if (exit.kind === "archive" || exit.kind === "restore" || exit.kind === "reset-workspace") {
+        const repository = new SessionRepository(paths);
+        try {
+          await repository.recover();
+          if (exit.kind === "archive") {
+            await repository.archive(exit.sessionId);
+            if (currentSessionId === exit.sessionId) sessionId = undefined;
+            else sessionId = currentSessionId;
+            pendingNotice = `Archived ${exit.sessionId}.`;
+          } else if (exit.kind === "restore") {
+            await repository.restore(exit.sessionId);
+            sessionId = exit.sessionId;
+            pendingNotice = `Restored ${exit.sessionId}.`;
+          } else {
+            const archived = await repository.resetWorkspace();
+            sessionId = undefined;
+            pendingNotice = `Archived ${archived.length} Session(s); started a fresh Session.`;
+          }
+        } finally {
+          repository.close();
+        }
         continue;
       }
       return;
@@ -201,20 +251,24 @@ async function main(): Promise<void> {
   ));
   presenter.update(runtime.events(), runtime.view());
   presenter.setSkills(runtime.skillCatalog());
+  const enabledPermissions = ["read", ...runtime.capabilityLabels()];
+  const disabledPermissions = ["write", "verify", "network", "execute", "background", "delegate"]
+    .filter((capability) => !enabledPermissions.includes(capability));
 
   process.stdout.write(
     [
       "Qi · evidence-first local agent",
       `workspace ${options.workspaceRoot}`,
       `model ${formatProviderLabel(options.provider.provider, options.provider.accountAlias)}/${options.provider.model}${options.provider.baseURL ? ` via ${options.provider.baseURL}` : ""} · ${options.provider.wireApi} · auth ${authStatus.authStatus}`,
-      `control read${options.allowWrite ? " + write" : ""}${options.allowVerify ? " + verify" : ""}${options.allowNetwork ? " + network" : ""}${options.allowExecute ? " + host execute" : ""}${options.allowBackground ? " + background tasks" : ""}${options.allowDelegate ? " + delegate" : ""}`,
+      `Permissions enabled: ${enabledPermissions.join(", ")}`,
+      `Permissions disabled: ${disabledPermissions.join(", ") || "none"}`,
       `context ${contextBudgetFromWindow(options.contextWindowTokens, options.outputReserveTokens)} prompt + ${options.outputReserveTokens} output reserve / ${options.contextWindowTokens} window`,
       ...(options.configPath === undefined ? [] : [`config ${options.configPath}`]),
       ...(runtime.verificationManifest === undefined
         ? []
         : [`verify ${runtime.verificationManifest.origin} ${runtime.verificationManifest.path} · ${runtime.verificationManifest.profiles.join(", ")}`]),
       ...(presenter.discoveryTip() === undefined ? [] : [presenter.discoveryTip()!]),
-      "commands /help · /settings · /memory · /login · /ask · /mode · /plan · /next · /tasks · /skills · /mounts · /permissions · /verify · /runs · /sessions · /steer <text> · /cancel · /quit",
+      "commands /help · /settings · /memory · /login · /ask · /mode · /plan · /model · /effort · /next · /tasks · /skills · /mounts · /permissions · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
       "",
     ].join("\n"),
   );
@@ -770,14 +824,9 @@ async function launchInfo(
     ...(options.provider.baseURL === undefined ? {} : { baseURL: options.provider.baseURL }),
     wireApi: options.provider.wireApi,
     authStatus,
-    capabilities: [
-      ...(options.allowWrite ? ["write"] : []),
-      ...(options.allowVerify ? ["verify"] : []),
-      ...(options.allowNetwork ? ["network"] : []),
-      ...(options.allowExecute ? ["host execute"] : []),
-      ...(options.allowBackground ? ["background tasks"] : []),
-      ...(options.allowDelegate ? ["delegate"] : []),
-    ],
+    capabilities: runtime.capabilityLabels(),
+    disabledCapabilities: ["write", "verify", "network", "execute", "background", "delegate"]
+      .filter((capability) => !runtime.capabilityLabels().includes(capability)),
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
     projectConfigPath: runtime.projectConfigPath(),
     mounts: runtime.mounts().map((mount) => ({ id: mount.id, path: mount.path, mode: mount.mode as "read" })),

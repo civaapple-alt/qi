@@ -33,6 +33,18 @@ After closing and reopening SQLite:
 Storage recovery does not settle running effects. `SessionSupervisor` and the Effect Journal handle that domain
 problem by appending explicit reconciliation facts.
 
+## Session directories and hard archive
+
+Each Session owns `sessions/<session-id>/` (event DB, Effect Journal, Artifacts, Plans, Tasks). Archive is a
+same-volume directory move into `archives/<session-id>/` after `session.archive.requested`, followed by
+`session.archived` and an `archive.json` SHA-256 manifest. Restore validates the manifest, appends
+`session.restore.requested`, moves back, then commits `session.restored`.
+
+`SessionRepository.recover()` finishes interrupted archive/restore states and resumes an incomplete
+`state/reset-operation.json` journal for `/reset-workspace`. A Session must never disappear from both
+`sessions/` and `archives/` at once. Legacy shared project `state/qi.sqlite` layouts are rejected without
+migration; see [ADR-0030](../../../design/decisions.md#adr-0030-make-session-directories-the-movable-persistence-boundary).
+
 ## Schema evolution
 
 Database migrations may change indexes or physical representation but must not reorder, rewrite, or reinterpret

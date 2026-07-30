@@ -33,10 +33,11 @@ the six coordinated public packages.
 ### Lifecycle or persistence
 
 1. [system-design §3](system-design.md#3-session-lifecycle-and-durable-truth)
-2. `packages/protocol/README.md`
-3. `packages/agent/docs/kernel/state-machine.md`
-4. `packages/node/docs/storage/atomicity-and-recovery.md`
-5. replay and SQLite tests
+2. [ADR-0030: Session directories as the movable persistence boundary](decisions.md#adr-0030-make-session-directories-the-movable-persistence-boundary)
+3. `packages/protocol/README.md`
+4. `packages/agent/docs/kernel/state-machine.md`
+5. `packages/node/docs/storage/atomicity-and-recovery.md`
+6. SessionRepository, replay, and SQLite tests
 
 ### Tool, authority, or effect safety
 
@@ -70,8 +71,9 @@ then `packages/node/README.md` (`./media`) and the provider adapter tests.
 2. [system-design §7](system-design.md#7-human-control-and-application-surfaces)
 3. [decisions: human control](decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)
 4. [decisions: bounded interaction timeline](decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention)
-5. `packages/tui/README.md`
-6. `apps/cli/README.md`
+5. [ADR-0031: drafts, `@` mentions, model reconfigure, permission display](decisions.md#adr-0031-preserve-composer-drafts-across-local-slash-controls)
+6. `packages/tui/README.md`
+7. `apps/cli/README.md`
 
 ### Extensions
 

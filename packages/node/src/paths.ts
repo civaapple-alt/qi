@@ -25,6 +25,7 @@ import {
 
 export const QI_LAYOUT_GENERATION = 2;
 export const QI_LAYOUT_VERSION = "0.6";
+export const QI_PROJECT_LAYOUT_VERSION = 2;
 
 export interface QiLayoutFile {
   readonly generation: typeof QI_LAYOUT_GENERATION;
@@ -42,18 +43,28 @@ export interface ProjectPaths {
   readonly root: string;
   readonly projectFile: string;
   readonly policyFile: string;
+  readonly sessionsRoot: string;
+  readonly archivesRoot: string;
   readonly stateRoot: string;
-  readonly databaseFile: string;
-  readonly effectsFile: string;
   readonly memoryFile: string;
   readonly schedulerFile: string;
-  readonly artifactsRoot: string;
-  readonly plansRoot: string;
-  readonly tasksRoot: string;
   readonly packagesRoot: string;
   readonly activationFile: string;
   readonly cacheRoot: string;
   readonly temporaryRoot: string;
+}
+
+export interface ProjectSessionPaths {
+  readonly sessionId: string;
+  readonly location: "active" | "archived";
+  readonly root: string;
+  readonly stateRoot: string;
+  readonly databaseFile: string;
+  readonly effectsFile: string;
+  readonly artifactsRoot: string;
+  readonly plansRoot: string;
+  readonly tasksRoot: string;
+  readonly archiveManifestFile: string;
 }
 
 export interface QiStatePaths {
@@ -149,19 +160,49 @@ export function projectPaths(input: {
     root,
     projectFile: resolve(root, "project.json"),
     policyFile: resolve(root, "policy.toml"),
+    sessionsRoot: resolve(root, "sessions"),
+    archivesRoot: resolve(root, "archives"),
     stateRoot,
-    databaseFile: resolve(stateRoot, "qi.sqlite"),
-    effectsFile: resolve(stateRoot, "effects.sqlite"),
     memoryFile: resolve(stateRoot, "memory.sqlite"),
     schedulerFile: resolve(stateRoot, "scheduler.sqlite"),
-    artifactsRoot: resolve(root, "artifacts"),
-    plansRoot: resolve(root, "plans"),
-    tasksRoot: resolve(root, "tasks"),
     packagesRoot,
     activationFile: resolve(packagesRoot, "activation.json"),
     cacheRoot: resolve(root, "cache"),
     temporaryRoot: resolve(root, "tmp"),
   };
+}
+
+export function projectSessionPaths(
+  paths: ProjectPaths,
+  sessionId: string,
+  location: "active" | "archived" = "active",
+): ProjectSessionPaths {
+  if (!/^ses_[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/.test(sessionId)) {
+    throw new TypeError(`Invalid Session ID: ${sessionId}`);
+  }
+  const root = resolve(location === "active" ? paths.sessionsRoot : paths.archivesRoot, sessionId);
+  const stateRoot = resolve(root, "state");
+  return {
+    sessionId,
+    location,
+    root,
+    stateRoot,
+    databaseFile: resolve(stateRoot, "qi.sqlite"),
+    effectsFile: resolve(stateRoot, "effects.sqlite"),
+    artifactsRoot: resolve(root, "artifacts"),
+    plansRoot: resolve(root, "plans"),
+    tasksRoot: resolve(root, "tasks"),
+    archiveManifestFile: resolve(root, "archive.json"),
+  };
+}
+
+export async function ensureProjectSessionLayout(paths: ProjectSessionPaths): Promise<void> {
+  await Promise.all([
+    paths.stateRoot,
+    paths.artifactsRoot,
+    paths.plansRoot,
+    paths.tasksRoot,
+  ].map((entry) => mkdir(entry, { recursive: true })));
 }
 
 export async function ensureQiLayout(
@@ -203,18 +244,18 @@ export async function ensureQiLayout(
 export async function ensureProjectLayout(paths: ProjectPaths): Promise<void> {
   await ensureQiLayout(paths.qiHome, { workspaceRoot: paths.workspaceRoot });
   await assertSafePrivateRoot(paths.root, paths.workspaceRoot);
+  await assertProjectLayout(paths);
   const directories = [
     paths.stateRoot,
-    paths.artifactsRoot,
-    paths.plansRoot,
-    paths.tasksRoot,
+    paths.sessionsRoot,
+    paths.archivesRoot,
     paths.packagesRoot,
     paths.cacheRoot,
     paths.temporaryRoot,
   ];
   await Promise.all(directories.map((entry) => mkdir(entry, { recursive: true })));
   await writeJsonAtomic(paths.projectFile, {
-    schemaVersion: 1,
+    schemaVersion: QI_PROJECT_LAYOUT_VERSION,
     projectId: paths.projectId,
     workspaceRoot: paths.workspaceRoot,
     dataRoot: paths.root,
@@ -222,6 +263,32 @@ export async function ensureProjectLayout(paths: ProjectPaths): Promise<void> {
   await ensureTextFile(
     paths.activationFile,
     `${JSON.stringify({ schemaVersion: 1, packages: {} }, null, 2)}\n`,
+  );
+}
+
+async function assertProjectLayout(paths: ProjectPaths): Promise<void> {
+  try {
+    const parsed = JSON.parse(await readFile(paths.projectFile, "utf8")) as { schemaVersion?: unknown };
+    if (parsed.schemaVersion !== QI_PROJECT_LAYOUT_VERSION) {
+      throw legacyProjectLayoutError(paths.root, `project schema ${String(parsed.schemaVersion)}`);
+    }
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const legacy = [
+    resolve(paths.root, "state", "qi.sqlite"),
+    resolve(paths.root, "artifacts"),
+    resolve(paths.root, "plans"),
+    resolve(paths.root, "tasks"),
+  ].find((candidate) => existsSync(candidate));
+  if (legacy) throw legacyProjectLayoutError(paths.root, `legacy path ${legacy}`);
+}
+
+function legacyProjectLayoutError(root: string, detail: string): Error {
+  return new Error(
+    `Qi project ${root} uses an unsupported shared Session layout (${detail}). ` +
+    "Back it up and clear this project data directory, or start with a new --data path; Qi will not migrate or delete it.",
   );
 }
 

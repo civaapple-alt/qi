@@ -79,7 +79,16 @@ export class SqliteMemoryIndex implements MemoryIndex {
   }
 
   rebuild(events: readonly SessionEvent[]): void {
-    for (const event of events) this.apply(event);
+    this.#assertOpen();
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      this.#database.exec("DELETE FROM memory_claims; DELETE FROM memory_applied_events;");
+      this.#database.exec("COMMIT");
+    } catch (error) {
+      this.#database.exec("ROLLBACK");
+      throw error;
+    }
+    this.applyBatch(events);
   }
 
   get(memoryId: MemoryId): IndexedMemoryClaim | undefined {

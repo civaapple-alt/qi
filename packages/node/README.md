@@ -32,7 +32,8 @@ Controlled entrypoints:
 
 ## Private layout
 
-Qi 0.6 uses layout generation 2:
+Qi 0.6 uses layout generation 2. Project layout version 2 stores each Session as a movable directory
+([ADR-0030](../../design/decisions.md#adr-0030-make-session-directories-the-movable-persistence-boundary)):
 
 ```text
 $QI_HOME/
@@ -45,18 +46,29 @@ $QI_HOME/
   projects/<workspace-name>-<path-hash>/
     project.json
     policy.toml
-    state/{qi.sqlite,effects.sqlite,memory.sqlite,scheduler.sqlite}
-    artifacts/ plans/<plan-id>/<sha256>.md tasks/ packages/activation.json cache/ tmp/
+    state/{memory.sqlite,scheduler.sqlite}
+    sessions/<session-id>/
+      state/{qi.sqlite,effects.sqlite}
+      artifacts/ plans/<plan-id>/<sha256>.md tasks/
+    archives/<session-id>/
+      state/{qi.sqlite,effects.sqlite}
+      artifacts/ plans/ tasks/
+      archive.json
+    packages/activation.json cache/ tmp/
 ```
 
-Project `memory.sqlite` indexes only that project's Session/Project claims. The fixed local-user Continuity
+Legacy project roots that still expose a shared `state/qi.sqlite` or project-level `artifacts/`, `plans/`, or
+`tasks/` are rejected without migration. Back up the old project directory and start from a new data root, or
+clear the incompatible project folder after backup.
+
+Project `memory.sqlite` indexes only that project's **active** Session/Project claims. The fixed local-user Continuity
 Session in `state/continuity.sqlite` is the global fact stream for explicitly confirmed User Memory, projected
 into `state/memory.sqlite`. Both indexes are versioned, transactional, and rebuildable from their event streams;
 claim text is plaintext inside these machine-private databases.
 
-`projectPaths()`, `ensureQiLayout()`, and `ensureProjectLayout()` are the only path/layout implementation used
-by CLI and Web. Existing non-empty pre-0.6 homes fail without migration or deletion. Private roots cannot be
-filesystem roots, Workspace descendants, symlinks, junction traversals, or path escapes.
+`projectPaths()`, `ensureQiLayout()`, `ensureProjectLayout()`, and `SessionRepository` are the path/layout and
+Session catalog surface used by CLI and Web. Existing non-empty pre-0.6 homes fail without migration or deletion.
+Private roots cannot be filesystem roots, Workspace descendants, symlinks, junction traversals, or path escapes.
 
 Workspace `.qi` is separate: it contains only allowlisted declarations and package locks. Ordinary Agent file
 tools still deny `.qi`; dedicated services validate types, size, secrets, executables, and symlinks before
@@ -73,7 +85,7 @@ mutation or evidence that an implementation task was completed.
 Image ingestion supports PNG, JPEG, GIF, and WebP with a 64 MiB source limit and 100 MP decode guard. The default
 prepared view is bounded to a 2000 px longest edge and 3.75 MiB; transparent images stay PNG, JPEG encoding uses
 quality/size ladders, and animated GIF/WebP passes only when already within limits. Both original and prepared
-bytes are content-addressed under project `artifacts/`. Public URL reads reuse DNS pinning, private/local denial,
+bytes are content-addressed under the owning Session's `artifacts/`. Public URL reads reuse DNS pinning, private/local denial,
 default ports, redirect/HTTPS policy, cancellation, and timeout rules while retaining a separate image byte
 budget from the 1 MiB text `fetch` Tool.
 

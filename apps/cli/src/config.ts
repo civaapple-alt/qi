@@ -71,6 +71,7 @@ export interface QiUserConfig {
   /** Saved OpenAI-compatible endpoints; active selection is the top-level fields. */
   readonly compatible?: readonly CompatibleEndpoint[];
   readonly contextWindowTokens?: number;
+  readonly imageInput?: boolean;
   readonly maxSteps?: number;
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
@@ -147,6 +148,7 @@ export interface UserProviderDefaults {
   readonly accountAlias?: string;
   readonly reasoningEffort?: "low" | "high" | "max" | "none";
   readonly contextWindowTokens?: number;
+  readonly imageInput?: boolean;
 }
 
 /**
@@ -165,6 +167,7 @@ export async function persistUserProviderDefaults(
       name: normalizeAccountAlias(selection.accountAlias),
       baseURL: selection.baseURL,
       model: selection.model,
+      ...(selection.imageInput === undefined ? {} : { imageInput: selection.imageInput }),
     })
     : loaded.config.compatible;
   const requestedReasoningEffort = selection.reasoningEffort ?? loaded.config.reasoningEffort;

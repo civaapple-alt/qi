@@ -1,5 +1,4 @@
 import {
-  CombinedAutocompleteProvider,
   Container,
   Editor,
   Key,
@@ -20,6 +19,7 @@ import type {
 } from "@civaapple/qi-protocol";
 import { nextSessionMode, type RuntimeActivity, type SessionMode } from "@civaapple/qi-agent/loop";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
+import { findTrustedExecutable } from "@civaapple/qi-node/tools";
 import type { AuthSession, AuthSessionStatus } from "./auth.js";
 import { parseLoginCommand } from "./auth.js";
 import { canAutoOpenAttention, highestPriorityAttention } from "./attention.js";
@@ -63,6 +63,7 @@ import {
   openHelpPanel,
   openHistoryListPanel,
   openModePanel,
+  openModelConfigurationPanel,
   openMountsPanel,
   openPermissionsPanel,
   openProvidersPanel,
@@ -84,11 +85,18 @@ import type { TuiRuntime } from "./runtime.js";
 import { applyTheme, theme, type ThemeName } from "./theme/index.js";
 import { readClipboardPaste } from "./clipboard.js";
 import { imagePlaceholder, structuredComposerContent } from "./image-composer.js";
+import {
+  validateWorkspaceMentions,
+  WorkspaceAutocompleteProvider,
+} from "./workspace-autocomplete.js";
 
 export type InteractiveExit =
   | { kind: "quit" }
   | { kind: "resume"; sessionId: SessionId }
-  | { kind: "new-session" };
+  | { kind: "new-session" }
+  | { kind: "archive"; sessionId: SessionId }
+  | { kind: "restore"; sessionId: SessionId }
+  | { kind: "reset-workspace" };
 
 export class InteractiveTui {
   readonly #runtime: TuiRuntime;
@@ -115,6 +123,7 @@ export class InteractiveTui {
   #workingTimer: ReturnType<typeof setInterval> | undefined;
   #noticeTimer: ReturnType<typeof setTimeout> | undefined;
   #noticeTimerExpiresAt: number | undefined;
+  #autocompleteGeneration = 0;
   /** Last Plan review key offered as a panel; Esc dismisses until the revision changes. */
   #planReviewKey: string | undefined;
   /** Last next-Run Question id offered as a panel; Esc dismisses until it changes. */
@@ -165,7 +174,7 @@ export class InteractiveTui {
     );
     this.#followUpsPanel = new FollowUpsComponent(this.#followUps, () => this.#presenter.locale());
     this.#syncAutocomplete();
-    this.#editor.onSubmit = (input) => this.#handleInput(input);
+    this.#editor.onSubmit = (input) => { void this.#handleInput(input); };
     // Composer keystrokes must not rebuild the chat transcript (grows with Runs/Steps).
     this.#editor.onChange = () => this.#renderChrome();
     this.#tui.addChild(this.#dashboard);
@@ -350,10 +359,11 @@ export class InteractiveTui {
     this.#resolveClosed?.(this.#exit);
   }
 
-  #handleInput(raw: string): void {
-    const input = raw.trim();
+  async #handleInput(raw: string): Promise<void> {
+    let input = raw.trim();
     if (!input) return;
-    const content = structuredComposerContent(raw, this.#composerImages);
+    const command = parseTuiCommand(raw);
+    let content = structuredComposerContent(raw, this.#composerImages);
     this.#composerImages.clear();
     this.#editor.addToHistory(raw);
     this.#editor.setText("");
@@ -361,6 +371,20 @@ export class InteractiveTui {
     // the operator begins the next one; that interaction may publish a fresh notice.
     this.#presenter.setNotice(undefined);
     if (this.#followUps.editing) {
+      try {
+        input = (await validateWorkspaceMentions(input, this.#presenter.launch.workspaceRoot)).trim();
+        content = content === undefined
+          ? undefined
+          : await Promise.all(content.map(async (part) =>
+              part.type === "text"
+                ? { ...part, text: await validateWorkspaceMentions(part.text, this.#presenter.launch.workspaceRoot) }
+                : part));
+      } catch (error) {
+        this.#editor.setText(raw);
+        this.#presenter.setNotice(message(error));
+        this.#render();
+        return;
+      }
       this.#followUps.commitEdit(input, content);
       this.#followUps.clearSelection();
       this.#presenter.setNotice(undefined);
@@ -368,9 +392,31 @@ export class InteractiveTui {
       this.#maybeDrainFollowUps();
       return;
     }
-    const command = parseTuiCommand(input);
     if (command) {
+      const policy = tuiCommands.find((candidate) => candidate.name === command.name)?.draftPolicy;
+      if (command.draft !== undefined && policy === "preserve") {
+        this.#editor.setText(command.draft);
+      } else if (command.draft !== undefined && policy === "reject") {
+        this.#editor.setText(command.draft);
+        this.#presenter.setNotice(`/${command.name} cannot run while a draft follows it.`);
+        this.#render();
+        return;
+      }
       this.#handleCommand(command.name, command.argument);
+      return;
+    }
+    try {
+      input = (await validateWorkspaceMentions(input, this.#presenter.launch.workspaceRoot)).trim();
+      content = content === undefined
+        ? undefined
+        : await Promise.all(content.map(async (part) =>
+            part.type === "text"
+              ? { ...part, text: await validateWorkspaceMentions(part.text, this.#presenter.launch.workspaceRoot) }
+              : part));
+    } catch (error) {
+      this.#editor.setText(raw);
+      this.#presenter.setNotice(message(error));
+      this.#render();
       return;
     }
     if (this.#runtime.active) {
@@ -1089,12 +1135,23 @@ export class InteractiveTui {
   }
 
   #syncAutocomplete(): void {
-    this.#editor.setAutocompleteProvider(
-      new CombinedAutocompleteProvider(
-        [...autocompleteSlashCommands(this.#presenter.locale())],
+    const generation = ++this.#autocompleteGeneration;
+    const commands = [...autocompleteSlashCommands(this.#presenter.locale())];
+    const preserve = new Set(
+      tuiCommands.filter((command) => command.draftPolicy === "preserve").map((command) => command.name),
+    );
+    const install = (fdPath?: string) => this.#editor.setAutocompleteProvider(
+      new WorkspaceAutocompleteProvider(
+        commands,
         this.#presenter.launch.workspaceRoot,
+        fdPath,
+        preserve,
       ),
     );
+    install();
+    void findTrustedExecutable("fd", this.#presenter.launch.workspaceRoot).then((fdPath) => {
+      if (generation === this.#autocompleteGeneration && !this.#closing && fdPath) install(fdPath);
+    });
   }
 
   #changeLocale(locale: Locale): void {
@@ -1119,6 +1176,8 @@ export class InteractiveTui {
       this.#presenter.launch = {
         ...launchRest,
         capabilities: [...applied.labels],
+        disabledCapabilities: ["write", "verify", "network", "execute", "background", "delegate"]
+          .filter((capability) => !applied.labels.includes(capability)),
         shell: this.#runtime.shellProfiles,
         ...(this.#runtime.verificationManifest === undefined
           ? {}
@@ -1299,6 +1358,9 @@ export class InteractiveTui {
       startUseAccount: (provider, alias, routing) => {
         this.#switchSealedAccount(provider, alias ?? "default", routing);
       },
+      configureModel: (routing, persistence) => {
+        this.#configureModel(routing, persistence);
+      },
       openInspect: (panel, title) => {
         if (panel === "skills") {
           this.#startSkillTask(async () => {
@@ -1325,7 +1387,7 @@ export class InteractiveTui {
       installSkill: (source, scope) => this.#installSkill(source, scope),
       listTasks: () => this.#runtime.tasks(),
       stopTask: (taskId) => this.#stopTaskFromArgument(`stop ${taskId}`, true),
-      listSessions: () => buildSessionEntries(this.#runtime.listSessions(), {
+      listSessions: () => buildSessionEntries(this.#runtime.listSessionCatalog(), {
         workspaceRoot: this.#presenter.launch.workspaceRoot,
         readEvents: (sessionId) => this.#runtime.readSessionEvents(sessionId),
       }),
@@ -1333,6 +1395,18 @@ export class InteractiveTui {
       workspaceRoot: () => this.#presenter.launch.workspaceRoot,
       resumeSession: (sessionId) => {
         void this.close({ kind: "resume", sessionId });
+      },
+      archiveSession: (sessionId) => {
+        const blockers = this.#runtime.sessionArchiveBlockers(sessionId);
+        if (blockers.length > 0) {
+          this.#presenter.setNotice(`Archive blocked · ${blockers.join(" · ")}`);
+          this.#render();
+          return;
+        }
+        void this.close({ kind: "archive", sessionId });
+      },
+      restoreSession: (sessionId) => {
+        void this.close({ kind: "restore", sessionId });
       },
       startNewSession: () => {
         void this.close({ kind: "new-session" });
@@ -1617,6 +1691,7 @@ export class InteractiveTui {
       baseURL?: string;
       reasoningEffort?: string;
       contextWindowTokens?: number;
+      imageInput?: boolean;
     },
   ): void {
     if (!this.#auth) {
@@ -1639,6 +1714,55 @@ export class InteractiveTui {
           (status.baseURL ? ` · ${status.baseURL}` : ""),
       );
     }, "login");
+  }
+
+  #configureModel(
+    routing: {
+      model: string;
+      reasoningEffort?: string;
+      contextWindowTokens?: number;
+      imageInput?: boolean;
+    },
+    persistence: "account" | "session",
+  ): void {
+    const auth = this.#auth;
+    if (!auth) {
+      this.#presenter.setNotice("Auth session is unavailable in this TUI mode.");
+      this.#render();
+      return;
+    }
+    if (this.#runtime.active) {
+      this.#presenter.setNotice("Cannot change model while a Run is active.");
+      this.#render();
+      return;
+    }
+    const current = auth.status();
+    this.#startManagementTask(async () => {
+      const status = await auth.useAccount(
+        current.provider,
+        current.accountAlias,
+        {
+          ...routing,
+          ...(current.baseURL === undefined ? {} : { baseURL: current.baseURL }),
+        },
+        persistence,
+      );
+      this.#syncAuthLaunch(status);
+      this.#runtime.recordModelConfiguration({
+        provider: status.provider,
+        accountAlias: status.accountAlias,
+        model: status.model,
+        ...(status.reasoningEffort === undefined ? {} : { reasoningEffort: status.reasoningEffort }),
+        contextWindowTokens: status.contextWindowTokens,
+        imageInput: status.imageInput,
+      }, persistence);
+      if (persistence === "account") await this.#persistLoginDefaults(status);
+      this.#presenter.setNotice(
+        `Model → ${status.model}` +
+        (status.reasoningEffort ? ` · effort ${status.reasoningEffort}` : "") +
+        ` · ${persistence === "account" ? "saved to account" : "current Session only"}`,
+      );
+    }, "model");
   }
 
   #handleCommand(name: string, argument: string): void {
@@ -1709,6 +1833,81 @@ export class InteractiveTui {
     }
     if (name === "sessions") {
       openSessionsPanel(this.#panelFlow());
+      return;
+    }
+    if (name === "model") {
+      if (!argument.trim()) {
+        openModelConfigurationPanel(this.#panelFlow());
+        return;
+      }
+      const sessionOnly = /(?:^|\s)--session(?:\s|$)/.test(argument);
+      const model = argument.replace(/(?:^|\s)--session(?:\s|$)/g, " ").trim();
+      if (!model || /\s/.test(model)) {
+        this.#presenter.setNotice("Usage: /model [model-id] [--session]");
+        this.#render();
+        return;
+      }
+      const status = this.#auth?.status();
+      this.#configureModel({
+        model,
+        ...(status?.reasoningEffort === undefined ? {} : { reasoningEffort: status.reasoningEffort }),
+        ...(status === undefined ? {} : { contextWindowTokens: status.contextWindowTokens }),
+        ...(status?.provider === "compatible" ? { imageInput: status.imageInput } : {}),
+      }, sessionOnly ? "session" : "account");
+      return;
+    }
+    if (name === "effort") {
+      const sessionOnly = /(?:^|\s)--session(?:\s|$)/.test(argument);
+      const effort = argument.replace(/(?:^|\s)--session(?:\s|$)/g, " ").trim();
+      const status = this.#auth?.status();
+      if (!status || !["low", "high", "max", "none"].includes(effort)) {
+        this.#presenter.setNotice("Usage: /effort <low|high|max|none> [--session]");
+        this.#render();
+        return;
+      }
+      this.#configureModel({
+        model: status.model,
+        reasoningEffort: effort,
+        contextWindowTokens: status.contextWindowTokens,
+        ...(status.provider === "compatible" ? { imageInput: status.imageInput } : {}),
+      }, sessionOnly ? "session" : "account");
+      return;
+    }
+    if (name === "reset-workspace") {
+      if (this.#runtime.active) {
+        this.#presenter.setNotice("Cannot reset the Workspace while a Run is active.");
+        this.#render();
+        return;
+      }
+      const blockers = this.#runtime.workspaceResetBlockers();
+      if (blockers.length > 0) {
+        this.#presenter.setNotice(`Workspace reset blocked · ${blockers.join(" · ")}`);
+        this.#render();
+        return;
+      }
+      this.#panels.push(new ListPanel({
+        title: "Reset Workspace",
+        hints: "↑↓ select · Enter confirm · Esc cancel",
+        items: [
+          {
+            id: "confirm",
+            label: "Archive all active Sessions",
+            description: `${this.#runtime.listSessions().length} active Session(s) → archives/; configuration is preserved`,
+          },
+          { id: "cancel", label: "Cancel", description: "Keep every Session active" },
+        ],
+        onClose: this.#panels.dismiss,
+        onSelect: (item) => {
+          if (item.id === "confirm") {
+            this.#panels.closeAll();
+            void this.close({ kind: "reset-workspace" });
+          } else {
+            this.#panels.dismiss();
+            this.#render();
+          }
+        },
+      }));
+      this.#render();
       return;
     }
     if (name === "login") {

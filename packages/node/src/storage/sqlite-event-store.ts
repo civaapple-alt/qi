@@ -33,10 +33,12 @@ export interface SqliteEventStoreOptions {
 
 export class SqliteEventStore implements EventStore {
   readonly #database: DatabaseSync;
+  readonly #readonly: boolean;
   readonly #projections = new Map<SessionId, { version: number; view: SessionView }>();
   #closed = false;
 
   constructor(path: string, options: SqliteEventStoreOptions = {}) {
+    this.#readonly = options.readonly ?? false;
     this.#database = new DatabaseSync(path, {
       readOnly: options.readonly ?? false,
       enableForeignKeyConstraints: true,
@@ -176,8 +178,14 @@ export class SqliteEventStore implements EventStore {
   close(): void {
     if (this.#closed) return;
     this.#projections.clear();
+    if (!this.#readonly) this.#database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     this.#database.close();
     this.#closed = true;
+  }
+
+  checkpoint(): void {
+    this.#assertOpen();
+    if (!this.#readonly) this.#database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   }
 
   #readEvents(sessionId: SessionId, afterVersion: number): SessionEvent[] {

@@ -53,6 +53,7 @@ export interface TuiLaunchInfo {
   readonly wireApi?: string;
   readonly authStatus?: "ready" | "missing" | "expired";
   readonly capabilities: readonly string[];
+  readonly disabledCapabilities?: readonly string[];
   readonly configPath?: string;
   readonly projectConfigPath?: string;
   readonly mounts?: readonly { id: string; path: string; mode: "read" }[];
@@ -746,6 +747,8 @@ export class TuiPresenter {
         t(this.#locale, "welcome.tip.short"),
         ...(this.launch.discoveryTip ? [this.launch.discoveryTip] : []),
         `Model: ${formatProviderLabel(this.launch.provider, this.launch.accountAlias)}/${this.launch.model}`,
+        `Permissions enabled: read${this.launch.capabilities.length ? `, ${this.launch.capabilities.join(", ")}` : ""}`,
+        `Permissions disabled: ${this.launch.disabledCapabilities?.join(", ") || "none"}`,
       ];
     }
     const mark = renderQiMark(Math.min(width, 48));
@@ -756,6 +759,8 @@ export class TuiPresenter {
       `  Directory: ${this.launch.workspaceRoot}`,
       `  Model:     ${formatProviderLabel(this.launch.provider, this.launch.accountAlias)}/${this.launch.model}`,
       `  Mode:      ${formatMode(this.#view?.mode ?? "agent")}`,
+      `  Permissions enabled:  read${this.launch.capabilities.length ? `, ${this.launch.capabilities.join(", ")}` : ""}`,
+      `  Permissions disabled: ${this.launch.disabledCapabilities?.join(", ") || "none"}`,
       "",
       t(this.#locale, "welcome.tip.long"),
       ...(this.launch.discoveryTip ? [`  ${this.launch.discoveryTip}`] : []),

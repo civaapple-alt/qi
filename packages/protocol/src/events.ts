@@ -243,6 +243,57 @@ export const SessionEventSchema = Type.Union([
     ),
   ),
   event(
+    "session.archive.requested",
+    Type.Object(
+      {
+        operationId: Type.String({ minLength: 1, maxLength: 128 }),
+        reason: Type.String({ minLength: 1, maxLength: 500 }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "session.archived",
+    Type.Object(
+      { operationId: Type.String({ minLength: 1, maxLength: 128 }) },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "session.restore.requested",
+    Type.Object(
+      { operationId: Type.String({ minLength: 1, maxLength: 128 }) },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "session.restored",
+    Type.Object(
+      { operationId: Type.String({ minLength: 1, maxLength: 128 }) },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "session.model.configured",
+    Type.Object(
+      {
+        provider: Type.String({ minLength: 1, maxLength: 128 }),
+        accountAlias: Type.String({ minLength: 1, maxLength: 128 }),
+        model: Type.String({ minLength: 1, maxLength: 256 }),
+        reasoningEffort: Type.Optional(Type.Union([
+          Type.Literal("low"),
+          Type.Literal("high"),
+          Type.Literal("max"),
+          Type.Literal("none"),
+        ])),
+        contextWindowTokens: Type.Integer({ minimum: 8_192, maximum: 2_000_000 }),
+        imageInput: Type.Boolean(),
+        persistence: Type.Union([Type.Literal("account"), Type.Literal("session")]),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
     "session.mode.changed",
     Type.Object(
       {

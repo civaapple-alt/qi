@@ -78,7 +78,10 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `policy.toml`) |
 | `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
 | `/runs` | Session history hub → interactive Runs / Steps / Actions / Agents lists (Enter selects observation) |
-| `/sessions` | List Workspace Sessions; type-to-search; Enter resumes in-process |
+| `/sessions` | Active/Archived Session list; type-to-search; Enter resumes or restores; `a` archives (with confirm) |
+| `/model [model-id] [--session]` | Reconfigure model without re-login; omit args for picker; `--session` scopes to this Session |
+| `/effort <level> [--session]` | Set reasoning effort from the current model profile |
+| `/reset-workspace` | Preflight all active Sessions, archive them, and start a fresh Session |
 | `/next [continue\|stop\|plan]` | Next Run panel |
 | `/steer <text>` | Queue direction for the next safe Step boundary |
 | `/cancel` | Cancel the active Run |
@@ -139,7 +142,9 @@ into the machine-private `artifact` store. Artifact persistence never changes th
 item complete. Write/edit Action cards still show unified diffs inline. Non-TTY line mode prints the same panel body after
 the transcript. Working/phase always follows the executing Run; history selection in `/runs` remains observational.
 Choosing another Session from `/sessions` closes the TUI and relaunches in-process with that `sessionId`
-(same AuthSession); **New Session** clears `sessionId`. The current Session is marked `← current`.
+(same AuthSession); **New Session** clears `sessionId`. Archiving the current Session also starts a new one.
+Tab switches Active/Archived; restoring an archived Session validates `archive.json` before making it active.
+The current Session is marked `← current`.
 
 Long pastes collapse to a line/char summary; Agent replies and Plans use a bounded terminal Markdown renderer
 (fenced code keeps internal blank lines); wide tables wrap cells and fall back to a vertical field layout when

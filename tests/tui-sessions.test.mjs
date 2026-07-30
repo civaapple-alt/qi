@@ -192,6 +192,57 @@ test("SessionsPanel filters by query and Enter selects a Session", () => {
   assert.equal(closed, true);
 });
 
+test("SessionsPanel archives with a only when the filter is empty", () => {
+  /** @type {string[]} */
+  const archived = [];
+  const panel = new SessionsPanel({
+    title: t("en", "sessions.title"),
+    hints: t("en", "sessions.hints"),
+    emptyLabel: t("en", "sessions.empty"),
+    currentMark: t("en", "sessions.current"),
+    showingLabel: (from, to, total) => t("en", "sessions.showing", {
+      from: String(from),
+      to: String(to),
+      total: String(total),
+    }),
+    items: [
+      { id: NEW_SESSION_ID, title: "New Session", isNew: true },
+      {
+        id: "ses_alpha",
+        title: "Alpha",
+        sessionId: /** @type {any} */ ("ses_alpha"),
+        updatedAt: "2026-07-23T11:00:00.000Z",
+        location: "active",
+      },
+      {
+        id: "ses_archived",
+        title: "Old",
+        sessionId: /** @type {any} */ ("ses_archived"),
+        updatedAt: "2026-07-20T11:00:00.000Z",
+        location: "archived",
+      },
+    ],
+    initialSelected: 1,
+    onSelect: () => {},
+    onArchive: (item) => archived.push(item.id),
+    onClose: () => {},
+  });
+
+  panel.handleInput("a");
+  assert.deepEqual(archived, ["ses_alpha"]);
+
+  panel.handleInput("l");
+  panel.handleInput("a");
+  const filtered = panel.render(80).join("\n");
+  assert.match(filtered, /filter: la/i);
+  assert.deepEqual(archived, ["ses_alpha"]);
+
+  panel.handleInput("\u001b");
+  panel.handleInput("\t");
+  panel.handleInput("a");
+  assert.deepEqual(archived, ["ses_alpha"]);
+});
+
 test("/sessions is a primary slash command", () => {
   const primary = primarySlashCommands("en");
   assert.ok(primary.some((command) => command.name === "sessions"));

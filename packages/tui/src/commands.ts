@@ -25,6 +25,7 @@ export type CommandVisibility = "primary" | "alias" | "advanced";
 export interface ParsedTuiCommand {
   readonly name: string;
   readonly argument: string;
+  readonly draft?: string;
 }
 
 export interface TuiCommandDefinition {
@@ -34,11 +35,12 @@ export interface TuiCommandDefinition {
   readonly category: "inspect" | "navigate" | "manage" | "control";
   readonly visibility: CommandVisibility;
   readonly panel?: TuiPanel;
+  readonly draftPolicy?: "preserve" | "consume" | "reject";
 }
 
 export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
-  { name: "help", descriptionKey: "cmd.help", argumentHint: "[command|advanced]", category: "inspect", visibility: "primary", panel: "help" },
-  { name: "settings", descriptionKey: "cmd.settings", category: "inspect", visibility: "primary" },
+  { name: "help", descriptionKey: "cmd.help", argumentHint: "[command|advanced]", category: "inspect", visibility: "primary", panel: "help", draftPolicy: "preserve" },
+  { name: "settings", descriptionKey: "cmd.settings", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
   {
     name: "memory",
     descriptionKey: "cmd.memory",
@@ -54,7 +56,7 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
     category: "control",
     visibility: "primary",
   },
-  { name: "login", descriptionKey: "cmd.login", argumentHint: "[status|list|logout [provider]|<provider> [device|key <api-key>]]", category: "manage", visibility: "primary" },
+  { name: "login", descriptionKey: "cmd.login", argumentHint: "[status|list|logout [provider]|<provider> [device|key <api-key>]]", category: "manage", visibility: "primary", draftPolicy: "preserve" },
   {
     name: "plan",
     descriptionKey: "cmd.plan",
@@ -66,10 +68,13 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "skills", descriptionKey: "cmd.skills", category: "inspect", visibility: "primary", panel: "skills" },
   { name: "tasks", descriptionKey: "cmd.tasks", argumentHint: "[stop <N|ID>]", category: "inspect", visibility: "primary", panel: "tasks" },
   { name: "mounts", descriptionKey: "cmd.mounts", argumentHint: "[add <path>|unmount <id>]", category: "inspect", visibility: "primary" },
-  { name: "permissions", descriptionKey: "cmd.permissions", category: "inspect", visibility: "primary" },
+  { name: "permissions", descriptionKey: "cmd.permissions", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
   { name: "verify", descriptionKey: "cmd.verify", category: "inspect", visibility: "primary" },
   { name: "runs", descriptionKey: "cmd.runs", category: "navigate", visibility: "primary", panel: "runs" },
-  { name: "sessions", descriptionKey: "cmd.sessions", category: "navigate", visibility: "primary" },
+  { name: "sessions", descriptionKey: "cmd.sessions", category: "navigate", visibility: "primary", draftPolicy: "preserve" },
+  { name: "model", descriptionKey: "cmd.model", argumentHint: "[model-id] [--session]", category: "manage", visibility: "primary", draftPolicy: "preserve" },
+  { name: "effort", descriptionKey: "cmd.effort", argumentHint: "<level> [--session]", category: "manage", visibility: "primary", draftPolicy: "preserve" },
+  { name: "reset-workspace", descriptionKey: "cmd.reset-workspace", category: "control", visibility: "primary", draftPolicy: "consume" },
   { name: "next", descriptionKey: "cmd.next", argumentHint: "[continue|stop|plan]", category: "control", visibility: "primary" },
   { name: "steer", descriptionKey: "cmd.steer", argumentHint: "<text>", category: "control", visibility: "primary" },
   { name: "cancel", descriptionKey: "cmd.cancel", category: "control", visibility: "primary" },
@@ -131,13 +136,21 @@ export function toSlashCommand(command: TuiCommandDefinition, locale: Locale): S
 }
 
 export function parseTuiCommand(input: string): ParsedTuiCommand | undefined {
-  const trimmed = input.trim();
+  const newline = input.search(/\r?\n/);
+  const commandLine = newline < 0 ? input : input.slice(0, newline);
+  const draft = newline < 0 ? undefined : input.slice(newline + (input[newline] === "\r" ? 2 : 1));
+  const trimmed = commandLine.trim();
   if (!trimmed.startsWith("/")) return undefined;
   const separator = trimmed.search(/\s/);
-  if (separator < 0) return { name: trimmed.slice(1).toLowerCase(), argument: "" };
+  if (separator < 0) return {
+    name: trimmed.slice(1).toLowerCase(),
+    argument: "",
+    ...(draft === undefined ? {} : { draft }),
+  };
   return {
     name: trimmed.slice(1, separator).toLowerCase(),
     argument: trimmed.slice(separator).trim(),
+    ...(draft === undefined ? {} : { draft }),
   };
 }
 

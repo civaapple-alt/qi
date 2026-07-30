@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
+import { projectPaths, projectSessionPaths } from "@civaapple/qi-node/paths";
 import {
   commandHelp,
   canAutoOpenAttention,
@@ -39,6 +40,14 @@ import { createPlanDocumentTool, validateFormalPlan } from "../apps/cli/dist/pla
 
 test("TUI command catalog separates inspection, navigation, and control", () => {
   assert.deepEqual(parseTuiCommand("/actions"), { name: "actions", argument: "" });
+  assert.deepEqual(
+    parseTuiCommand("/model\nkeep this draft"),
+    { name: "model", argument: "", draft: "keep this draft" },
+  );
+  assert.deepEqual(
+    parseTuiCommand("/effort high --session\r\nstill drafting"),
+    { name: "effort", argument: "high --session", draft: "still drafting" },
+  );
   assert.equal(parseTuiCommand("fix the bug"), undefined);
   const helpZh = commandHelp(undefined, "zh");
   assert.ok(helpZh.some((line) => line.includes("键盘快捷键")));
@@ -1718,6 +1727,7 @@ test("renderPanel exposes config for temporary panels", () => {
     provider: "fake",
     model: "panel-v1",
     capabilities: ["write"],
+    disabledCapabilities: ["verify", "network", "execute", "background", "delegate"],
     contextWindowTokens: 80_000,
     contextBudgetTokens: 64_000,
     outputReserveTokens: 16_000,
@@ -1728,7 +1738,10 @@ test("renderPanel exposes config for temporary panels", () => {
   const lines = presenter.renderPanel("config").join("\n");
   assert.match(lines, /Effective configuration/);
   assert.match(lines, /fake\/panel-v1/);
-  assert.match(presenter.renderWelcome(80).join("\n"), /QI|栖/);
+  const welcome = presenter.renderWelcome(80).join("\n");
+  assert.match(welcome, /QI|栖/);
+  assert.match(welcome, /Permissions enabled:  read, write/);
+  assert.match(welcome, /Permissions disabled: verify, network, execute, background, delegate/);
 });
 
 test("context panel shows ContextBlock kind shares, counts, and omitted tokens", () => {
@@ -2031,7 +2044,10 @@ test("background ProcessTasks remain visible after their Run and can be stopped 
     assert.equal(task?.command, process.execPath);
     await waitUntil(() => activities.some((activity) => activity.type === "task.output"));
     assert.doesNotMatch(JSON.stringify(activities), new RegExp(taskSecret));
-    const taskLog = join(root, ".qi", "tasks", `${task.taskId}.log`);
+    const taskLog = join(
+      projectSessionPaths(projectPaths({ workspaceRoot: root, dataRoot: join(root, ".qi") }), runtime.sessionId).tasksRoot,
+      `${task.taskId}.log`,
+    );
     await waitUntil(async () => {
       try { return (await readFile(taskLog, "utf8")).includes("REDACTED"); }
       catch { return false; }

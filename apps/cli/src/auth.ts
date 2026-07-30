@@ -43,6 +43,7 @@ export interface AuthSessionStatus {
   readonly contextWindowTokens: number;
   readonly contextWindowTokensOverride: boolean;
   readonly baseURL?: string;
+  readonly imageInput: boolean;
 }
 
 export interface LoginRoutingOptions {
@@ -133,6 +134,11 @@ export class AuthSession {
         : providerModelContextTokens(this.#config.profile, this.#config.model),
       contextWindowTokensOverride: this.#contextWindowTokensOverride,
       ...(this.#config.baseURL === undefined ? {} : { baseURL: this.#config.baseURL }),
+      imageInput: (
+        getProviderModelProfile(this.#config.profile, this.#config.model)?.inputModalities
+        ?? this.#config.profile.inputModalities
+      )?.includes("image") === true
+        || this.#config.imageInput === true,
     };
   }
 
@@ -218,6 +224,9 @@ export class AuthSession {
         ...(contextWindowTokens === undefined
           ? {}
           : { contextWindowTokens: String(contextWindowTokens) }),
+        ...(provider === "compatible"
+          ? { imageInput: String(options.imageInput === true) }
+          : {}),
       },
     });
     const { reasoningEffort: _previousEffort, imageInput: _previousImageInput, ...previousConfig } = this.#config;
@@ -252,6 +261,7 @@ export class AuthSession {
     provider: string,
     alias: string,
     routing?: Omit<LoginRoutingOptions, "alias">,
+    persistence: "account" | "session" = "account",
   ): Promise<AuthSessionStatus> {
     const normalizedAlias = normalizeAccountAlias(alias);
     const profile = requireProviderProfile(provider);
@@ -298,33 +308,40 @@ export class AuthSession {
     }
     const metadataModel = optionalNonEmpty(stored.metadata?.model);
     const metadataBase = optionalNonEmpty(stored.metadata?.baseURL);
+    const storedImageInput = stored.metadata?.imageInput === "true";
     if (
       metadataModel !== model ||
       metadataBase !== baseURL ||
       optionalNonEmpty(stored.metadata?.reasoningEffort) !== reasoningEffort ||
-      optionalStoredInteger(stored.metadata?.contextWindowTokens) !== contextWindowTokens
+      optionalStoredInteger(stored.metadata?.contextWindowTokens) !== contextWindowTokens ||
+      (provider === "compatible" && storedImageInput !== (routing?.imageInput ?? storedImageInput))
     ) {
       const {
         reasoningEffort: _storedEffort,
         contextWindowTokens: _storedContext,
         ...storedMetadata
       } = stored.metadata ?? {};
-      await this.#store.set({
-        ...stored,
-        secret,
-        metadata: {
-          ...storedMetadata,
-          model,
-          baseURL,
-          ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-          ...(contextWindowTokens === undefined
-            ? {}
-            : { contextWindowTokens: String(contextWindowTokens) }),
-        },
-      });
+      if (persistence === "account") {
+        await this.#store.set({
+          ...stored,
+          secret,
+          metadata: {
+            ...storedMetadata,
+            model,
+            baseURL,
+            ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+            ...(contextWindowTokens === undefined
+              ? {}
+              : { contextWindowTokens: String(contextWindowTokens) }),
+            ...(provider === "compatible"
+              ? { imageInput: String(routing?.imageInput ?? storedImageInput) }
+              : {}),
+          },
+        });
+      }
     }
     const imageInput = provider === "compatible"
-      ? routing?.imageInput ?? (
+      ? routing?.imageInput ?? storedImageInput ?? (
           provider === this.#config.provider && this.#config.accountAlias === normalizedAlias
             ? this.#config.imageInput
             : false

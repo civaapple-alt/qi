@@ -455,6 +455,50 @@ content-addressed puts conflict inside one Step.
   same-Step Artifact puts, same-digest resource identity, permission-safe Work Plan presentation, and replay of
   existing Sessions whose Artifact Actions used the legacy coarse resource.
 
+## ADR-0030: make Session directories the movable persistence boundary
+
+Pressure: project-wide event, Effect, Artifact, Plan, and ProcessTask stores make a Session impossible to archive
+without copying selected rows and recursively discovering shared files. They also let stale Session projections
+remain visible after an operator asks to reset a Workspace's conversational state.
+
+- Each active Session owns one directory under `projects/<project>/sessions/<session-id>` containing its event
+  database, Effect Journal, Artifacts, Formal Plans, and ProcessTask logs. Archived Sessions use the identical
+  self-contained layout under `archives/<session-id>`.
+- The append-only stream records `archive.requested`, `archived`, `restore.requested`, and `restored` lifecycle
+  facts. Node owns verified, same-volume directory moves and a recoverable project operation journal; neither
+  storage location nor an index silently substitutes for Session truth.
+- Archive is denied unless Runs, Actions, Questions, Delegations, ProcessTasks, and Watchers are settled. Pending
+  and archived Sessions reject ordinary events. Restore validates the archive manifest before making it active.
+- Project Memory and Session catalogs remain rebuildable projections over active Session streams. User
+  continuity, policy, installed packages, credentials, and caches are project- or user-owned and do not move.
+- `/reset-workspace` archives the complete preflighted active set and creates a new Session. It is recoverable and
+  reversible; it is not deletion.
+- Project layout compatibility is intentionally broken. A versioned legacy project layout is rejected with a
+  backup/new-data-root instruction; Qi neither guesses ownership in shared stores nor deletes old data.
+- Rejected alternatives are an `archived` flag in one shared database, best-effort file copying, automatic
+  cancellation of unsettled effects, and treating a rebuildable catalog as the lifecycle authority.
+- Required evidence covers isolation, lifecycle denial, manifest validation, move interruption recovery,
+  reset preflight atomicity, restore replay, protected-path enforcement, and active-only Memory rebuilding.
+
+## ADR-0031: preserve composer drafts across local slash controls
+
+Pressure: invoking a local control such as model selection currently clears an already-written prompt, while
+`@` completion is wired without a usable discovery executable and has machine-dependent fallback behavior.
+
+- A recognized slash command occupies the first logical editor line. Commands declare whether following text is
+  preserved, consumed, or rejected. Completing a draft-preserving command at the start of existing text inserts
+  a newline; the local control consumes only its first line and restores the suffix and cursor.
+- `@` mentions resolve to validated Workspace-relative file or directory text. Completion is bounded, has one
+  deterministic ignore/protected-path policy with or without `fd`, never crosses mounts or symlinks, and never
+  injects file bytes into model input.
+- Sealed provider credentials and model routing are separate. Model, supported reasoning effort, context limit,
+  and compatible-endpoint image opt-in may be updated without exposing or re-entering a secret. Endpoint changes
+  still require credential rebinding.
+- Startup surfaces disclose the complete effective capability partition as enabled and disabled; the compact
+  status line remains unchanged.
+- Required evidence covers draft/cursor preservation, mention validation and fallback parity, profile-bounded
+  model changes without secret access, and capability display after all configuration precedence is applied.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

@@ -511,6 +511,48 @@ test("parseLoginCommand distinguishes status, logout, device, and API key modes"
   );
 });
 
+test("sealed compatible account reconfigures model and image input without re-entering its key", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-login-reconfigure-"));
+  try {
+    const store = new EncryptedFileCredentialStore(root);
+    const auth = await AuthSession.create({
+      config: resolveProviderConfig({
+        provider: "compatible",
+        accountAlias: "local",
+        model: "before",
+        baseURL: "https://models.example/v1",
+        allowMissingCredential: true,
+        environment: {},
+      }),
+      store,
+    });
+    await auth.loginApiKey("compatible", "sealed-secret", {
+      alias: "local",
+      model: "before",
+      baseURL: "https://models.example/v1",
+      imageInput: false,
+    });
+    const temporary = await auth.useAccount("compatible", "local", {
+      model: "temporary",
+      imageInput: true,
+    }, "session");
+    assert.equal(temporary.model, "temporary");
+    assert.equal(temporary.imageInput, true);
+    assert.equal((await store.get("compatible:local"))?.metadata?.model, "before");
+
+    const saved = await auth.useAccount("compatible", "local", {
+      model: "after",
+      imageInput: true,
+    });
+    assert.equal(saved.model, "after");
+    assert.equal(saved.imageInput, true);
+    assert.equal((await store.get("compatible:local"))?.metadata?.model, "after");
+    assert.equal((await store.get("compatible:local"))?.metadata?.imageInput, "true");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("requestKimiDeviceAuthorization uses the public client id", async () => {
   const seen = [];
   const transport = {

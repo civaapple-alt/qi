@@ -8,6 +8,7 @@ import {
   assertSafePrivateRoot,
   discoverProjects,
   ensureProjectLayout,
+  projectSessionPaths,
   ensureQiLayout,
   projectPaths,
   workspaceProjectId,
@@ -26,7 +27,7 @@ test("project IDs normalize Windows and POSIX paths without slug collisions", ()
   );
 });
 
-test("0.6 initializes the private QI_HOME and project state layout", async () => {
+test("0.7 initializes the private QI_HOME and Session-first project layout", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-layout-"));
   try {
     const workspace = join(root, "workspace");
@@ -39,10 +40,13 @@ test("0.6 initializes the private QI_HOME and project state layout", async () =>
     await ensureProjectLayout(paths);
     const layout = JSON.parse(await readFile(join(qiHome, "layout.json"), "utf8"));
     assert.equal(layout.generation, QI_LAYOUT_GENERATION);
-    assert.equal(paths.databaseFile, join(paths.root, "state", "qi.sqlite"));
-    assert.equal(paths.effectsFile, join(paths.root, "state", "effects.sqlite"));
+    const session = projectSessionPaths(paths, "ses_layout_001");
+    assert.equal(session.databaseFile, join(paths.root, "sessions", "ses_layout_001", "state", "qi.sqlite"));
+    assert.equal(session.effectsFile, join(paths.root, "sessions", "ses_layout_001", "state", "effects.sqlite"));
+    assert.equal(paths.archivesRoot, join(paths.root, "archives"));
     assert.equal(paths.policyFile, join(paths.root, "policy.toml"));
     const descriptor = JSON.parse(await readFile(paths.projectFile, "utf8"));
+    assert.equal(descriptor.schemaVersion, 2);
     assert.equal(descriptor.projectId, paths.projectId);
     assert.equal(descriptor.workspaceRoot, paths.workspaceRoot);
     const discovered = await discoverProjects(qiHome);
@@ -61,6 +65,31 @@ test("pre-0.6 QI_HOME is rejected without migration or deletion", async () => {
       /unsupported pre-0\.6 layout.*will not migrate or delete/i,
     );
     assert.equal(await readFile(join(root, "credentials.key"), "utf8"), "old");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy shared-Session project layout is rejected without deleting it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-project-layout-legacy-"));
+  try {
+    const workspace = join(root, "workspace");
+    const qiHome = join(root, "home");
+    await mkdir(workspace);
+    const paths = projectPaths({ workspaceRoot: workspace, environment: { QI_HOME: qiHome } });
+    await ensureQiLayout(qiHome, { workspaceRoot: workspace });
+    await mkdir(join(paths.root, "state"), { recursive: true });
+    await writeFile(join(paths.root, "state", "qi.sqlite"), "legacy");
+    await writeFile(paths.projectFile, JSON.stringify({
+      schemaVersion: 1,
+      projectId: paths.projectId,
+      workspaceRoot: paths.workspaceRoot,
+    }));
+    await assert.rejects(
+      () => ensureProjectLayout(paths),
+      /unsupported shared Session layout.*will not migrate or delete/i,
+    );
+    assert.equal(await readFile(join(paths.root, "state", "qi.sqlite"), "utf8"), "legacy");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

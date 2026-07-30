@@ -36,6 +36,9 @@ const messages = {
     "cmd.permissions": "选择项目能力授权（空格多选，写入 project config）",
     "cmd.verify": "扫描 package.json/pom.xml/AGENTS.md/README.md 中的验证命令候选，人工确认后写入 .qi/qi.verify.json",
     "cmd.sessions": "列出本 Workspace 的 Session；搜索并恢复",
+    "cmd.reset-workspace": "将全部活跃 Session 硬归档并创建新 Session",
+    "cmd.model": "切换模型；默认保存到账户，--session 仅当前 Session",
+    "cmd.effort": "切换模型思考等级；默认保存到账户",
     "cmd.quit": "取消进行中的工作并退出",
 
     "help.title.shortcuts": "键盘快捷键",
@@ -222,7 +225,7 @@ const messages = {
     "runs.list.empty.agents": "当前 Run 没有 Subagent。",
 
     "sessions.title": "Sessions  (输入搜索)",
-    "sessions.hints": "↑↓ 选择 · Enter 确认 · Esc 取消",
+    "sessions.hints": "Tab Active/Archived · ↑↓ 选择 · Enter 恢复/切换 · a 归档 · Esc 取消",
     "sessions.empty": "没有匹配的 Session。",
     "sessions.current": "← current",
     "sessions.new": "New Session",
@@ -263,6 +266,9 @@ const messages = {
     "cmd.permissions": "Select project capability grants (Space multi-select; writes project config)",
     "cmd.verify": "Scan package.json/pom.xml/AGENTS.md/README.md for verification command candidates and write .qi/qi.verify.json after human confirmation",
     "cmd.sessions": "List Sessions in this Workspace; search and resume",
+    "cmd.reset-workspace": "Archive every active Session and create a new Session",
+    "cmd.model": "Switch model; saves to the account unless --session is used",
+    "cmd.effort": "Switch model reasoning effort; saves to the account by default",
     "cmd.quit": "Cancel active work and exit",
 
     "help.title.shortcuts": "Keyboard shortcuts",
@@ -449,7 +455,7 @@ const messages = {
     "runs.list.empty.agents": "The selected Run has no Subagents.",
 
     "sessions.title": "Sessions  (type to search)",
-    "sessions.hints": "↑↓ navigate · Enter select · Esc cancel",
+    "sessions.hints": "Tab Active/Archived · ↑↓ navigate · Enter restore/resume · a archive · Esc cancel",
     "sessions.empty": "No matching sessions.",
     "sessions.current": "← current",
     "sessions.new": "New Session",
