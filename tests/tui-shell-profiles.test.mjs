@@ -34,7 +34,12 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
     assert.match(directPrompt, new RegExp(`platform=.*${process.platform}`));
     assert.match(directPrompt, /bash=disallowed/);
     assert.match(directPrompt, /does not interpret pipes/);
+    assert.match(directPrompt, /Do not request more than one shell or script Action/);
+    assert.match(directPrompt, /BATCH_WRITE_CONFLICT/);
     assert.match(directPrompt, /do not repeat the same unsupported assumption/);
+    const shellDescription = directModel.requests[0].tools.find((tool) => tool.name === "shell")?.description ?? "";
+    assert.match(shellDescription, /BATCH_WRITE_CONFLICT/);
+    assert.match(shellDescription, /one authorized script Action/);
     if (process.platform === "win32") {
       assert.match(directPrompt, /Do not attempt POSIX-only bash, lsof, xargs/);
     }
@@ -57,6 +62,14 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
     assert.equal(scriptTools.includes("shell"), true);
     if (scriptRuntime.shellProfiles.available.length > 0) {
       assert.equal(scriptTools.includes("script"), true);
+      const scriptPrompt = scriptModel.requests[0].messages
+        .flatMap((message) => message.content)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+      assert.match(scriptPrompt, /probe multiple host tools or run chained statements in one script Action/);
+      const scriptDescription = scriptModel.requests[0].tools.find((tool) => tool.name === "script")?.description ?? "";
+      assert.match(scriptDescription, /probe multiple host tools/);
     } else {
       assert.equal(scriptTools.includes("script"), false);
     }

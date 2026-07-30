@@ -90,6 +90,7 @@ import { SqliteEffectJournal } from "@civaapple/qi-node/workspace";
 import { createCodeActTool } from "./codeact-tool.js";
 import { createAskQuestionTool, RunQuestionCoordinator } from "./ask-question-tool.js";
 import type { QiCapabilityConfig, QiImageConfig, QiShellConfig } from "./config.js";
+import { defaultUserConfigPath, persistUserShell } from "./config.js";
 import { createDelegateTool } from "./delegate-tool.js";
 import { defaultProjectConfigPath } from "./paths.js";
 import {
@@ -217,7 +218,7 @@ export class TuiRuntime {
   readonly #userMemory: MemoryController;
   readonly #userMemoryStore: SqliteEventStore;
   readonly #projectConfigPath: string;
-  readonly #shellConfig: QiShellConfig | undefined;
+  #shellConfig: QiShellConfig | undefined;
   #verificationManifest: TuiVerificationManifest | undefined;
   #shellProfiles: ShellProfileSnapshot;
   #codeactRuntime: "docker" | "podman" | undefined;
@@ -591,6 +592,55 @@ export class TuiRuntime {
     this.#allowBackground = normalized.background;
     this.#allowDelegate = normalized.delegate;
     return { labels: this.capabilityLabels(), capabilities: normalized };
+  }
+
+  /**
+   * Hot-apply user-global shell profiles: persist to `$QI_HOME/config.toml`, re-probe, and refresh
+   * shell/script tools + execute leases without restarting the CLI.
+   */
+  async applyShellConfig(
+    shell: QiShellConfig,
+    options?: { persist?: boolean; configPath?: string },
+  ): Promise<ShellProfileSnapshot> {
+    if (this.active) throw new Error("Cannot change shell profiles while a Run is active");
+    if (!shell.allowed || shell.allowed.length === 0) {
+      throw new TypeError("shell.allowed must contain at least one profile");
+    }
+    const defaultProfile = shell.default
+      ?? (shell.allowed.includes("direct") ? "direct" : shell.allowed[0]!);
+    if (!shell.allowed.includes(defaultProfile)) {
+      throw new TypeError(`shell.default ${defaultProfile} must be listed in shell.allowed`);
+    }
+    const normalized: QiShellConfig = {
+      default: defaultProfile,
+      allowed: [...shell.allowed],
+    };
+    if (options?.persist !== false) {
+      await persistUserShell(normalized, options?.configPath ?? defaultUserConfigPath());
+    }
+    this.#shellConfig = normalized;
+    const capabilities: Required<QiCapabilityConfig> = {
+      write: this.#allowWrite,
+      verify: this.#allowVerify,
+      network: this.#allowNetwork,
+      execute: this.#allowExecute,
+      background: this.#allowBackground,
+      delegate: this.#allowDelegate,
+    };
+    await this.#syncOptionalTools(capabilities);
+    for (const leaseId of OPTIONAL_LEASE_IDS) this.#broker.revoke(leaseId);
+    grantOptionalRuntimeLeases(
+      this.#broker,
+      this.#subject,
+      capabilities.write,
+      this.#verificationProfiles,
+      this.#shellProfiles,
+      this.#codeactRuntime,
+      capabilities.network,
+      capabilities.background,
+      capabilities.delegate,
+    );
+    return this.#shellProfiles;
   }
 
   /** Scan package manifests plus AGENTS.md/README.md for candidate verification commands; writes nothing. */
@@ -1771,10 +1821,13 @@ async function buildTuiContextBlocks(
   const scriptNames = shellProfiles.available.map((profile) => profile.id);
   const executionGuidance = [
     ...(shellProfiles.directEnabled
-      ? ["shell only for finite direct executable+argv commands when that profile is authorized"]
+      ? ["shell only for one finite direct executable+argv command per workdir per Step when that profile is authorized"]
       : []),
     ...(scriptNames.length > 0
-      ? [`script for explicit ${scriptNames.join("/")} profile scripts when those profiles were authorized and probed`]
+      ? [
+        `script for one ${scriptNames.join("/")} profile script per workdir per Step when authorized and probed ` +
+          "(prefer one script to probe multiple host tools or chain statements; never batch multiple shells for the same workdir)",
+      ]
       : []),
     ...(codeactRuntime
       ? [`codeact only for compact multi-step coordination logic (async function main(api)) that runs isolated in a network-off ${codeactRuntime} container, whose nested api.call tool calls still require normal authorization`]
@@ -1820,7 +1873,7 @@ async function buildTuiContextBlocks(
       source: "qi:host-environment",
       role: "system",
       content:
-        `Host execution facts: platform=${hostPlatform}; shell profiles: ${profileFacts}. The shell tool executes one direct executable plus argv and does not interpret pipes, redirection, command chaining, variable expansion, or shell builtins. The script tool accepts only these currently probed profiles: ${availableProfiles.length > 0 ? availableProfiles.join(", ") : "none"}. ${platformGuidance} Treat a missing executable or unavailable-profile ToolFailure as an environment fact for the remainder of the Run: change approach and do not repeat the same unsupported assumption unless new probe evidence appears. These facts are regenerated from startup probes for every Run, so they take precedence over remembered shell assumptions from earlier conversations.`,
+        `Host execution facts: platform=${hostPlatform}; shell profiles: ${profileFacts}. The shell tool executes one direct executable plus argv and does not interpret pipes, redirection, command chaining, variable expansion, or shell builtins. The script tool accepts only these currently probed profiles: ${availableProfiles.length > 0 ? availableProfiles.join(", ") : "none"}. Do not request more than one shell or script Action targeting the same workdir in a single Step; same-Step host-workspace/shell-profile overlap fails with BATCH_WRITE_CONFLICT. When a script profile is available, probe multiple host tools or run chained statements in one script Action rather than multiple shells. ${platformGuidance} Treat a missing executable or unavailable-profile ToolFailure as an environment fact for the remainder of the Run: change approach and do not repeat the same unsupported assumption unless new probe evidence appears. These facts are regenerated from startup probes for every Run, so they take precedence over remembered shell assumptions from earlier conversations.`,
       priority: 98,
       required: true,
       retentionReason: "Probed host execution environment",

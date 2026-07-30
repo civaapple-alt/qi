@@ -3,6 +3,7 @@ import { providerModelContextTokens } from "@civaapple/qi-ai";
 import { SessionIdSchema, assertSchema, type SessionId } from "@civaapple/qi-protocol";
 import {
   defaultUserConfigPath,
+  ensureUserShellConfig,
   findCompatibleEndpoint,
   loadUserConfig,
   resolveLanguage,
@@ -15,7 +16,6 @@ import {
   assertMountPathAllowed,
   loadProjectConfig,
   mergeCapabilities,
-  mergeShell,
   projectConfigPathForWorkspace,
   suggestMountId,
   type ProjectMountConfig,
@@ -162,9 +162,6 @@ export async function parseTuiCliArguments(
     ...capabilityOverride(flags, "delegate"),
   };
   const configuredPath = values.get("--config") ?? defaultUserConfigPath();
-  const loaded = flags.has("--no-config")
-    ? { path: configuredPath, exists: false, config: { version: 1 as const } }
-    : await loadUserConfig(configuredPath);
   if (positionalWorkspace !== undefined && values.has("--workspace")) {
     throw new TypeError("Pass WORKSPACE as a positional path or --workspace, not both");
   }
@@ -172,12 +169,16 @@ export async function parseTuiCliArguments(
   const environment = options.environment ?? process.env;
   // Bare `qi` uses the current directory; `--workspace` / positional path override.
   const workspaceRoot = resolve(cwd, values.get("--workspace") ?? positionalWorkspace ?? ".");
+  const loaded = flags.has("--no-config")
+    ? { path: configuredPath, exists: false, config: { version: 1 as const } }
+    : await ensureUserShellConfig(workspaceRoot, configuredPath);
   const projectConfigPath = projectConfigPathForWorkspace(workspaceRoot, environment);
   const project = flags.has("--no-config")
     ? { path: projectConfigPath, exists: false, config: { version: 1 as const } }
     : await loadProjectConfig(projectConfigPath);
   const capabilities = mergeCapabilities(loaded.config.capabilities, project.config.capabilities, overrides);
-  const shell = mergeShell(loaded.config.shell, project.config.shell);
+  // Shell profiles are user-global only ($QI_HOME/config.toml); project policy.toml [shell] is ignored.
+  const shell = loaded.config.shell;
   const dataRoot = values.has("--data")
     ? resolve(cwd, values.get("--data")!)
     : defaultSessionDataRoot(workspaceRoot, environment);
@@ -281,15 +282,16 @@ export async function refreshLaunchCapabilities(
     };
   }
   const loaded = options.configPath
-    ? await loadUserConfig(options.configPath)
-    : await loadUserConfig(defaultUserConfigPath(environment));
+    ? await ensureUserShellConfig(options.workspaceRoot, options.configPath)
+    : await ensureUserShellConfig(options.workspaceRoot, defaultUserConfigPath(environment));
   const project = await loadProjectConfig(projectConfigPath);
   const caps = mergeCapabilities(
     loaded.config.capabilities,
     project.config.capabilities,
     options.capabilityOverrides,
   );
-  const shell = mergeShell(loaded.config.shell, project.config.shell);
+  // Shell profiles are user-global only; project policy.toml [shell] is ignored.
+  const shell = loaded.config.shell;
   return {
     ...caps,
     projectConfigPath,

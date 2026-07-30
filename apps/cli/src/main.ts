@@ -268,7 +268,7 @@ async function main(): Promise<void> {
         ? []
         : [`verify ${runtime.verificationManifest.origin} ${runtime.verificationManifest.path} · ${runtime.verificationManifest.profiles.join(", ")}`]),
       ...(presenter.discoveryTip() === undefined ? [] : [presenter.discoveryTip()!]),
-      "commands /help · /settings · /memory · /login · /ask · /mode · /plan · /model · /effort · /next · /tasks · /skills · /mounts · /permissions · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
+      "commands /help · /settings · /memory · /login · /ask · /mode · /plan · /model · /effort · /next · /tasks · /skills · /mounts · /permissions · /shell · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
       "",
     ].join("\n"),
   );
@@ -285,7 +285,7 @@ async function main(): Promise<void> {
       return;
     }
     const command = isSingleLine ? parseTuiCommand(line) : undefined;
-    if (command?.name === "quit") {
+    if (command?.name === "quit" || command?.name === "exit") {
       closing = true;
       runtime?.cancel("User quit");
       readline.close();

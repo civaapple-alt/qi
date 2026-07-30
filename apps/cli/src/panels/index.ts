@@ -13,6 +13,7 @@ export {
   openModelConfigurationPanel,
   openMountsPanel,
   openPermissionsPanel,
+  openShellPanel,
   openProvidersPanel,
   openRunsHubPanel,
   openSessionsPanel,

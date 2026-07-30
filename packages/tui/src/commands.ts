@@ -69,6 +69,7 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "tasks", descriptionKey: "cmd.tasks", argumentHint: "[stop <N|ID>]", category: "inspect", visibility: "primary", panel: "tasks" },
   { name: "mounts", descriptionKey: "cmd.mounts", argumentHint: "[add <path>|unmount <id>]", category: "inspect", visibility: "primary" },
   { name: "permissions", descriptionKey: "cmd.permissions", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
+  { name: "shell", descriptionKey: "cmd.shell", category: "manage", visibility: "primary", draftPolicy: "preserve" },
   { name: "verify", descriptionKey: "cmd.verify", category: "inspect", visibility: "primary" },
   { name: "runs", descriptionKey: "cmd.runs", category: "navigate", visibility: "primary", panel: "runs" },
   { name: "sessions", descriptionKey: "cmd.sessions", category: "navigate", visibility: "primary", draftPolicy: "preserve" },
@@ -88,6 +89,7 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "task", descriptionKey: "cmd.task", argumentHint: "stop <N|ID>", category: "manage", visibility: "alias" },
   { name: "add-dir", descriptionKey: "cmd.add-dir", argumentHint: "<path>", category: "control", visibility: "alias" },
   { name: "unmount", descriptionKey: "cmd.unmount", argumentHint: "<id>", category: "control", visibility: "alias" },
+  { name: "exit", descriptionKey: "cmd.exit", category: "control", visibility: "alias" },
   { name: "steps", descriptionKey: "cmd.steps", category: "navigate", visibility: "alias", panel: "steps" },
   { name: "actions", descriptionKey: "cmd.actions", category: "navigate", visibility: "alias", panel: "actions" },
   { name: "agents", descriptionKey: "cmd.agents", category: "navigate", visibility: "alias", panel: "agents" },
@@ -122,6 +124,7 @@ export function autocompleteSlashCommands(locale: Locale = defaultLocale()): rea
           || command.name === "config"
           || command.name === "context"
           || command.name === "providers"
+          || command.name === "exit"
         )))
       .map((command) => toSlashCommand(command, locale)),
   );

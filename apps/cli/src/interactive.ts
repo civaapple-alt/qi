@@ -66,6 +66,7 @@ import {
   openModelConfigurationPanel,
   openMountsPanel,
   openPermissionsPanel,
+  openShellPanel,
   openProvidersPanel,
   openRunsHubPanel,
   openSessionsPanel,
@@ -1289,6 +1290,27 @@ export class InteractiveTui {
     }, "Permissions");
   }
 
+  #saveShell(shell: import("./config.js").QiShellConfig): void {
+    if (this.#runtime.active) {
+      this.#presenter.setNotice("Cannot change shell profiles while a Run is active.");
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const configPath = this.#presenter.launch.configPath ?? defaultUserConfigPath();
+      const snapshot = await this.#runtime.applyShellConfig(shell, { configPath });
+      this.#presenter.launch = {
+        ...this.#presenter.launch,
+        shell: snapshot,
+      };
+      this.#presenter.setNotice(
+        t(this.#presenter.locale(), "shell.saved", {
+          profiles: snapshot.allowed.join(", "),
+        }),
+      );
+    }, "Shell");
+  }
+
   #installSkill(source: string, scope: "user" | "workspace"): void {
     if (this.#runtime.active) {
       this.#presenter.setNotice("Cannot install a Skill while a Run is active.");
@@ -1480,6 +1502,7 @@ export class InteractiveTui {
       removeMount: (mountId) => this.#removeMountById(mountId),
       effectiveCapabilities: () => capabilityIdsFromLaunchLabels(this.#runtime.capabilityLabels()),
       saveCapabilities: (capabilities) => this.#saveCapabilities(capabilities),
+      saveShell: (shell) => this.#saveShell(shell),
       applyVerificationSetup: (selected) => this.#applyVerificationSetup(selected),
       installSkill: (source, scope) => this.#installSkill(source, scope),
       listTasks: () => this.#runtime.tasks(),
@@ -1863,7 +1886,7 @@ export class InteractiveTui {
   }
 
   #handleCommand(name: string, argument: string): void {
-    if (this.#panels.open && name !== "quit" && name !== "cancel") {
+    if (this.#panels.open && name !== "quit" && name !== "exit" && name !== "cancel") {
       this.#panels.closeAll();
     }
     if (name === "settings") {
@@ -2272,11 +2295,16 @@ export class InteractiveTui {
         openPermissionsPanel(this.#panelFlow());
         return;
       }
+      case "shell": {
+        openShellPanel(this.#panelFlow());
+        return;
+      }
       case "verify": {
         this.#openVerifySetupPanel();
         return;
       }
       case "quit":
+      case "exit":
         void this.close();
         return;
       default:

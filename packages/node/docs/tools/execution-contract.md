@@ -119,7 +119,13 @@ Authorized script profiles (`pwsh`, `cmd`, `bash`) are a separate `script` tool.
 `shell-profile:<name>` resources, are probed at runtime startup, and never replace `shell` based on command text.
 `pwsh` runs with `-NoLogo -NoProfile -NonInteractive` and receives the script on stdin; `bash` uses
 `--noprofile --norc -s`; `cmd` runs a temporary script through the trusted system processor. Profile scripts inherit
-a credential-scrubbed environment and terminate process trees on timeout or cancel. Host-process environments
+a credential-scrubbed environment and terminate process trees on timeout or cancel. Prefer one `script` Action to
+probe multiple host tools or run multi-statement logic. Do not request more than one `shell` or `script` Action
+targeting the same `workdir` in a single Step: both declare `host-workspace:<workdir>` (and `shell` also declares
+`shell-profile:direct`), so a later same-Step overlap fails closed as `BATCH_WRITE_CONFLICT`.
+Allowed profiles are configured only in `$QI_HOME/config.toml` (first-run auto-detect writes installed candidates;
+`/shell` hot-applies without restart). Project `policy.toml` `[shell]` is ignored.
+Host-process environments
 also drop npm's lifecycle-exported `npm_config_allow_scripts`: when Qi itself starts through `npm run qi`, that
 ambient value must not become an explicit CLI/environment policy for a nested project-scoped `npm install`.
 Nested npm processes continue to read ordinary project, user, and global configuration files.

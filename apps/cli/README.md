@@ -66,7 +66,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | Command | Purpose |
 | --- | --- |
 | `/help [command\|advanced]` | Shortcuts + common commands; `advanced` lists aliases |
-| `/settings` | Settings hub: mode, **permissions**, providers, config, context, theme, language, **timeline density**, status |
+| `/settings` | Settings hub: mode, **permissions**, **shell**, providers, config, context, theme, language, **timeline density**, status |
 | `/memory [list\|remember\|accept\|correct\|forget\|promote\|pin\|unpin]` | Inspect actual Run injection, pending candidates, Project/User boundaries and provenance; explicitly manage the full Memory lifecycle |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
@@ -77,6 +77,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/tasks [stop …]` | Interactive background-task list; select a running task and press Enter to stop it |
 | `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path form) / unmount (picker); slash args still work |
 | `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `policy.toml`) |
+| `/shell` | Select global shell profiles (`direct` / `pwsh` / `cmd` / `bash`; applies immediately and writes `$QI_HOME/config.toml`) |
 | `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
 | `/runs` | Session history hub → interactive Runs / Steps / Actions / Agents lists (Enter selects observation) |
 | `/sessions` | Active/Archived Session list; type-to-search; Enter resumes or restores; `a` archives (with confirm) |
@@ -95,7 +96,7 @@ send-now (promote to front), Esc to cancel; after the Run ends, Qi starts the ne
 Slash commands and `/steer` are unchanged.
 
 Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, `/status`, `/providers`,
-`/add-dir`, `/unmount`, `/skill`, `/task`, `/steps`, `/actions`, `/agents`, plus unimplemented `/coord` `/work`
+`/add-dir`, `/unmount`, `/skill`, `/task`, `/exit`, `/steps`, `/actions`, `/agents`, plus unimplemented `/coord` `/work`
 `/gate` `/extensions`.
 
 UI language defaults to Chinese. Set `language = "zh"` or `language = "en"` in `~/.qi/config.toml`, or
@@ -132,7 +133,7 @@ Agent replies (narration before tools when the model requested Actions), and a l
 `rg` / `fd`; when missing, a dim Tip / 提示 recommends installing them (Node fallback remains active). After
 `开始实现`, Plan Todo
 (`✔` / `◐` / `○`) appears in the chat transcript (not sticky above the composer). Primary slash inspect commands
-(`/settings`, `/plan`, `/skills`, `/tasks`, `/mounts`, `/permissions`, `/runs`, `/sessions`, `/help`) open temporary panels over the
+(`/settings`, `/plan`, `/skills`, `/tasks`, `/mounts`, `/permissions`, `/shell`, `/runs`, `/sessions`, `/help`) open temporary panels over the
 composer (Esc closes / pops a level); they do not write Session events or append into the chat timeline, and
 dismissing them does not cancel an active Run or Subagent. Unknown slash commands keep the chat open and show a
 short notice (they do not open `/help`). When a Run fails with `INVALID_MODEL_ACTION` because the model called an
@@ -227,15 +228,19 @@ live Session. Mount and sensitive-path events are audit facts. Before a
 Run, the runtime reconciles additions, removals, and changed mount identities into the Session
 ([ADR 0015](../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts)).
 
-When host execute is enabled, `[shell]` in user or project TOML selects profiles. `direct` keeps the argv `shell`
-tool; `pwsh`, `cmd`, and `bash` are probed at startup and, when available, expose a separate `script` tool.
+When host execute is enabled, `[shell]` in **`$QI_HOME/config.toml`** (or `QI_CONFIG`) selects profiles.
+`direct` keeps the argv `shell` tool; `pwsh`, `cmd`, and `bash` are probed and, when allowed and available,
+expose a separate `script` tool. Project `policy.toml` `[shell]` is ignored. On first launch without `[shell]`,
+Qi probes platform-installed profiles and writes defaults (`direct` plus installed candidates) into the user
+config. `/shell` (also under `/settings`) multi-selects profiles and hot-applies them without restarting.
 `/config` shows default/allowed profiles, resolved executables, versions, and unavailable reasons. Profiles are
 never chosen from command text. Every Run receives a required host-environment block containing the detected
 platform and the available/disallowed profile facts. Direct `shell` is described explicitly as executable plus
-argv, without pipes or redirection; on Windows the block warns against POSIX-only
-`bash`/`lsof`/`xargs` assumptions. A missing executable or unavailable profile becomes a fact for the rest of
-that Run, so the model must change approach instead of repeating the same assumption. The same `execute` grant
-also probes for a responding `docker` or `podman`
+argv, without pipes or redirection; models are told to use at most one `shell`/`script` per workdir per Step and
+to probe multiple host tools in one `script` Action when a profile is available. On Windows the block warns against
+POSIX-only `bash`/`lsof`/`xargs` assumptions. A missing executable or unavailable profile becomes a fact for the
+rest of that Run, so the model must change approach instead of repeating the same assumption. The same `execute`
+grant also probes for a responding `docker` or `podman`
 runtime at startup and, only when one responds, exposes a `codeact` tool that runs a short generated program in a
 network-off, read-only-root container; its nested tool calls still pass through normal authorization and Session
 events, and it can never call `codeact` or `delegate` itself.

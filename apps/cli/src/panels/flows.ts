@@ -4,6 +4,7 @@ import {
   type ProviderProfile,
 } from "@civaapple/qi-ai";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
+import { SHELL_PROFILE_IDS, type ShellProfileId } from "@civaapple/qi-node/tools";
 import type { ProcessTaskView } from "@civaapple/qi-agent/kernel";
 import type { AuthSession } from "../auth.js";
 import {
@@ -11,6 +12,7 @@ import {
   loadUserConfig,
   type CompatibleEndpoint,
   type QiCapabilityConfig,
+  type QiShellConfig,
 } from "../config.js";
 import { t, type Locale, type MessageKey } from "../i18n.js";
 import type { TuiPresenter } from "../presenter.js";
@@ -101,6 +103,7 @@ export interface PanelFlowContext {
   readonly removeMount: (mountId: string) => void;
   readonly effectiveCapabilities: () => readonly CapabilityId[];
   readonly saveCapabilities: (capabilities: QiCapabilityConfig) => void;
+  readonly saveShell: (shell: QiShellConfig) => void;
   readonly applyVerificationSetup: (selected: readonly VerificationCandidate[]) => void;
   readonly installSkill: (source: string, scope: "user" | "workspace") => void;
   readonly listTasks: () => ProcessTaskView[];
@@ -128,6 +131,7 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
     items: [
       { id: "mode", label: t(locale, "settings.mode"), description: t(locale, "settings.mode.desc") },
       { id: "permissions", label: t(locale, "settings.permissions"), description: t(locale, "settings.permissions.desc") },
+      { id: "shell", label: t(locale, "settings.shell"), description: t(locale, "settings.shell.desc") },
       { id: "providers", label: t(locale, "settings.providers"), description: t(locale, "settings.providers.desc") },
       { id: "runs", label: t(locale, "settings.runs"), description: t(locale, "settings.runs.desc") },
       { id: "config", label: t(locale, "settings.config"), description: t(locale, "settings.config.desc") },
@@ -149,6 +153,10 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
       }
       if (item.id === "permissions") {
         openPermissionsPanel(ctx);
+        return;
+      }
+      if (item.id === "shell") {
+        openShellPanel(ctx);
         return;
       }
       if (item.id === "providers") {
@@ -635,6 +643,63 @@ export function openPermissionsPanel(ctx: PanelFlowContext): void {
       };
       ctx.panels.closeAll();
       ctx.saveCapabilities(capabilities);
+    },
+  }));
+}
+
+export function openShellPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const snapshot = ctx.presenter.launch.shell;
+  const selected = new Set<string>(snapshot?.allowed ?? ["direct"]);
+  const items = SHELL_PROFILE_IDS.map((id) => {
+    const available = snapshot?.available.find((profile) => profile.id === id);
+    const unavailable = snapshot?.unavailable.find((profile) => profile.id === id);
+    const platformBlocked = id === "cmd" && process.platform !== "win32";
+    let description: string;
+    if (id === "direct") {
+      description = t(locale, "shell.profile.direct.desc");
+    } else if (platformBlocked) {
+      description = t(locale, "shell.profile.windows_only");
+    } else if (available) {
+      description = t(locale, "shell.profile.available", {
+        executable: available.executable,
+        version: available.version ? ` · ${available.version}` : "",
+      });
+    } else if (unavailable?.status === "unavailable") {
+      description = t(locale, "shell.profile.unavailable", { reason: unavailable.reason });
+    } else {
+      description = t(locale, "shell.profile.disabled");
+    }
+    return {
+      id,
+      label: id,
+      description,
+      disabled: platformBlocked,
+    };
+  });
+  ctx.panels.push(new MultiSelectPanel({
+    title: t(locale, "shell.title"),
+    hints: t(locale, "shell.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items,
+    selectedIds: [...selected],
+    currentIds: [...selected],
+    onClose: ctx.panels.dismiss,
+    onApply: (selectedIds) => {
+      const allowed = selectedIds.filter((id): id is ShellProfileId =>
+        (SHELL_PROFILE_IDS as readonly string[]).includes(id)
+      );
+      if (allowed.length === 0) {
+        ctx.presenter.setNotice(t(locale, "shell.empty"));
+        ctx.render();
+        return;
+      }
+      const shell: QiShellConfig = {
+        default: allowed.includes("direct") ? "direct" : allowed[0]!,
+        allowed,
+      };
+      ctx.panels.closeAll();
+      ctx.saveShell(shell);
     },
   }));
 }

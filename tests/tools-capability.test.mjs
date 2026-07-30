@@ -29,6 +29,7 @@ import {
   removeTool,
   searchTool,
   shellTool,
+  createScriptTool,
   treeTool,
   writeTool,
 } from "@civaapple/qi-node/tools";
@@ -84,6 +85,17 @@ test("shell catalog guidance is platform-aware and prefers direct package-manage
   assert.match(shellTool.description, /workdir/);
   assert.match(shellTool.description, /command npm/);
   assert.match(shellTool.description, /NUL instead of \/dev\/null/);
+  assert.match(shellTool.description, /BATCH_WRITE_CONFLICT/);
+  assert.match(shellTool.description, /one authorized script Action/);
+});
+
+test("script catalog guidance prefers one multi-tool probe over same-Step shell batches", () => {
+  const script = createScriptTool([
+    { id: "pwsh", executable: "pwsh", status: "available", version: "7.0" },
+  ]);
+  assert.match(script.description, /probe multiple host tools/);
+  assert.match(script.description, /BATCH_WRITE_CONFLICT/);
+  assert.match(script.description, /Prefer dedicated file tools/);
 });
 
 test("findTrustedExecutable caches PATH resolution and serves repeats without re-probing", async () => {

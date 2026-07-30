@@ -37,6 +37,7 @@ import {
 } from "../apps/cli/dist/index.js";
 import { createAskQuestionTool } from "../apps/cli/dist/ask-question-tool.js";
 import { createPlanDocumentTool, validateFormalPlan } from "../apps/cli/dist/plan-tool.js";
+import { visibleWidth } from "@civaapple/qi-tui";
 
 test("TUI command catalog separates inspection, navigation, and control", () => {
   assert.deepEqual(parseTuiCommand("/actions"), { name: "actions", argument: "" });
@@ -70,6 +71,8 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.ok(primary.some((command) => command.name === "help"));
   assert.ok(primary.some((command) => command.name === "runs"));
   assert.ok(primary.some((command) => command.name === "sessions"));
+  assert.ok(primary.some((command) => command.name === "shell"));
+  assert.ok(primary.some((command) => command.name === "permissions"));
   assert.ok(!primary.some((command) => command.name === "config"));
   assert.ok(!primary.some((command) => command.name === "run"));
   const autocomplete = autocompleteSlashCommands("en");
@@ -82,7 +85,10 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.ok(autocomplete.some((command) => command.name === "actions"));
   assert.ok(autocomplete.some((command) => command.name === "agents"));
   assert.ok(autocomplete.some((command) => command.name === "config"));
+  assert.ok(autocomplete.some((command) => command.name === "exit"));
   assert.ok(!autocomplete.some((command) => command.name === "coord"));
+  assert.deepEqual(parseTuiCommand("/exit"), { name: "exit", argument: "" });
+  assert.deepEqual(parseTuiCommand("/quit"), { name: "quit", argument: "" });
   assert.deepEqual(parseSkillInstallCommand("install skill-creator"), { source: "skill-creator", scope: "user" });
   assert.deepEqual(parseSkillInstallCommand('install --workspace "skill drafts/my-skill"'), {
     source: "skill drafts/my-skill",
@@ -3279,6 +3285,35 @@ test("QuestionPanel answers multiple/text questions and persists Esc as skip", (
     { questionId: "detail", selectedOptionIds: [], text: "custom detail", skipped: false },
     { questionId: "optional", selectedOptionIds: [], skipped: true },
   ]);
+});
+
+test("QuestionPanel hard-wraps long CJK prompts within the terminal width", () => {
+  const prompt =
+    "确认 v1 冲突策略：草稿采用「服务端按 updated_at 取较新者（LWW），旧版本写入 note_versions 快照兜底，但 v1 不做冲突合并 UI」。是否接受？";
+  const panel = new QuestionPanel({
+    questions: [{
+      id: "conflict",
+      header: "冲突处理确认",
+      prompt,
+      selection: "single",
+      options: [
+        { id: "accept", label: "接受（服务端留快照，v1 无冲突 UI）", description: "按草稿假设执行，实现最简单" },
+        { id: "ui", label: "v1 就需要冲突解决 UI", description: "冲突时提示用户选择保留哪一版" },
+      ],
+      allowText: true,
+    }],
+    onSubmit: () => {},
+  });
+  const width = 120;
+  const lines = panel.render(width);
+  assert.ok(lines.some((line) => stripVTControlCharacters(line).includes("冲突策略")));
+  assert.ok(lines.some((line) => stripVTControlCharacters(line).includes("是否接受")));
+  for (const line of lines) {
+    assert.ok(
+      visibleWidth(line) <= width,
+      `line exceeds width ${width}: visible=${visibleWidth(line)} text=${JSON.stringify(stripVTControlCharacters(line))}`,
+    );
+  }
 });
 
 test("ask_question enables custom input by default unless explicitly disabled", async () => {

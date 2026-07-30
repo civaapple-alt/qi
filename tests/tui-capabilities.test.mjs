@@ -97,6 +97,85 @@ test("TUI applyCapabilities rejects changes while a Run is active", async () => 
   }
 });
 
+test("TUI applyShellConfig hot-applies profiles and ignores project policy shell", async () => {
+  const { writeFile } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-shell-hot-"));
+  const projectConfigPath = join(root, "project-config.toml");
+  const userConfigPath = join(root, "user-config.toml");
+  const model = responseModel();
+  let runtime;
+  try {
+    await writeFile(projectConfigPath, `
+version = 1
+[shell]
+default = "bash"
+allowed = ["bash"]
+`);
+    await writeFile(userConfigPath, `
+version = 1
+[shell]
+default = "direct"
+allowed = ["direct"]
+`);
+    runtime = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi", "data"),
+      projectConfigPath,
+      modelPort: model,
+      model: { provider: "fake", model: "shell-hot" },
+      allowExecute: true,
+      shell: { default: "direct", allowed: ["direct"] },
+    });
+    assert.equal(runtime.shellProfiles.directEnabled, true);
+    assert.equal(runtime.shellProfiles.allowed.includes("bash"), false);
+
+    const snapshot = await runtime.applyShellConfig(
+      { default: "direct", allowed: ["direct", ...(process.platform === "win32" ? ["pwsh", "cmd"] : ["bash", "pwsh"])] },
+      { persist: true, configPath: userConfigPath },
+    );
+    assert.ok(snapshot.allowed.includes("direct"));
+    const { loadUserConfig } = await import("../apps/cli/dist/index.js");
+    const loaded = await loadUserConfig(userConfigPath);
+    assert.ok(loaded.config.shell?.allowed?.includes("direct"));
+    assert.ok(loaded.config.shell.allowed.length >= 1);
+
+    await runtime.run("Probe tools.");
+    const tools = model.requests.at(-1).tools.map((tool) => tool.name);
+    assert.equal(tools.includes("shell"), snapshot.directEnabled);
+    if (snapshot.available.length > 0) assert.equal(tools.includes("script"), true);
+  } finally {
+    if (runtime) await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("TUI applyShellConfig rejects changes while a Run is active", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-shell-active-"));
+  let runtime;
+  try {
+    runtime = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi", "data"),
+      modelPort: new ScriptedModelPort([[
+        { type: "text.delta", delta: "Working…" },
+        { type: "completed", finishReason: "stop", responseId: "response_active_shell" },
+      ]]),
+      model: { provider: "fake", model: "shell-active" },
+      allowExecute: true,
+      shell: { default: "direct", allowed: ["direct"] },
+    });
+    const runPromise = runtime.run("Busy.");
+    await assert.rejects(
+      () => runtime.applyShellConfig({ default: "direct", allowed: ["direct"] }, { persist: false }),
+      /Cannot change shell profiles while a Run is active/,
+    );
+    await runPromise;
+  } finally {
+    if (runtime) await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("TUI model context follows model switches unless the user set an explicit window", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-model-window-"));
   let automatic;

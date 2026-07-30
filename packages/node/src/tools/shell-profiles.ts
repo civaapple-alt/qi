@@ -66,6 +66,33 @@ export function resolveShellConfig(
   return { default: defaultProfile, allowed: Object.freeze([...allowed]) };
 }
 
+/** Script profiles Qi will auto-probe for first-run defaults on this host OS. */
+export function platformShellCandidates(
+  platform: NodeJS.Platform = process.platform,
+): readonly ScriptShellProfileId[] {
+  if (platform === "win32") return ["pwsh", "cmd"];
+  return ["bash", "pwsh"];
+}
+
+/**
+ * Build a first-run `[shell]` config: always enable `direct`, plus each platform candidate that
+ * resolves to a trusted executable outside the Workspace.
+ */
+export async function detectInstalledShellProfiles(
+  workspaceRoot: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<{ default: ShellProfileId; allowed: readonly ShellProfileId[] }> {
+  const allowed: ShellProfileId[] = ["direct"];
+  for (const id of platformShellCandidates(platform)) {
+    const probed = await probeScriptProfile(id, workspaceRoot);
+    if (probed.status === "available") allowed.push(id);
+  }
+  return {
+    default: "direct",
+    allowed: Object.freeze([...allowed]),
+  };
+}
+
 export function shellProfileResource(profile: ShellProfileId): string {
   return `shell-profile:${profile}`;
 }
@@ -106,7 +133,7 @@ export function createScriptTool(profiles: readonly AvailableScriptProfile[]): A
   }
   return defineTool({
     description:
-      `Run one explicitly authorized shell-profile script (${names.join(", ")}). Prefer dedicated file tools for Workspace mutation. Profiles are never auto-selected from command text; choose the profile name explicitly. Non-zero exits and timeouts fail the Action.`,
+      `Run one explicitly authorized shell-profile script (${names.join(", ")}). Prefer one script Action to probe multiple host tools or run multi-statement logic when a profile is available, instead of multiple same-Step shell Actions that share a workdir. Prefer dedicated file tools for Workspace mutation. Profiles are never auto-selected from command text; choose the profile name explicitly. At most one script Action per Step for a given workdir (same-Step host-workspace overlap fails with BATCH_WRITE_CONFLICT). Non-zero exits and timeouts fail the Action.`,
     input: Type.Object(
       {
         profile: names.length === 1
@@ -271,11 +298,26 @@ async function readProfileVersion(
       detachedProcessGroup: false,
     });
     if (result.exitCode !== 0) return undefined;
-    const text = `${result.stdout}\n${result.stderr}`.trim().split(/\r?\n/).find((line) => line.trim());
-    return text?.slice(0, 120);
+    const text = `${result.stdout}\n${result.stderr}`.trim();
+    // cmd `ver` is OEM/ANSI-localized (e.g. 「版本」); keep an ASCII Windows build label only.
+    if (id === "cmd") return formatCmdVersionLabel(text);
+    const line = text.split(/\r?\n/).find((entry) => entry.trim());
+    return sanitizeProfileVersion(line?.slice(0, 120));
   } catch {
     return undefined;
   }
+}
+
+/** Extract `Windows <build>` from localized/OEM `ver` output without depending on codepage decoding. */
+export function formatCmdVersionLabel(text: string): string | undefined {
+  const match = text.match(/(\d+\.\d+(?:\.\d+){1,2})/);
+  return match ? `Windows ${match[1]}` : undefined;
+}
+
+function sanitizeProfileVersion(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value.replace(/\uFFFD/g, "").trim();
+  return cleaned.length > 0 ? cleaned.slice(0, 120) : undefined;
 }
 
 async function buildScriptInvocation(

@@ -17,7 +17,8 @@ Reusable Qi-specific terminal presentation and control components built on
 - Render that same bounded Formal Plan preview before Plan Review choices, so the reviewed document is visible
   before acceptance.
 - Retain confirmed `ask_question` cards with every question and option plus selected, custom-text, and skipped
-  answers; durable Action input/output, rather than transient panel state, drives replay.
+  answers; durable Action input/output, rather than transient panel state, drives replay. Interactive
+  `QuestionPanel` prompts hard-wrap by display column width so long CJK text cannot overflow the terminal.
 - Group consecutive, same-Step read-only discovery Actions while preserving every durable Action for expansion
   and History Center inspection.
 - Project `/context` diagnostics with per-ContextBlock-kind included token share, included/omitted counts,

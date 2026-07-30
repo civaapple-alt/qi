@@ -9,6 +9,8 @@ import {
   FileArtifactStore,
   ToolRegistry,
   createScriptTool,
+  detectInstalledShellProfiles,
+  platformShellCandidates,
   probeShellProfiles,
   resolveShellConfig,
   shellProfileResource,
@@ -55,6 +57,38 @@ test("resolveShellConfig defaults to direct-only when execute is enabled", () =>
     () => resolveShellConfig({ default: "bash", allowed: ["direct"] }, true),
     /listed in shell\.allowed/,
   );
+});
+
+test("platformShellCandidates and detectInstalledShellProfiles prefer installed OS shells", async () => {
+  assert.deepEqual(platformShellCandidates("win32"), ["pwsh", "cmd"]);
+  assert.deepEqual(platformShellCandidates("linux"), ["bash", "pwsh"]);
+  assert.deepEqual(platformShellCandidates("darwin"), ["bash", "pwsh"]);
+  await withWorkspace(async ({ root }) => {
+    const detected = await detectInstalledShellProfiles(root);
+    assert.equal(detected.default, "direct");
+    assert.ok(detected.allowed.includes("direct"));
+    for (const id of detected.allowed) {
+      if (id === "direct") continue;
+      assert.ok(
+        platformShellCandidates().includes(id),
+        `unexpected auto-enabled profile ${id}`,
+      );
+    }
+  });
+});
+
+test("formatCmdVersionLabel extracts Windows build from localized or mojibake ver output", async () => {
+  const { formatCmdVersionLabel } = await import("@civaapple/qi-node/tools");
+  assert.equal(
+    formatCmdVersionLabel("Microsoft Windows [版本 10.0.26200.8875]"),
+    "Windows 10.0.26200.8875",
+  );
+  assert.equal(
+    formatCmdVersionLabel("Microsoft Windows [\uFFFD\uFFFD\uFFFD 10.0.26200.8875]"),
+    "Windows 10.0.26200.8875",
+  );
+  assert.equal(formatCmdVersionLabel("Microsoft Windows [Version 10.0.19045.3803]"), "Windows 10.0.19045.3803");
+  assert.equal(formatCmdVersionLabel("no version here"), undefined);
 });
 
 test("probeShellProfiles marks disallowed profiles and keeps direct separate", async () => {

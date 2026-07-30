@@ -354,6 +354,52 @@ export async function persistUserTimelineDensity(
   return { path: absolute, exists: true, config: next };
 }
 
+/**
+ * Persist `[shell]` profiles into the user config.toml (creates it when missing).
+ */
+export async function persistUserShell(
+  shell: QiShellConfig,
+  path = defaultUserConfigPath(),
+): Promise<LoadedUserConfig> {
+  const absolute = resolve(path);
+  const loaded = await loadUserConfig(absolute);
+  if (!shell.allowed || shell.allowed.length === 0) {
+    throw new TypeError("shell.allowed must contain at least one profile");
+  }
+  const defaultProfile = shell.default ?? (shell.allowed.includes("direct") ? "direct" : shell.allowed[0]!);
+  if (!shell.allowed.includes(defaultProfile)) {
+    throw new TypeError(`shell.default ${defaultProfile} must be listed in shell.allowed`);
+  }
+  const next: QiUserConfig = {
+    ...loaded.config,
+    version: 1,
+    shell: {
+      default: defaultProfile,
+      allowed: [...shell.allowed],
+    },
+  };
+  await saveUserConfig(absolute, next);
+  return { path: absolute, exists: true, config: next };
+}
+
+/**
+ * Ensure `$QI_HOME/config.toml` has `[shell]`. When missing, probe installed profiles for this OS,
+ * write them once, and return the updated config. Existing `[shell]` is left unchanged.
+ */
+export async function ensureUserShellConfig(
+  workspaceRoot: string,
+  path = defaultUserConfigPath(),
+): Promise<LoadedUserConfig> {
+  const absolute = resolve(path);
+  const loaded = await loadUserConfig(absolute);
+  if (loaded.config.shell?.allowed !== undefined && loaded.config.shell.allowed.length > 0) {
+    return loaded;
+  }
+  const { detectInstalledShellProfiles } = await import("@civaapple/qi-node/tools");
+  const detected = await detectInstalledShellProfiles(workspaceRoot);
+  return persistUserShell(detected, absolute);
+}
+
 export async function saveUserConfig(path: string, config: QiUserConfig): Promise<void> {
   const absolute = resolve(path);
   const encodedCompatible = config.compatible?.map((entry) => ({

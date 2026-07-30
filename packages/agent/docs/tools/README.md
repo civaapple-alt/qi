@@ -78,7 +78,9 @@ automatic inference path, so a hand-picked manifest is exactly as trustworthy as
   closed; returned page text remains explicitly untrusted.
 - Shell arguments are not interpolated through an ambient shell and globs, pipes, and redirection are not
   expanded. Windows PATH/PATHEXT shims are resolved explicitly; `.cmd`/`.bat` invocation rejects shell
-  metacharacters before entering the trusted command processor.
+  metacharacters before entering the trusted command processor. Advertised guidance tells the model to use at
+  most one `shell`/`script` Action per workdir per Step and to probe multiple host tools in one `script` Action
+  when a profile is available, matching the Loop's same-resource `BATCH_WRITE_CONFLICT` rule.
 - Shell and declared verification timeouts or non-zero exits are failed Actions, not successful settlements with
   an error-shaped payload. Failure details retain bounded process evidence for the next Step.
 - In Git Workspaces, shell execution records before/after state hashes and a bounded tracked diff when that

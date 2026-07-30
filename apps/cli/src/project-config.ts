@@ -111,6 +111,10 @@ export function mergeCapabilities(
   return resolveCapabilities(configured, overrides);
 }
 
+/**
+ * @deprecated Project `[shell]` no longer merges into launch authority (ADR-0015).
+ * Prefer user-global `$QI_HOME/config.toml` via `ensureUserShellConfig` / `/shell`.
+ */
 export function mergeShell(
   globalShell: QiShellConfig | undefined,
   projectShell: QiShellConfig | undefined,

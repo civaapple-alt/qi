@@ -228,13 +228,18 @@ ContextBlocks.
 
 Cross-directory reads use human-gated mounts, not model-owned authority. Project policy lives at
 `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`
-(`[capabilities]`, `[shell]`, `[[mounts]]`); merge order is
-CLI flags > project TOML > global `~/.qi/config.toml`. `/mounts add <path>`, `/mounts`, and
+(`[capabilities]`, `[[mounts]]`); capability merge order is
+CLI flags > project TOML > global `$QI_HOME/config.toml`. **Shell profiles** live only in
+`$QI_HOME/config.toml` (project `[shell]` is ignored); first launch without `[shell]` probes and writes
+installed defaults. `/mounts add <path>`, `/mounts`, and
 `/mounts unmount <id>` manage mounts in-session. `/permissions` (also under `/settings`) lists effective Session
 capabilities with Space multi-select, applies the selection to the current Session (tool catalog + leases)
-immediately when no Run is active, and writes `[capabilities]` into the project config. In-process New Session /
-resume re-reads that project config (CLI `--allow-*` / `--safe` from the original launch still win).
-External TOML edits during a live Runtime still wait for relaunch.
+immediately when no Run is active, and writes `[capabilities]` into the project config. `/shell` multi-selects
+`direct` / `pwsh` / `cmd` / `bash`, hot-applies tools and leases, and writes `[shell]` into `$QI_HOME/config.toml`.
+In-process New Session / resume re-reads project capabilities (CLI `--allow-*` / `--safe` from the original
+launch still win) and re-ensures user shell config.
+External project-TOML edits during a live Runtime still wait for relaunch; `/shell` and `/permissions` are the
+in-session apply paths.
 When a read/discovery tool hits a path outside the primary Workspace and
 mounts, the Action fails with `PATH_GRANT_REQUIRED` and the TUI offers allow (persist read mount) or deny.
 Authorized paths use `mount:<id>/…`; write/edit/move/remove remain confined to the primary Workspace. See

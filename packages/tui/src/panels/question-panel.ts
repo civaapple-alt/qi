@@ -1,4 +1,5 @@
-import { Key, matchesKey, truncateToWidth, type Focusable } from "@earendil-works/pi-tui";
+import { Key, matchesKey, type Focusable } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "../layout.js";
 import { theme } from "../theme/index.js";
 import { panelFooter, panelHeader, pointer } from "./chrome.js";
 import type { PanelComponent } from "./types.js";
@@ -117,7 +118,8 @@ export class QuestionPanel implements PanelComponent, Focusable {
       ? `type · Enter confirm · Esc skip · ${progress}`
       : `${question.selection === "multiple" ? "Space toggle · " : ""}Enter confirm · Esc skip · ${progress}`;
     const lines = [...panelHeader(`${question.header}`, hints, safe), ""];
-    lines.push(...wrapPlain(question.prompt, safe - 2).map((line) => `  ${line}`), "");
+    // Hard-wrap by display columns so CJK prompts never exceed the terminal width.
+    lines.push(...wrapPlain(question.prompt, Math.max(1, safe - 2)).map((line) => truncateToWidth(`  ${line}`, safe, "…")), "");
     if (this.#editingText) {
       lines.push(truncateToWidth(theme.fg("accent", `  > ${this.#text}▌`), safe, "…"));
     } else {
@@ -152,18 +154,22 @@ export class QuestionPanel implements PanelComponent, Focusable {
   }
 }
 
+/** Wrap plain text to a display-column budget, breaking mid-word when needed (CJK). */
 function wrapPlain(text: string, width: number): string[] {
-  const words = text.split(/\s+/);
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [""];
+  const budget = Math.max(1, width);
   const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    if (!line) line = word;
-    else if (line.length + word.length + 1 <= width) line += ` ${word}`;
-    else {
-      lines.push(line);
-      line = word;
+  let current = "";
+  for (const character of Array.from(normalized)) {
+    const next = `${current}${character}`;
+    if (current && visibleWidth(next) > budget) {
+      lines.push(current.trimEnd());
+      current = character === " " ? "" : character;
+    } else {
+      current = next;
     }
   }
-  if (line) lines.push(line);
-  return lines;
+  if (current) lines.push(current.trimEnd());
+  return lines.length > 0 ? lines : [""];
 }

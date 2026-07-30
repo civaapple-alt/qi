@@ -171,13 +171,19 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 ## ADR-0015: separate project policy from Session mount facts
 
 - Effective launch authority resolves as CLI flags over `$QI_HOME/projects/<project-id>/policy.toml` over
-  `$QI_HOME/config.toml` over built-ins.
+  `$QI_HOME/config.toml` over built-ins for **capabilities**, mounts, and related project policy.
+- **Shell profiles** (`direct` / `pwsh` / `cmd` / `bash`) are user-global under `$QI_HOME/config.toml` only.
+  Project `policy.toml` `[shell]` is ignored for effective authority. `/shell` (and Settings → Shell) hot-applies
+  allowed profiles without restarting the CLI, mirroring `/permissions` for capabilities.
+- On first launch without `[shell]`, Qi probes platform-installed script profiles, writes
+  `direct` plus each installed candidate into `$QI_HOME/config.toml`, and treats that file as source of truth.
 - Extra directories are read-only mounts addressed as `mount:<id>/...`; writes stay in the primary Workspace.
 - Mounts are human-granted, reject filesystem roots and unsafe aliases, and never imply shell authority.
-- Project policy determines future access. Session mount events record what a Session could see; they do not grant
-  access when replayed.
+- Project policy determines future access for capabilities/mounts. Session mount events record what a Session
+  could see; they do not grant access when replayed.
 - Persistent changes settle policy first and audit events second; startup reconciles any interrupted settlement.
-- External TOML edits take effect on launch/relaunch, not silently during an active Runtime.
+- External TOML edits to project policy take effect on launch/relaunch, not silently during an active Runtime.
+  Live `/shell` and `/permissions` are the in-session apply paths for shell profiles and capabilities.
 - Workspace `.qi` declarations never participate in capability precedence and cannot widen project policy.
 
 ## ADR-0016: keep execution local and Web read-only

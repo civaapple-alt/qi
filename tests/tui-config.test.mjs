@@ -6,11 +6,13 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import {
   defaultUserConfigPath,
+  ensureUserShellConfig,
   findCompatibleEndpoint,
   loadUserConfig,
   persistActiveCompatible,
   persistUserLanguage,
   persistUserProviderDefaults,
+  persistUserShell,
   persistUserTheme,
   persistUserTimelineDensity,
   parseTuiCliArguments,
@@ -543,3 +545,26 @@ function launchTui(workspace, config, extraArgs) {
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+test("ensureUserShellConfig writes detected profiles once and preserves later edits", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-shell-bootstrap-"));
+  const path = join(root, "config.toml");
+  const workspace = join(root, "ws");
+  try {
+    await writeFile(join(root, ".keep"), "");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(workspace, { recursive: true });
+    const first = await ensureUserShellConfig(workspace, path);
+    assert.equal(first.exists, true);
+    assert.ok(first.config.shell?.allowed?.includes("direct"));
+    const raw = await readFile(path, "utf8");
+    assert.match(raw, /\[shell\]/);
+    assert.match(raw, /allowed/);
+
+    await persistUserShell({ default: "direct", allowed: ["direct"] }, path);
+    const second = await ensureUserShellConfig(workspace, path);
+    assert.deepEqual(second.config.shell, { default: "direct", allowed: ["direct"] });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

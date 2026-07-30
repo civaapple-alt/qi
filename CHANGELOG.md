@@ -7,6 +7,10 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+- `/shell` (and Settings → Shell) multi-selects global shell profiles (`direct` / `pwsh` / `cmd` / `bash`),
+  persists them to `$QI_HOME/config.toml`, and hot-applies tools/leases without restarting the CLI. First launch
+  without `[shell]` probes platform-installed profiles and writes defaults automatically.
+- `/exit` is an alias for `/quit` in rich TTY and line mode.
 - `/context` now shows per-ContextBlock-kind included token share, included/omitted counts, omitted estimated
   tokens, and a separate conversation/Tool-schema subtotal from replayable aggregate Session facts.
 - Added end-to-end image input for Kimi K3 and other image-capable models: rich-TTY clipboard paste, safe image
@@ -34,6 +38,11 @@ steps and investigation history belong in pull requests, not release notes.
   `Permissions disabled` partition after `--safe`, config, and CLI overrides.
 - ADR-0001 now gates sensitive Workspace paths with human content grants instead of rewriting source-code
   assignment forms before they reach the model; authorized file bodies round-trip for precise `edit`.
+- Host-execute guidance now tells the model to use at most one `shell`/`script` Action per workdir per Step and
+  to probe multiple host tools in one authorized `script` Action, reducing same-Step `BATCH_WRITE_CONFLICT`
+  from parallel version probes.
+- Shell profiles are user-global only under `$QI_HOME/config.toml`; project `policy.toml` `[shell]` is no longer
+  merged into launch authority (ADR-0015).
 
 ### Deprecated
 
@@ -41,6 +50,10 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- Plan-mode `ask_question` panels now hard-wrap long CJK prompts by display column width so rich-TTY rendering
+  no longer crashes with `Rendered line exceeds terminal width`.
+- `/config` cmd profile versions no longer show OEM-codepage mojibake from localized `ver` output; the probe keeps
+  an ASCII `Windows <build>` label.
 - Distinguished Workspace mutations, Artifact persistence, and other write effects in bounded Session inspection
   while retaining the legacy aggregate counters. Artifact puts now use digest-scoped resources, so independent
   content-addressed writes no longer produce false `BATCH_WRITE_CONFLICT` failures in one Step.
