@@ -232,7 +232,7 @@ const scheduler = new SqliteWatcherScheduler(":memory:", {
 assert.equal(scheduler.get("missing"), undefined);
 scheduler.close();
 assert.match(createId("ses"), /^ses_/);
-assert.equal(qiSelfModel.release, "0.7.1");
+assert.equal(qiSelfModel.release, "0.7.2");
 assert.ok(Array.isArray(queryQiSelfModel("packages")));
 
 const port = new ScriptedModelPort([[

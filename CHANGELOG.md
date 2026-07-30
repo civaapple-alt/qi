@@ -7,6 +7,22 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Documentation
+
+## [0.7.2] - 2026-07-30
+
+### Added
+
 - `/shell` (and Settings → Shell) multi-selects global shell profiles (`direct` / `pwsh` / `cmd` / `bash`),
   persists them to `$QI_HOME/config.toml`, and hot-applies tools/leases without restarting the CLI. First launch
   without `[shell]` probes platform-installed profiles and writes defaults automatically.
@@ -50,10 +66,6 @@ steps and investigation history belong in pull requests, not release notes.
 - Shell profiles are user-global only under `$QI_HOME/config.toml`; project `policy.toml` `[shell]` is no longer
   merged into launch authority (ADR-0015).
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
 - Composer `@` mention validation no longer blocks submit when the token is an absent npm-style
@@ -96,6 +108,9 @@ steps and investigation history belong in pull requests, not release notes.
   Artifact materialization, replay recovery, model capability gating, and the deferred video boundary.
 - Added ADR-0029 for the Workspace-mutation versus private-Artifact boundary, digest-scoped Artifact resources,
   permission preflight, and separated diagnostic write counts.
+- Source-release dependency inventory now reviews sharp optional platform packages that ship libvips under
+  `LGPL-3.0-or-later` (including Apache/MIT compound SPDX expressions).
+
 ## [0.7.1] - 2026-07-29
 
 ### Added

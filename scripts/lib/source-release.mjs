@@ -5,10 +5,13 @@ import { join, posix, resolve, sep } from "node:path";
 
 const acceptedDependencyLicenses = new Set([
   "Apache-2.0",
+  "Apache-2.0 AND LGPL-3.0-or-later",
+  "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
   "BlueOak-1.0.0",
   "BSD-2-Clause",
   "BSD-3-Clause",
   "ISC",
+  "LGPL-3.0-or-later",
   "MIT",
   "0BSD",
 ]);
@@ -88,7 +91,7 @@ export async function auditSourceRelease(rootPath) {
       "dependency-license-inventory",
       dependencies.every((dependency) => dependency.accepted),
       dependencies.every((dependency) => dependency.accepted)
-        ? `${dependencies.length} external lockfile packages use reviewed permissive SPDX licenses`
+        ? `${dependencies.length} external lockfile packages use reviewed SPDX licenses`
         : `unreviewed dependency licenses: ${dependencies
           .filter((dependency) => !dependency.accepted)
           .map((dependency) => `${dependency.name}@${dependency.version} (${dependency.license ?? "missing"})`)
