@@ -65,6 +65,11 @@ atomic writes.
 Formal Plan revisions are stored at immutable content-hash paths under the machine-private project root.
 Ordinary file tools cannot read or edit that directory; `plan_document read/edit` is the bounded access path.
 
+The `artifact` Tool also writes only to the machine-private project store. Its mutation resource includes the
+content digest (`artifact-store:local:<sha256>`), so distinct content-addressed writes in one Step do not conflict;
+the capability lease remains bounded by `artifact-store:local:**`. An Artifact reference is not a Workspace file
+mutation or evidence that an implementation task was completed.
+
 Image ingestion supports PNG, JPEG, GIF, and WebP with a 64 MiB source limit and 100 MP decode guard. The default
 prepared view is bounded to a 2000 px longest edge and 3.75 MiB; transparent images stay PNG, JPEG encoding uses
 quality/size ladders, and animated GIF/WebP passes only when already within limits. Both original and prepared

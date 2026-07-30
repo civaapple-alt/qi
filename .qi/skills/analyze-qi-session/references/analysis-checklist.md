@@ -13,7 +13,7 @@ Use this checklist after extracting the Session report. It is a review rubric, n
 
 | Layer | Inspect | Typical concern |
 | --- | --- | --- |
-| Run | `displayTitle`, Formal Plan binding, status, terminal reason, completion kind, `actionFacts` | raw accepted-plan input treated as the task; `responded` presented as verified; partial effects before failure |
+| Run | `displayTitle`, Formal Plan binding, status, terminal reason, completion kind, scoped `actionFacts` | raw accepted-plan input treated as the task; `responded` presented as verified; Artifact/runtime writes mistaken for Workspace mutation; partial effects before failure |
 | Step | context budget, model finish reason, `modelReasoning`, rejected calls, progress | Thinking mistaken for evidence; repeated strategy; context pressure; action batch confusion |
 | Action | tool, effect, resource, authority, start, settlement, `diffKind` / Git workspace change | missing settlement; denial ignored; shell Git fingerprint confused with file-tool diff |
 | Work Plan | `update_plan` items vs write/verify Actions | Todo “completed” without durable mutation; provisional Work item ID loops |

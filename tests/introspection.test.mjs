@@ -306,6 +306,8 @@ test("Session inspection projects Formal Plan titles, reasoning, actionFacts, an
   const stepId = "stp_inspect_01";
   const planActionId = "act_inspect_todo";
   const shellId = "act_inspect_sh01";
+  const artifactId = "act_inspect_art";
+  const editId = "act_inspect_edit";
   writer.append("run.started", { runId }, actor);
   writer.append("step.started", { runId, stepId }, actor);
   writer.append("model.completed", {
@@ -320,6 +322,8 @@ test("Session inspection projects Formal Plan titles, reasoning, actionFacts, an
     actionCalls: [
       { callId: "call_todo", name: "update_plan", input: { plan: [] } },
       { callId: "call_shell", name: "shell", input: { command: "npm", args: ["test"] } },
+      { callId: "call_artifact", name: "artifact", input: { content: "private note" } },
+      { callId: "call_edit", name: "edit", input: { path: "src/app.ts" } },
     ],
   }, actor);
   writer.append("action.proposed", {
@@ -346,8 +350,27 @@ test("Session inspection projects Formal Plan titles, reasoning, actionFacts, an
     resources: ["host-process:npm"],
     effect: "execute",
   }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: artifactId,
+    toolName: "artifact",
+    input: { content: "private note", mediaType: "text/plain" },
+    // Legacy Sessions used one coarse Artifact resource; replay still classifies by Tool identity.
+    resources: ["artifact-store:local"],
+    effect: "write",
+  }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: editId,
+    toolName: "edit",
+    input: { path: "src/app.ts", oldText: "a", newText: "b" },
+    resources: ["file:src/app.ts"],
+    effect: "write",
+  }, actor);
   writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
-  for (const actionId of [planActionId, shellId]) {
+  for (const actionId of [planActionId, shellId, artifactId, editId]) {
     writer.append("authority.requested", { runId, stepId, actionId }, actor);
     writer.append("authority.granted", { runId, stepId, actionId, leaseId: `lea_${actionId.slice(-8)}` }, actor);
     writer.append("action.started", { runId, stepId, actionId }, actor);
@@ -382,6 +405,26 @@ test("Session inspection projects Formal Plan titles, reasoning, actionFacts, an
   writer.append("action.completed", {
     runId,
     stepId,
+    actionId: artifactId,
+    outputRef: `artifact://${"a".repeat(64)}`,
+    modelOutput: [{ type: "text", text: JSON.stringify({ ref: `artifact://${"a".repeat(64)}` }) }],
+  }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId: editId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        path: "src/app.ts",
+        replacements: 1,
+        diff: "--- a/src/app.ts\n+++ b/src/app.ts\n@@\n-a\n+b",
+      }),
+    }],
+  }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
     actionId: shellId,
     modelOutput: [{
       type: "text",
@@ -407,7 +450,17 @@ test("Session inspection projects Formal Plan titles, reasoning, actionFacts, an
   assert.deepEqual(run.planBinding, { planId, revision: 1 });
   assert.equal(run.formalPlan.title, "Inspect feature");
   assert.equal(run.formalPlan.path, "/tmp/inspect-feature.md");
-  assert.deepEqual(run.actionFacts, { writeCompleted: 1, writeFailed: 0, readCompleted: 0 });
+  assert.deepEqual(run.actionFacts, {
+    writeCompleted: 3,
+    writeFailed: 0,
+    readCompleted: 0,
+    workspaceWriteCompleted: 1,
+    workspaceWriteFailed: 0,
+    artifactWriteCompleted: 1,
+    artifactWriteFailed: 0,
+    otherWriteCompleted: 1,
+    otherWriteFailed: 0,
+  });
 
   const step = inspectQiSession(store, {
     operation: "last-step",

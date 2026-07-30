@@ -571,7 +571,7 @@ test("TurnLoop persists authority and action start before entering the executor"
       subject: "agent_main",
       tools: ["artifact"],
       effects: ["write"],
-      resources: ["artifact-store:local"],
+      resources: ["artifact-store:local:**"],
       expiresAt: "2099-01-01T00:00:00.000Z",
     });
     const registry = new ToolRegistry(broker);
@@ -690,7 +690,7 @@ test("TurnLoop compacts an oversized settled exchange into an auditable Artifact
       subject: "agent_main",
       tools: ["artifact"],
       effects: ["write"],
-      resources: ["artifact-store:local"],
+      resources: ["artifact-store:local:**"],
       expiresAt: "2099-01-01T00:00:00.000Z",
     });
     const registry = new ToolRegistry(broker);
@@ -744,7 +744,7 @@ test("TurnLoop compacts consumed exchanges before touching the newest tool feedb
       subject: "agent_main",
       tools: ["artifact"],
       effects: ["write"],
-      resources: ["artifact-store:local"],
+      resources: ["artifact-store:local:**"],
       expiresAt: "2099-01-01T00:00:00.000Z",
     });
     const registry = new ToolRegistry(broker);
@@ -910,7 +910,7 @@ test("TurnLoop settles unstarted batch actions before parking an indeterminate e
       subject: "agent_main",
       tools: ["artifact"],
       effects: ["write"],
-      resources: ["artifact-store:local"],
+      resources: ["artifact-store:local:**"],
       expiresAt: "2099-01-01T00:00:00.000Z",
     });
     const registry = new ToolRegistry(broker);
@@ -953,6 +953,57 @@ test("TurnLoop settles unstarted batch actions before parking an indeterminate e
       reason: "indeterminate-effect",
       detail: "Tool settlement could not be confirmed",
     });
+  });
+});
+
+test("TurnLoop stores distinct Artifact writes from one Step without a batch conflict", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_distinct_artifacts",
+      subject: "agent_main",
+      tools: ["artifact"],
+      effects: ["write"],
+      resources: ["artifact-store:local:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("artifact", artifactTool);
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call-artifact-a",
+          name: "artifact",
+          input: { content: "first artifact", mediaType: "text/plain" },
+        },
+        {
+          type: "action.requested",
+          callId: "call-artifact-b",
+          name: "artifact",
+          input: { content: "second artifact", mediaType: "text/plain" },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      (request) => {
+        const results = request.messages
+          .flatMap((message) => message.content)
+          .filter((part) => part.type === "tool-result");
+        assert.deepEqual(results.map((part) => part.isError), [false, false]);
+        return [
+          { type: "text.delta", delta: "Both private artifacts were stored." },
+          { type: "completed", finishReason: "stop" },
+        ];
+      },
+    ]);
+    const result = await new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry })
+      .run(turnRequest(root, artifactStore, { maxSteps: 2 }));
+    assert.equal(result.status, "completed");
+    const actions = Object.values(result.view.runs[result.runId].actions);
+    assert.deepEqual(actions.map((action) => action.status), ["completed", "completed"]);
+    assert.equal(actions.some((action) => action.terminalDetail === "BATCH_WRITE_CONFLICT"), false);
+    assert.notEqual(actions[0].resources[0], actions[1].resources[0]);
   });
 });
 
@@ -1010,7 +1061,7 @@ test("TurnLoop stops a concurrent read batch and denies the rest of the Step on 
       subject: "agent_main",
       tools: ["artifact"],
       effects: ["write"],
-      resources: ["artifact-store:local"],
+      resources: ["artifact-store:local:**"],
       expiresAt: "2099-01-01T00:00:00.000Z",
     });
     broker.grant({

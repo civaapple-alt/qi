@@ -44,8 +44,13 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
   or tool identity.
 - Committed `step.model.reasoning` projects as a collapsible Thinking block (default ~3 lines). It is narrative-only
   and is not Evidence.
+- Context omissions are labeled by projected category (for example an omitted history Run) instead of showing
+  only an unexplained count.
 - `update_plan`, `ask_question`, process tools (`shell`/`script`/`verify`), and file mutations (`edit`/`write`/
   `move`/`remove`) use specialized narrative cards; generic JSON Tool result remains available under a details fold.
+- Contract effect labels distinguish machine-private Artifact writes from Workspace writes. A completed Work Plan
+  item without a completed Workspace mutation or verification Action is shown with a warning; Todo state alone is
+  navigation, not mutation evidence.
 - Action results, file diffs, and Git workspace-change diffs are diagnostics. They are not called Evidence Ledger
   records unless `evidence.recorded` exists.
 - ProcessTasks are rendered from the Session's durable task projection independently of Run narrative folding;

@@ -20,12 +20,21 @@ steps and investigation history belong in pull requests, not release notes.
   unless their `[[compatible]]` entry sets `image_input = true`.
 - Chat Completions and Responses adapters now map ordered user media and tool-result images without persisting
   provider data URLs. Image context cost uses dimensions rather than base64 length.
+- Agent Runs now receive an explicit Workspace Write permission fact. When Write is disabled, the model is told
+  to request `/permissions` instead of using machine-private Artifacts as a substitute for project files.
 ### Deprecated
 
 ### Removed
 
 ### Fixed
 
+- Distinguished Workspace mutations, Artifact persistence, and other write effects in bounded Session inspection
+  while retaining the legacy aggregate counters. Artifact puts now use digest-scoped resources, so independent
+  content-addressed writes no longer produce false `BATCH_WRITE_CONFLICT` failures in one Step.
+- Fixed rich-TTY multiline user messages so one message receives one top/bottom background pad instead of adding
+  padding around every logical line.
+- Clarified Web context omissions with their block category and made Artifact-vs-Workspace effects explicit in
+  the Run contract instead of presenting every non-read Action as an undifferentiated write.
 ### Security
 
 - Image URLs use the existing DNS-pinned public-network boundary with independent byte limits, MIME plus
@@ -35,6 +44,8 @@ steps and investigation history belong in pull requests, not release notes.
 
 - Added ADR-0028 and synchronized protocol, Agent, AI, Node, TUI, and CLI contracts for image ingestion,
   Artifact materialization, replay recovery, model capability gating, and the deferred video boundary.
+- Added ADR-0029 for the Workspace-mutation versus private-Artifact boundary, digest-scoped Artifact resources,
+  permission preflight, and separated diagnostic write counts.
 ## [0.7.1] - 2026-07-29
 
 ### Added

@@ -621,6 +621,53 @@ test("Ctrl+C clears a non-empty composer before exiting", async () => {
   }
 });
 
+test("interactive TUI pads a multi-line user message as one block", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-multiline-card-"));
+  const runtime = await TuiRuntime.create({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    userSkillsRoot: join(root, "user-skills"),
+    skillCompatibilityRoots: [],
+    modelPort: new ScriptedModelPort([[
+      { type: "text.delta", delta: "Received both lines." },
+      { type: "completed", finishReason: "stop", responseId: "response_multiline_card" },
+    ]]),
+    model: { provider: "fake", model: "multiline-card-v1" },
+  });
+  await runtime.run("first logical line\nsecond logical line");
+  const terminal = new FakeTerminal();
+  const presenter = new TuiPresenter({
+    workspaceRoot: root,
+    dataRoot: join(root, ".qi"),
+    provider: "fake",
+    model: "multiline-card-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const tui = new InteractiveTui(runtime, presenter, { terminal });
+  try {
+    const running = tui.run();
+    await delay(25);
+    const rendered = stripVTControlCharacters(terminal.output);
+    const firstEnd = rendered.indexOf("first logical line") + "first logical line".length;
+    const secondStart = rendered.indexOf("second logical line", firstEnd);
+    assert.ok(firstEnd >= "first logical line".length);
+    assert.ok(secondStart > firstEnd);
+    assert.equal((rendered.slice(firstEnd, secondStart).match(/\n/g) ?? []).length, 1);
+    terminal.sendText("\u0003");
+    await running;
+  } finally {
+    await tui.close();
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("interactive TUI renders command help and exits through the editor", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-interactive-"));
   const runtime = await TuiRuntime.create({

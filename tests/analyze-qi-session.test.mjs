@@ -199,12 +199,35 @@ test("detectSignals flags verbal mutation claims without completed write Actions
           },
         ],
       },
+      {
+        runId: "run_artifact_only",
+        status: "completed",
+        displayStatus: "responded",
+        terminalReason: "response",
+        startSequence: 21,
+        endSequence: 30,
+        summary: { stepCount: 1, actionCount: 1 },
+        steps: [{
+          stepId: "stp_artifact",
+          modelText: "两处问题都已修复。",
+          rejectedCalls: [],
+          actions: [{
+            actionId: "act_artifact",
+            stepId: "stp_artifact",
+            toolName: "artifact",
+            effect: "write",
+            status: "completed",
+            milestones: { proposed: 22, authorityGranted: 23, started: 24, terminal: 25 },
+          }],
+        }],
+      },
     ],
   };
   const codes = detectSignals(narrative, []).map((item) => `${item.code}:${item.evidence.runId}`);
   assert.ok(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_verbal"));
   assert.equal(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_honest"), false);
   assert.equal(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_real_write"), false);
+  assert.ok(codes.includes("CLAIMED_MUTATION_WITHOUT_ACTIONS:run_artifact_only"));
 });
 
 test("detectSignals flags Formal Plan persistence claims and reserved Run-fact output", () => {
@@ -246,7 +269,7 @@ test("detectSignals flags Formal Plan persistence claims and reserved Run-fact o
 
 test("analyze-qi-session skill and extract --all surface Formal Plan / reasoning diagnostics", async () => {
   const skill = await readFile(join(root, ".qi", "skills", "analyze-qi-session", "SKILL.md"), "utf8");
-  assert.match(skill, /version:\s*1\.3\.1/);
+  assert.match(skill, /version:\s*1\.3\.2/);
   assert.match(skill, /displayTitle/);
   assert.match(skill, /modelReasoning/);
   assert.match(skill, /actionFacts/);

@@ -33,6 +33,9 @@ test("Web workbench serves real Session projections, history and committed live 
     assert.match(application, /Working on /);
     assert.match(application, /Git workspace change/);
     assert.match(application, /run\.displayTitle/);
+    assert.match(application, /function omittedSummary/);
+    assert.match(application, /artifact-store write/);
+    assert.match(application, /Todo status is navigation only/);
     assert.doesNotMatch(application, /narrative\.runs\.slice\(\)\.reverse\(\)/);
 
     const meta = await fetch(`${address.url}/api/meta`).then((response) => response.json());
@@ -100,7 +103,7 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
     runId,
     stepId,
     includedBlockIds: ["user-task"],
-    omittedBlockIds: [],
+    omittedBlockIds: ["history:omitted:run_prior"],
     estimatedTokens: 320,
     budgetTokens: 8_000,
   }, actor);
@@ -159,6 +162,7 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
   assert.equal(step.status, "settled");
   assert.equal(step.finishReason, "action-requested");
   assert.equal(step.context.estimatedTokens, 320);
+  assert.deepEqual(step.context.omittedBlockIds, ["history:omitted:run_prior"]);
   assert.match(step.modelReasoning, /Prefer an edit over a rewrite/);
   const action = step.actions[0];
   assert.equal(action.toolName, "edit");

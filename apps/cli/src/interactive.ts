@@ -2094,19 +2094,35 @@ class DashboardComponent implements Component {
     const usable = Math.max(20, width);
     if (!this.#dirty && usable === this.#cachedWidth) return this.#cachedLines;
     // Notices live in the Working strip above the composer so long chats do not hide them.
-    this.#cachedLines = this.#presenter.render(usable).flatMap((line) => {
-      if (line.startsWith("notice  ")) return [];
+    const sourceLines = this.#presenter.render(usable);
+    const rendered: string[] = [];
+    for (let index = 0; index < sourceLines.length;) {
+      const line = sourceLines[index]!;
+      if (line.startsWith("notice  ")) {
+        index += 1;
+        continue;
+      }
       if (line.startsWith(USER_MESSAGE_PREFIX)) {
-        const text = line.slice(USER_MESSAGE_PREFIX.length);
         const paint = (content: string) =>
           theme.bg("userMessageBg", theme.fg("roleUser", padToDisplayWidth(content, usable)));
-        const body = wrapTextWithAnsi(` ${text} `, usable).map((wrapped) => paint(wrapped));
-        // Extra bg rows so short user turns are not a one-line strip.
+        const body: string[] = [];
+        while (
+          index < sourceLines.length &&
+          sourceLines[index]!.startsWith(USER_MESSAGE_PREFIX)
+        ) {
+          const text = sourceLines[index]!.slice(USER_MESSAGE_PREFIX.length);
+          body.push(...wrapTextWithAnsi(` ${text} `, usable).map((wrapped) => paint(wrapped)));
+          index += 1;
+        }
+        // Pad the whole message block once; logical lines should not each look like a separate turn.
         const pad = paint("");
-        return [pad, ...body, pad];
+        rendered.push(pad, ...body, pad);
+        continue;
       }
-      return wrapTextWithAnsi(styleLine(line), usable);
-    });
+      rendered.push(...wrapTextWithAnsi(styleLine(line), usable));
+      index += 1;
+    }
+    this.#cachedLines = rendered;
     this.#cachedWidth = usable;
     this.#dirty = false;
     return this.#cachedLines;

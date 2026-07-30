@@ -1079,7 +1079,9 @@ export class TurnLoop {
         if (overlap.length > 0 && !chainedEdit) {
           throw new ToolFailure(
             "BATCH_WRITE_CONFLICT",
-            `A prior write in this step already changed ${overlap.join(", ")}; re-read that path, then edit with the new expectedSha256`,
+            inspected.name === "edit"
+              ? `A prior write in this Step already changed ${overlap.join(", ")}; re-read that path, then edit with the new expectedSha256`
+              : `A prior non-read Action in this Step already targeted ${overlap.join(", ")}; submit the dependent mutation in a later Step after a fresh observation`,
           );
         }
       }

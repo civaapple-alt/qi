@@ -1146,6 +1146,27 @@ test("artifact tool stores complete content behind a content-addressed reference
     grant(broker);
     const registry = new ToolRegistry(broker);
     registry.register("artifact", artifactTool);
+    const first = registry.inspect(
+      "artifact",
+      identity(registry, "artifact"),
+      { content: "durable evidence", mediaType: "text/plain" },
+      context(root, artifactStore),
+    );
+    const repeated = registry.inspect(
+      "artifact",
+      identity(registry, "artifact"),
+      { content: "durable evidence", mediaType: "text/plain" },
+      context(root, artifactStore),
+    );
+    const distinct = registry.inspect(
+      "artifact",
+      identity(registry, "artifact"),
+      { content: "different evidence", mediaType: "text/plain" },
+      context(root, artifactStore),
+    );
+    assert.match(first.resources[0], /^artifact-store:local:[a-f0-9]{64}$/);
+    assert.deepEqual(repeated.resources, first.resources);
+    assert.notDeepEqual(distinct.resources, first.resources);
 
     const settlement = await registry.execute(
       "artifact",

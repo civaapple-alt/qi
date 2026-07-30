@@ -500,7 +500,7 @@ function detectSignals(narrative, events) {
   const knownRunIds = new Set(narrative.runs.map((run) => run.runId));
   for (const run of narrative.runs) {
     const actions = run.steps.flatMap((step) => step.actions);
-    const writeActions = actions.filter((action) => action.effect === "write" && action.status === "completed");
+    const workspaceWriteActions = actions.filter(isCompletedWorkspaceMutation);
     const failedActions = actions.filter((action) => action.status === "failed");
     const indeterminate = actions.filter((action) => action.status === "indeterminate");
     if (run.status === "failed" || run.status === "parked") {
@@ -537,13 +537,13 @@ function detectSignals(narrative, events) {
     if (run.summary.stepCount >= 12) {
       signals.push(signal("info", "LONG_RUN", `${run.summary.stepCount} Steps and ${run.summary.actionCount} Actions warrant a convergence review`, { runId: run.runId }));
     }
-    if (writeActions.length > 0 && run.displayStatus === "responded" && !actions.some(isVerificationAction)) {
-      signals.push(signal("medium", "MUTATION_WITHOUT_OBSERVED_VERIFICATION", `${writeActions.length} completed mutation(s), but no declared or recognizable verification Action was observed`, { runId: run.runId }));
+    if (workspaceWriteActions.length > 0 && run.displayStatus === "responded" && !actions.some(isVerificationAction)) {
+      signals.push(signal("medium", "MUTATION_WITHOUT_OBSERVED_VERIFICATION", `${workspaceWriteActions.length} completed Workspace mutation(s), but no declared or recognizable verification Action was observed`, { runId: run.runId }));
     }
-    if (writeActions.length > 0 && run.displayStatus === "responded") {
+    if (workspaceWriteActions.length > 0 && run.displayStatus === "responded") {
       signals.push(signal("info", "NO_FORMAL_ACCEPTANCE", "Workspace mutation ended with response completion, not evidence-backed verified completion", { runId: run.runId }));
     }
-    if (run.displayStatus === "responded" && writeActions.length === 0) {
+    if (run.displayStatus === "responded" && workspaceWriteActions.length === 0) {
       const finalText = [...run.steps]
         .reverse()
         .map((step) => step.modelText)
@@ -552,7 +552,7 @@ function detectSignals(narrative, events) {
         signals.push(signal(
           "medium",
           "CLAIMED_MUTATION_WITHOUT_ACTIONS",
-          "Final response claims a durable mutation, but this Run had no completed write Action",
+          "Final response claims a durable Workspace mutation, but this Run had no completed Workspace mutation Action",
           { runId: run.runId },
         ));
       }
@@ -597,6 +597,15 @@ function detectSignals(narrative, events) {
     }
   }
   return signals.sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+}
+
+function isCompletedWorkspaceMutation(action) {
+  if (action.status !== "completed") return false;
+  if (new Set(["edit", "write", "move", "remove"]).has(action.toolName)) return true;
+  return (
+    new Set(["shell", "script"]).has(action.toolName) &&
+    Boolean(action.diff || action.process?.workspaceChanged)
+  );
 }
 
 function isVerificationAction(action) {

@@ -78,7 +78,12 @@ export interface WebStepProjection {
   modelReasoning: string | undefined;
   provider: string | undefined;
   model: string | undefined;
-  context: { estimatedTokens: number; budgetTokens: number; omitted: number } | undefined;
+  context: {
+    estimatedTokens: number;
+    budgetTokens: number;
+    omitted: number;
+    omittedBlockIds: string[];
+  } | undefined;
   rejectedCalls: Array<{ toolName: string; errorCode: string; reason: string }>;
   actions: WebActionProjection[];
   startSequence: number | undefined;
@@ -212,6 +217,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
               estimatedTokens: step.context.estimatedTokens,
               budgetTokens: step.context.budgetTokens,
               omitted: step.context.omittedBlockIds.length,
+              omittedBlockIds: [...step.context.omittedBlockIds],
             }
           : undefined,
         rejectedCalls: (step.rejectedActionCalls ?? []).map((call) => ({

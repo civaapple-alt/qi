@@ -998,7 +998,9 @@ export const gitTool = defineTool({
 });
 
 export const artifactTool = defineTool({
-  description: "Store complete text as a content-addressed Artifact and return its durable reference.",
+  description:
+    "Store complete text in Qi's machine-private content-addressed Artifact store and return its durable reference. " +
+    "This does not create or modify a Workspace file and must not be used as a substitute for write/edit.",
   input: Type.Object(
     { content: Type.String(), mediaType: Type.String({ minLength: 1, maxLength: 200 }) },
     { additionalProperties: false },
@@ -1012,7 +1014,10 @@ export const artifactTool = defineTool({
     { additionalProperties: false },
   ),
   effect: () => "write",
-  resources: () => ["artifact-store:local"],
+  resources: (input) => {
+    const request = input as { content: string };
+    return [`artifact-store:local:${hash(request.content)}`];
+  },
   async execute(input, context) {
     const request = input as { content: string; mediaType: string };
     return context.artifactStore.put(Buffer.from(request.content), request.mediaType);

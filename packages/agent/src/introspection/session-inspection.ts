@@ -374,16 +374,55 @@ function countActionFacts(run: NonNullable<SessionView["runs"][string]>): {
   writeCompleted: number;
   writeFailed: number;
   readCompleted: number;
+  workspaceWriteCompleted: number;
+  workspaceWriteFailed: number;
+  artifactWriteCompleted: number;
+  artifactWriteFailed: number;
+  otherWriteCompleted: number;
+  otherWriteFailed: number;
 } {
   let writeCompleted = 0;
   let writeFailed = 0;
   let readCompleted = 0;
+  let workspaceWriteCompleted = 0;
+  let workspaceWriteFailed = 0;
+  let artifactWriteCompleted = 0;
+  let artifactWriteFailed = 0;
+  let otherWriteCompleted = 0;
+  let otherWriteFailed = 0;
+  const workspaceTools = new Set(["write", "edit", "move", "remove"]);
   for (const action of Object.values(run.actions)) {
-    if (action.effect === "write" && action.status === "completed") writeCompleted += 1;
-    else if (action.effect === "write" && action.status === "failed") writeFailed += 1;
-    else if (action.effect === "read" && action.status === "completed") readCompleted += 1;
+    if (action.effect === "read" && action.status === "completed") {
+      readCompleted += 1;
+      continue;
+    }
+    if (action.effect !== "write" || (action.status !== "completed" && action.status !== "failed")) continue;
+    const completed = action.status === "completed";
+    if (completed) writeCompleted += 1;
+    else writeFailed += 1;
+    if (workspaceTools.has(action.toolName)) {
+      if (completed) workspaceWriteCompleted += 1;
+      else workspaceWriteFailed += 1;
+    } else if (action.toolName === "artifact") {
+      if (completed) artifactWriteCompleted += 1;
+      else artifactWriteFailed += 1;
+    } else if (completed) {
+      otherWriteCompleted += 1;
+    } else {
+      otherWriteFailed += 1;
+    }
   }
-  return { writeCompleted, writeFailed, readCompleted };
+  return {
+    writeCompleted,
+    writeFailed,
+    readCompleted,
+    workspaceWriteCompleted,
+    workspaceWriteFailed,
+    artifactWriteCompleted,
+    artifactWriteFailed,
+    otherWriteCompleted,
+    otherWriteFailed,
+  };
 }
 
 function projectStep(

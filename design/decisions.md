@@ -427,6 +427,34 @@ event stream and can leak binary content into logs, redaction, and context accou
   materialization, missing-Artifact recovery, image Action authorization, ordered TTY composition, and queued
   follow-ups.
 
+## ADR-0029: separate Workspace mutation from private Artifact persistence
+
+Pressure: Artifact storage and Workspace file tools both use a durable `write` effect, but they change different
+worlds. A model without Workspace Write authority can still persist diagnostic or handoff Artifacts. Treating those
+Actions as Workspace writes makes implementation progress, restored-history settlement, and operator projections
+look stronger than the underlying facts. A single coarse `artifact-store:local` resource also makes independent
+content-addressed puts conflict inside one Step.
+
+- Artifact persistence is machine-private Runtime state. It never creates, edits, moves, or removes a Workspace
+  file and cannot substantiate an implementation Todo or a claim that project code landed.
+- The model-visible Artifact Tool and Agent-mode control block state this boundary explicitly. When the user's task
+  requires Workspace mutation but Write authority is disabled, the Agent stops and directs the human to the
+  permission control instead of substituting Artifacts.
+- Content-addressed Artifact puts inspect a digest-scoped resource. Different digests may settle independently in
+  one Step; the same digest keeps one resource identity for authorization, serialization, replay, and recovery.
+- Bounded introspection preserves the legacy aggregate write counters for compatibility and adds separate
+  Workspace, Artifact, and other-write counts. Operator surfaces prefer the separated categories and continue to
+  label every count as diagnostic rather than Evidence.
+- Work Plan state remains model-authored navigation, not a completion gate. A surface may warn when completed
+  implementation Todos have no completed Workspace mutation or verification in the Run, but it does not rewrite
+  the durable Work Plan.
+- Compatibility is additive: Session event schemas, effect names, database layout, and existing aggregate
+  inspection fields remain valid. Artifact capability resources become digest-scoped, so application leases use
+  the corresponding bounded wildcard.
+- Required evidence covers Write-disabled Agent context, Artifact-vs-Workspace inspection counts, two distinct
+  same-Step Artifact puts, same-digest resource identity, permission-safe Work Plan presentation, and replay of
+  existing Sessions whose Artifact Actions used the legacy coarse resource.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

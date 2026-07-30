@@ -133,7 +133,10 @@ composer (Esc closes / pops a level); they do not write Session events or append
 dismissing them does not cancel an active Run or Subagent. Unknown slash commands keep the chat open and show a
 short notice (they do not open `/help`). When a Run fails with `INVALID_MODEL_ACTION` because the model called an
 unadvertised capability-gated tool (for example `edit` without Write), the handoff and notice point to
-`/permissions` to enable the missing grant. Write/edit Action cards still show unified diffs inline. Non-TTY line mode prints the same panel body after
+`/permissions` to enable the missing grant. Every Run also receives an explicit Workspace Write enabled/disabled
+fact: when disabled, a mutation task should stop promptly and request the grant instead of drafting project files
+into the machine-private `artifact` store. Artifact persistence never changes the Workspace or proves a Work Plan
+item complete. Write/edit Action cards still show unified diffs inline. Non-TTY line mode prints the same panel body after
 the transcript. Working/phase always follows the executing Run; history selection in `/runs` remains observational.
 Choosing another Session from `/sessions` closes the TUI and relaunches in-process with that `sessionId`
 (same AuthSession); **New Session** clears `sessionId`. The current Session is marked `← current`.
@@ -167,7 +170,8 @@ Next Run use temporary choice panels over the composer; transcript cards stay co
 ([ADR 0011](../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)).
 
 The editor submits with `Enter` and inserts a newline with `Shift+Enter` or `Ctrl+J`; bracketed multi-line paste
-is preserved as one message. A compact pixel mark appears before the first Run, then yields attention to the
+is preserved as one message. A rendered multi-line user message receives one shared top/bottom padding pair,
+not separate card spacing for every logical line. A compact pixel mark appears before the first Run, then yields attention to the
 Session timeline. Each Run injects at most the Workspace-root `AGENTS.md` (≤64 KiB, non-symlink) as bounded
 workspace instructions; nested `AGENTS.md` files are not auto-loaded.
 

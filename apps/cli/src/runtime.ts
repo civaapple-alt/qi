@@ -967,6 +967,7 @@ export class TuiRuntime {
         this.shellProfiles,
         this.#codeactRuntime,
         skills,
+        this.#allowWrite,
         this.#allowDelegate,
         mode,
         this.#mounts,
@@ -1414,7 +1415,7 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
       subject,
       tools: ["artifact"],
       effects: ["write"],
-      resources: ["artifact-store:local"],
+      resources: ["artifact-store:local:**"],
       expiresAt,
     },
     {
@@ -1553,6 +1554,7 @@ async function buildTuiContextBlocks(
   shellProfiles: ShellProfileSnapshot,
   codeactRuntime: "docker" | "podman" | undefined,
   skills: readonly CatalogSkill[],
+  allowWrite: boolean,
   allowDelegate: boolean,
   mode: SessionMode,
   mounts: readonly RuntimeMount[] = [],
@@ -1619,7 +1621,7 @@ async function buildTuiContextBlocks(
       kind: "constitution",
       source: "qi:tui-mode",
       role: "system",
-      content: modeGuidance(mode, allowDelegate),
+      content: modeGuidance(mode, allowDelegate, allowWrite),
       priority: 99,
       required: true,
       retentionReason: "Active Session mode policy",
@@ -1671,7 +1673,7 @@ async function buildTuiContextBlocks(
   return blocks;
 }
 
-function modeGuidance(mode: SessionMode, allowDelegate: boolean): string {
+function modeGuidance(mode: SessionMode, allowDelegate: boolean, allowWrite: boolean): string {
   if (mode === "ask") {
     return (
       "Session mode is Ask. Answer questions and explore with read-only tools only. " +
@@ -1694,10 +1696,14 @@ function modeGuidance(mode: SessionMode, allowDelegate: boolean): string {
       "Executor will receive the accepted plan but none of this planning conversation."
     );
   }
+  const writeGuidance = allowWrite
+    ? "Dedicated Workspace Write permission is enabled; use edit/write and wait for their settlements before claiming project changes. "
+    : "Dedicated Workspace Write permission is disabled. If the request requires project-file mutation and no authorized mutation tool is advertised, stop promptly and ask the human to enable Write with /permissions; do not spend Steps drafting file contents into Artifacts. ";
   return (
-    "Session mode is Agent. Use the tools granted at launch to execute the user request. " +
+    "Session mode is Agent. Use the tools granted at launch to execute the user request. " + writeGuidance +
     "Workspace mutations require edit/write (or authorized shell/script mutation) tool results in this Run; " +
     "do not report a file as fixed from memory, history narration, or an unexecuted plan. " +
+    "The artifact tool writes only machine-private Qi state: it never changes the Workspace and cannot justify marking an implementation Todo completed. " +
     "For cross-package work, three or more meaningful implementation steps, phased migrations, or multi-round validation, " +
     "use update_plan as a Work Plan/Todo and keep it current with at most one in_progress item. Skip update_plan for simple " +
     "tasks. A Work Plan is navigation, not completion evidence. Do not call plan_document; switch to Plan mode when a new " +

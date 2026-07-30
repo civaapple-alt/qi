@@ -22,6 +22,9 @@ test("TUI applyCapabilities enables write tools mid-session and persists project
     await runtime.run("Inspect tools.");
     assert.equal(model.requests[0].tools.some((tool) => tool.name === "edit"), false);
     assert.equal(model.requests[0].tools.some((tool) => tool.name === "write"), false);
+    assert.match(requestText(model.requests[0]), /Workspace Write permission is disabled/);
+    assert.match(requestText(model.requests[0]), /\/permissions/);
+    assert.match(requestText(model.requests[0]), /machine-private/);
 
     const applied = await runtime.applyCapabilities({ write: true });
     assert.deepEqual(applied.capabilities.write, true);
@@ -30,6 +33,7 @@ test("TUI applyCapabilities enables write tools mid-session and persists project
     await runtime.run("Edit a file.");
     assert.equal(model.requests[1].tools.some((tool) => tool.name === "edit"), true);
     assert.equal(model.requests[1].tools.some((tool) => tool.name === "write"), true);
+    assert.match(requestText(model.requests[1]), /Workspace Write permission is enabled/);
 
     const loaded = await loadProjectConfig(projectConfigPath);
     assert.equal(loaded.config.capabilities?.write, true);
@@ -152,4 +156,12 @@ function responseModel() {
     { type: "text.delta", delta: "Done again." },
     { type: "completed", finishReason: "stop", responseId: "response_caps_catalog_2" },
   ]]);
+}
+
+function requestText(request) {
+  return request.messages
+    .flatMap((message) => message.content)
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
 }
