@@ -24,6 +24,8 @@ Callers provide uniquely identified `ContextBlock` values with kind, priority, r
 - Duplicate block IDs are rejected.
 - Equal input and estimator produce equal ordering and output.
 - The result reports both included and omitted blocks.
+- `blockStats` aggregates included/omitted counts and estimated tokens by `ContextKind` in deterministic
+  first-seen order.
 
 ## Failure semantics
 
@@ -56,7 +58,8 @@ const compiled = compileContext({
 
 ## Public API
 
-`compileContext()`, context block/result types, `TokenEstimator`, and `approximateTokenEstimator`.
+`compileContext()`, context block/result types (including `ContextBlockStats`), `TokenEstimator`, and
+`approximateTokenEstimator`.
 
 ## Change guide
 

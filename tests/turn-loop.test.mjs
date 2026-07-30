@@ -129,6 +129,15 @@ test("TurnLoop completes a response-only Run with durable context and model boun
     const step = run.steps[run.stepOrder[0]];
     assert.equal(step.context.includedBlockIds.includes("constitution"), true);
     assert.equal(step.context.includedBlockIds.includes("tool-catalog"), true);
+    assert.deepEqual(step.context.blockStats, [
+      {
+        kind: "constitution",
+        includedCount: 1,
+        includedEstimatedTokens: 6,
+        omittedCount: 0,
+        omittedEstimatedTokens: 0,
+      },
+    ]);
     assert.equal(step.model.text, "A grounded answer");
     assert.equal(step.model.reasoning, "A short reason");
     assert.deepEqual(

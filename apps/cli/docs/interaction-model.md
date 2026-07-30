@@ -219,6 +219,10 @@ The effective configuration distinguishes the provider/model window, prompt work
 Within a Run, `/context` lists reclaimed estimated tokens from committed `context.compacted` events. A settled
 exchange remains complete for its first model consumer, then may become an Artifact-backed causal summary under
 pressure. If required context still cannot fit, the Run parks at the safe Step boundary with reason `budget`.
+When the selected Step has `context.compiled.blockStats`, the same panel lists each ContextBlock kind's included
+token share, included/omitted counts, and omitted estimated tokens. Conversation messages and advertised Tool
+schemas are shown as one separate non-block subtotal because they are part of prompt use but are not
+ContextBlocks.
 
 ## Read-only directory mounts
 

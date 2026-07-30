@@ -1663,6 +1663,100 @@ test("renderPanel exposes config for temporary panels", () => {
   assert.match(presenter.renderWelcome(80).join("\n"), /QI|栖/);
 });
 
+test("context panel shows ContextBlock kind shares, counts, and omitted tokens", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "context-v1",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  presenter.update([], {
+    sessionId: "ses_context",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    currentRunId: "run_context",
+    runOrder: ["run_context"],
+    runs: {
+      run_context: {
+        runId: "run_context",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "inspect context",
+        stepOrder: ["stp_context"],
+        steps: {
+          stp_context: {
+            stepId: "stp_context",
+            status: "completed",
+            context: {
+              estimatedTokens: 10_000,
+              budgetTokens: 64_000,
+              includedBlockIds: ["constitution", "memory:1", "tool-catalog", "conversation:0"],
+              omittedBlockIds: ["memory:2", "skills:catalog"],
+              blockStats: [
+                {
+                  kind: "constitution",
+                  includedCount: 1,
+                  includedEstimatedTokens: 4_800,
+                  omittedCount: 0,
+                  omittedEstimatedTokens: 0,
+                },
+                {
+                  kind: "memory",
+                  includedCount: 1,
+                  includedEstimatedTokens: 1_200,
+                  omittedCount: 1,
+                  omittedEstimatedTokens: 800,
+                },
+                {
+                  kind: "skill",
+                  includedCount: 0,
+                  includedEstimatedTokens: 0,
+                  omittedCount: 1,
+                  omittedEstimatedTokens: 2_000,
+                },
+              ],
+            },
+            model: { text: "done", finishReason: "stop" },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "idle" },
+  });
+
+  const lines = presenter.renderPanel("context").join("\n");
+  assert.match(lines, /block mix\s+2 included · 2 omitted · 6\.0k included tokens/);
+  assert.match(lines, /constitution\s+4\.8k ·\s+80% · 1 in \/ 0 out/);
+  assert.match(lines, /memory\s+1\.2k ·\s+20% · 1 in \/ 1 out · 800 omitted/);
+  assert.match(lines, /skill\s+0 ·\s+0% · 0 in \/ 1 out · 2\.0k omitted/);
+  assert.match(lines, /non-block\s+4\.0k · conversation messages \+ advertised Tool schemas/);
+  assert.match(lines, /candidates\s+8\.8k ContextBlock tokens before omission/);
+});
+
 test("info notices expire while Run notices remain until explicitly cleared", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",

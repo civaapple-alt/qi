@@ -43,6 +43,11 @@ matched value and has no mutable projection state.
 estimates, message count, pressure reason, and content-addressed Artifact reference. It changes only future model
 working context. The source model, Action, authority, and settlement events remain append-only truth.
 
+`context.compiled` records prompt budget/use, selected and omitted block identities, and optional bounded
+`blockStats` aggregates by ContextBlock kind. The aggregates contain included/omitted counts and estimated tokens
+only; they do not persist Block content, sources, retention reasons, conversation text, or Tool schemas. Older
+events without `blockStats` remain replayable and render the aggregate view as unavailable.
+
 A ProcessTask begins only through a running Action. `task.started` records command identity, origin, PID, hard
 expiry, and private log reference; `task.stop.requested` records user/runtime intent; `task.exited` records a
 known terminal process result; `task.lost` records that ownership can no longer be proven. Pipe chunks remain a

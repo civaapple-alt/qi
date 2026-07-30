@@ -30,6 +30,8 @@ for untrusted serialized input.
 - Entity identity cannot be reassigned across Session, Run, Step, or Action boundaries.
 - IDs of different domain kinds are not interchangeable.
 - New events must remain replayable without requiring current process state.
+- `context.compiled.blockStats`, when present, carries only bounded per-kind included/omitted count and estimated
+  token aggregates. Block payloads, sources, and retention reasons remain outside Session truth.
 - `context.compacted` identifies the archived source exchange and token reduction without deleting its events.
 - `safety.redaction.applied` records only boundary, scope, category, and count; secret values are forbidden from
   the audit fact itself.

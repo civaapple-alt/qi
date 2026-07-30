@@ -22,6 +22,9 @@ Opaque credential handles remain the preferred transport. Previously persisted s
 
 - Provider/model window, next-response reserve, and prompt budget are distinct values.
 - The adapter and Turn Loop use the same resolved limits.
+- `context.compiled` may retain bounded aggregate ContextBlock accounting by kind: included/omitted counts and
+  estimated tokens. These replayable operator diagnostics never contain block content, source values, retention
+  reasons, or provider payloads; conversation and advertised Tool-schema cost remain a separate non-block subtotal.
 - Settled tool exchanges may be compacted into deterministic summaries plus Artifact references.
 - Session events and Artifacts remain complete durable evidence; compaction changes only future model input.
 - If required context still cannot fit, the Run parks with a budget outcome.
@@ -344,7 +347,7 @@ improving the requested task.
   ordinary capability decision; metadata already present in model context cannot widen that query.
 - Required Runtime ContextBlocks are reserved for safety or control invariants. Task-helpful diagnostics are
   optional and omission-visible. Payloads stay out of `context.compiled`; that event records selected/omitted
-  block identities and budgets only.
+  block identities, budgets, and bounded aggregate kind/count/token accounting only.
 - Rejected alternatives: replaying Action/tool transcripts or raw event JSON; embedding machine tags in assistant
   prose; automatically exposing IDs and exact counters “for debugging”; and withholding all settlement indication,
   which lets restored verbal mutation claims influence later Runs with no counter-signal.

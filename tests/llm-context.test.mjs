@@ -105,6 +105,29 @@ test("Context Compiler keeps required blocks and spends remaining budget by prio
   assert.deepEqual(compiled.included.map((block) => block.id), ["constitution", "goal-high"]);
   assert.deepEqual(compiled.omitted.map((block) => block.id), ["recent-low"]);
   assert.equal(compiled.estimatedTokens, 9);
+  assert.deepEqual(compiled.blockStats, [
+    {
+      kind: "constitution",
+      includedCount: 1,
+      includedEstimatedTokens: 4,
+      omittedCount: 0,
+      omittedEstimatedTokens: 0,
+    },
+    {
+      kind: "recent",
+      includedCount: 0,
+      includedEstimatedTokens: 0,
+      omittedCount: 1,
+      omittedEstimatedTokens: 4,
+    },
+    {
+      kind: "goal",
+      includedCount: 1,
+      includedEstimatedTokens: 5,
+      omittedCount: 0,
+      omittedEstimatedTokens: 0,
+    },
+  ]);
   assert.deepEqual(compiled.messages.map((message) => message.role), ["system", "system"]);
 });
 

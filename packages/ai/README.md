@@ -26,4 +26,6 @@ blocks are purpose-built least-information disclosures rather than serialized Se
 authority traces, and unrelated lifecycle diagnostics stay outside model context unless an explicit bounded
 introspection path is authorized.
 
-See [`docs/model/`](docs/model/) and [`docs/context/`](docs/context/) for adapter and compiler contracts.
+The compiler result includes deterministic per-kind ContextBlock statistics for included/omitted counts and
+estimated tokens; callers can project composition without retaining block payloads. See
+[`docs/model/`](docs/model/) and [`docs/context/`](docs/context/) for adapter and compiler contracts.

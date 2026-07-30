@@ -329,6 +329,7 @@ export class TurnLoop {
               ...compiled.omitted.map((block) => block.id),
               ...history.omittedRunIds.map((omittedRunId) => `history:omitted:${omittedRunId}`),
             ],
+            blockStats: compiled.blockStats,
             estimatedTokens: compiled.estimatedTokens + conversationTokens + toolCatalogTokens,
             budgetTokens: request.contextBudgetTokens,
           },

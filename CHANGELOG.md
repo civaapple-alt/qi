@@ -7,6 +7,9 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+- `/context` now shows per-ContextBlock-kind included token share, included/omitted counts, omitted estimated
+  tokens, and a separate conversation/Tool-schema subtotal from replayable aggregate Session facts.
+
 ### Changed
 
 ### Deprecated

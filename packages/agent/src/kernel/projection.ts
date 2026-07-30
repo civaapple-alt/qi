@@ -19,6 +19,7 @@ import type {
   WorkPlanId,
 } from "@civaapple/qi-protocol";
 import { parseSessionEvent } from "@civaapple/qi-protocol";
+import type { ContextBlockStats } from "@civaapple/qi-ai/context";
 import { StateTransitionError } from "./errors.js";
 
 export type SessionMode = "ask" | "plan" | "agent";
@@ -51,6 +52,7 @@ export interface StepView {
   context?: {
     includedBlockIds: string[];
     omittedBlockIds: string[];
+    blockStats?: ContextBlockStats[];
     estimatedTokens: number;
     budgetTokens: number;
   };
@@ -1441,9 +1443,28 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       const step = getStep(run, event.data.stepId);
       if (step.status !== "running") fail("STEP_NOT_RUNNING", `Step ${step.stepId} is not running`);
       if (step.context) fail("CONTEXT_ALREADY_COMPILED", `Step ${step.stepId} already has compiled context`);
+      if (event.data.blockStats) {
+        const kinds = new Set(event.data.blockStats.map((item) => item.kind));
+        if (kinds.size !== event.data.blockStats.length) {
+          fail("CONTEXT_STATS_DUPLICATE_KIND", "Context block statistics must contain each kind at most once");
+        }
+        const includedTokens = event.data.blockStats.reduce(
+          (sum, item) => sum + item.includedEstimatedTokens,
+          0,
+        );
+        if (includedTokens > event.data.estimatedTokens) {
+          fail("CONTEXT_STATS_EXCEED_TOTAL", "Context block token statistics exceed total estimated prompt tokens");
+        }
+        if (event.data.blockStats.some((item) => item.includedCount + item.omittedCount === 0)) {
+          fail("CONTEXT_STATS_EMPTY_KIND", "Context block statistics cannot contain an empty kind");
+        }
+      }
       step.context = {
         includedBlockIds: [...event.data.includedBlockIds],
         omittedBlockIds: [...event.data.omittedBlockIds],
+        ...(event.data.blockStats === undefined
+          ? {}
+          : { blockStats: event.data.blockStats.map((item) => ({ ...item })) }),
         estimatedTokens: event.data.estimatedTokens,
         budgetTokens: event.data.budgetTokens,
       };

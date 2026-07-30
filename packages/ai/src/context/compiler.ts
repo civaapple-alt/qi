@@ -26,6 +26,14 @@ export interface EstimatedContextBlock extends ContextBlock {
   estimatedTokens: number;
 }
 
+export interface ContextBlockStats {
+  kind: ContextKind;
+  includedCount: number;
+  includedEstimatedTokens: number;
+  omittedCount: number;
+  omittedEstimatedTokens: number;
+}
+
 export interface TokenEstimator {
   estimate(text: string): number;
 }
@@ -34,6 +42,7 @@ export interface CompiledContext {
   messages: ModelMessage[];
   included: EstimatedContextBlock[];
   omitted: EstimatedContextBlock[];
+  blockStats: ContextBlockStats[];
   estimatedTokens: number;
   budgetTokens: number;
 }
@@ -97,6 +106,24 @@ export function compileContext(input: CompileContextInput): CompiledContext {
 
   const included = estimated.filter((block) => selected.has(block.id));
   const omitted = estimated.filter((block) => !selected.has(block.id));
+  const statsByKind = new Map<ContextKind, ContextBlockStats>();
+  for (const block of estimated) {
+    const stats = statsByKind.get(block.kind) ?? {
+      kind: block.kind,
+      includedCount: 0,
+      includedEstimatedTokens: 0,
+      omittedCount: 0,
+      omittedEstimatedTokens: 0,
+    };
+    if (selected.has(block.id)) {
+      stats.includedCount += 1;
+      stats.includedEstimatedTokens += block.estimatedTokens;
+    } else {
+      stats.omittedCount += 1;
+      stats.omittedEstimatedTokens += block.estimatedTokens;
+    }
+    statsByKind.set(block.kind, stats);
+  }
 
   return {
     messages: included.map((block) => ({
@@ -105,6 +132,7 @@ export function compileContext(input: CompileContextInput): CompiledContext {
     })),
     included: included.map(({ index: _, ...block }) => block),
     omitted: omitted.map(({ index: _, ...block }) => block),
+    blockStats: [...statsByKind.values()],
     estimatedTokens: used,
     budgetTokens: input.budgetTokens,
   };

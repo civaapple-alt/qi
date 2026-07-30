@@ -63,6 +63,9 @@ identities, outcomes, locators, and Artifact reference before the request procee
 
 Prompt accounting includes the advertised Tool catalog as well as portable messages and compiled ContextBlocks;
 tool schemas are not free space outside the model window.
+Each successful compilation also persists bounded `blockStats` grouped by ContextBlock kind. These statistics
+include selected/omitted counts and estimated tokens; conversation messages and advertised Tool schemas remain
+separate non-block prompt cost so operator percentages cannot be mistaken for provider payload accounting.
 
 Before provider entry, the complete portable message list passes through deterministic high-confidence secret
 redaction. Tool results are sanitized before they become feedback, model output is sanitized before reuse or

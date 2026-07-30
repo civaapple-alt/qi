@@ -227,7 +227,10 @@ Run or in-flight Subagent. Unsettled delegations cancel on Session recovery befo
 
 User TOML may set `context_window_tokens`. The TUI reserves up to 16K tokens for model output and shows window,
 prompt budget, reserve, current use, and compacted-exchange savings. `/context` projects committed
-`context.compacted` events; increasing the window does not turn off compaction or remove its Artifact trail.
+`context.compacted` events and committed per-kind ContextBlock statistics. The block view shows included token
+share, included/omitted counts, omitted estimated tokens, and a separate subtotal for conversation messages plus
+advertised Tool schemas. Older Steps without aggregate facts remain readable but report that the block mix is
+unavailable. Increasing the window does not turn off compaction or remove its Artifact trail.
 Without an explicit override, Kimi model windows resolve from the selected model: `k3` uses 1,048,576 and
 `k3-256k`, `kimi-for-coding`, and `kimi-for-coding-highspeed` use 262,144. Kimi defaults to `k3`.
 Set `reasoning_effort = "low" | "high" | "max" | "none"` (aliases documented by `@civaapple/qi-ai` are also

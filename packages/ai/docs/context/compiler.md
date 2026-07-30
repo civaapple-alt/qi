@@ -14,7 +14,8 @@ explicit token budget and estimator.
 3. Include all required blocks or throw `ContextBudgetError`.
 4. Order optional blocks deterministically by policy.
 5. Include optional blocks while budget remains.
-6. Return included blocks, omitted blocks, and total estimated cost.
+6. Return included blocks, omitted blocks, total estimated cost, and per-kind included/omitted count/token
+   aggregates.
 
 ## Integration rules
 

@@ -1056,6 +1056,23 @@ export class TuiPresenter {
       return lines;
     }
     const ratio = context.estimatedTokens / context.budgetTokens;
+    const blockStats = [...(context.blockStats ?? [])].sort(
+      (left, right) =>
+        right.includedEstimatedTokens - left.includedEstimatedTokens
+        || right.omittedEstimatedTokens - left.omittedEstimatedTokens
+        || left.kind.localeCompare(right.kind),
+    );
+    const includedBlockTokens = blockStats.reduce(
+      (sum, item) => sum + item.includedEstimatedTokens,
+      0,
+    );
+    const omittedBlockTokens = blockStats.reduce(
+      (sum, item) => sum + item.omittedEstimatedTokens,
+      0,
+    );
+    const includedBlockCount = blockStats.reduce((sum, item) => sum + item.includedCount, 0);
+    const omittedBlockCount = blockStats.reduce((sum, item) => sum + item.omittedCount, 0);
+    const nonBlockTokens = Math.max(0, context.estimatedTokens - includedBlockTokens);
     lines.push(
       `  Step        ${position(run.stepOrder, step.stepId)} · ${short(step.stepId)}`,
       `  usage       ${formatTokens(context.estimatedTokens)} / ${formatTokens(context.budgetTokens)} · ${Math.round(ratio * 100)}% ${progressBar(ratio, 20)}`,
@@ -1065,6 +1082,22 @@ export class TuiPresenter {
       `  compaction  ${step.compactions?.length ? `${step.compactions.length} settled exchange(s), ${formatTokens(step.compactions.reduce((sum, item) => sum + item.originalEstimatedTokens - item.compactedEstimatedTokens, 0))} reclaimed` : context.omittedBlockIds.some((id) => id.startsWith("history:")) ? "older Session turns were omitted" : "not triggered for this Step"}`,
       `  boundary    safe between Steps; parks if required context still exceeds ${formatTokens(context.budgetTokens)}`,
     );
+    if (blockStats.length > 0) {
+      lines.push(
+        "",
+        `  block mix   ${includedBlockCount} included · ${omittedBlockCount} omitted · ${formatTokens(includedBlockTokens)} included tokens`,
+        ...blockStats.map((item) => {
+          const share = includedBlockTokens === 0
+            ? 0
+            : Math.round((item.includedEstimatedTokens / includedBlockTokens) * 100);
+          return `    ${item.kind.padEnd(12)} ${formatTokens(item.includedEstimatedTokens).padStart(6)} · ${String(share).padStart(3)}% · ${item.includedCount} in / ${item.omittedCount} out · ${formatTokens(item.omittedEstimatedTokens)} omitted`;
+        }),
+        `  non-block   ${formatTokens(nonBlockTokens)} · conversation messages + advertised Tool schemas`,
+        `  candidates  ${formatTokens(includedBlockTokens + omittedBlockTokens)} ContextBlock tokens before omission`,
+      );
+    } else {
+      lines.push("", "  block mix   unavailable for this legacy Step");
+    }
     return lines;
   }
 

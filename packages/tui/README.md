@@ -20,6 +20,8 @@ Reusable Qi-specific terminal presentation and control components built on
   answers; durable Action input/output, rather than transient panel state, drives replay.
 - Group consecutive, same-Step read-only discovery Actions while preserving every durable Action for expansion
   and History Center inspection.
+- Project `/context` diagnostics with per-ContextBlock-kind included token share, included/omitted counts,
+  omitted token cost, and a separate conversation/Tool-schema subtotal when durable block statistics exist.
 - Keep bounded file Diff previews for completed mutations in the current Run, and
   expose bounded process failure evidence instead of hiding it inside the ToolFailure envelope.
 - Provide reusable composer, follow-up queue, selection/form/scroll panels, themes, and layout helpers.
