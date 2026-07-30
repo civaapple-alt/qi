@@ -112,8 +112,10 @@ and recovery semantics.
 `@civaapple/qi-ai` defines a portable streaming model protocol. Provider profiles explicitly declare wire API,
 auth schemes, model window, and supported capabilities. Provider-specific details do not enter Session truth.
 
-Credential values remain behind execution-side handles. High-confidence secret redaction runs before provider
-requests and durable persistence.
+Credential values remain behind execution-side handles. Sensitive Workspace paths require a human content grant
+before file bodies reach the model; ordinary authorized reads round-trip as raw text for precise edits. Narrow
+last-resort literal redaction (provider tokens, PEM blocks) may still run at provider and durable-event
+boundaries, and must not rewrite source-code forms.
 
 The Context Compiler selects source-aware blocks under a working budget. Model window, output reserve, and prompt
 budget are distinct. Settled exchanges may compact into causal summaries plus Artifact references; complete

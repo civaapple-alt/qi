@@ -25,7 +25,8 @@ denser engineering detail.
 The rich TTY has three stable regions: a committed同行 timeline, a provisional live status strip, and controls
 (composer, follow-ups, attention panels, statusline, and History Center). Provisional Thinking/tool output never
 enters Session truth or rewrites settled history. `Ctrl+O` expands the latest or explicitly selected block.
-`Ctrl+G` opens the highest-priority pending gate: Run Question, Plan Review, Next Run, then path grant. A new gate
+`Ctrl+G` opens the highest-priority pending gate: Run Question, Plan Review, Next Run, then sensitive-path
+grant, then outside-Workspace path grant. A new gate
 never steals focus while the composer contains text or a follow-up is being edited; it leaves a persistent
 attention notice instead.
 
@@ -214,12 +215,15 @@ names the exact Qi project-private data directory; when omitted it defaults to
 
 Per-Workspace policy lives in `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`
 (`max_steps`, `[capabilities]`, `[shell]`,
-`[[mounts]]`), overlaying global `~/.qi/config.toml`; CLI flags still win. `--add-dir PATH` and
+`[[mounts]]`, `sensitive_path_grants`, `[sensitive_paths]`), overlaying global `~/.qi/config.toml`; CLI flags still win. `--add-dir PATH` and
 `/mounts add` authorize **read-only** mounts (`mount:<id>/…`); mutations stay in the primary Workspace.
 Outside-root reads fail with `PATH_GRANT_REQUIRED` and open an allow/deny panel
-([ADR 0015](../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts)). Project policy seeds each
+([ADR 0015](../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts)). Sensitive Workspace
+files (for example `.env`) fail with `SENSITIVE_PATH_GRANT_REQUIRED` before any file body reaches the model and open a
+separate allow/deny panel; Allow persists `sensitive_path_grants` and emits Session audit facts
+([ADR 0001](../../design/decisions.md#adr-0001-gate-sensitive-paths-before-content-reaches-the-model)). Project policy seeds each
 launch (including in-process `/sessions` New Session / resume); `/permissions` can also apply capabilities to the
-live Session. Mount events are audit facts. Before a
+live Session. Mount and sensitive-path events are audit facts. Before a
 Run, the runtime reconciles additions, removals, and changed mount identities into the Session
 ([ADR 0015](../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts)).
 

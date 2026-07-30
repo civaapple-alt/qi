@@ -20,12 +20,21 @@ export interface ProjectMountConfig {
   readonly mode: "read";
 }
 
+export interface ProjectSensitivePathPolicy {
+  readonly extra?: readonly string[];
+  readonly exclude?: readonly string[];
+}
+
 export interface QiProjectConfig {
   readonly version: 1;
   readonly maxSteps?: number;
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
   readonly mounts?: readonly ProjectMountConfig[];
+  /** Workspace-relative paths whose file bodies may reach the model. */
+  readonly sensitivePathGrants?: readonly string[];
+  /** Optional overlays for default sensitive-path classification. */
+  readonly sensitivePaths?: ProjectSensitivePathPolicy;
 }
 
 export interface LoadedProjectConfig {
@@ -64,6 +73,17 @@ export async function saveProjectConfig(path: string, config: QiProjectConfig): 
     ...(config.mounts === undefined || config.mounts.length === 0
       ? {}
       : { mounts: config.mounts.map((mount) => ({ id: mount.id, path: mount.path, mode: mount.mode })) }),
+    ...(config.sensitivePathGrants === undefined || config.sensitivePathGrants.length === 0
+      ? {}
+      : { sensitive_path_grants: [...config.sensitivePathGrants] }),
+    ...(config.sensitivePaths === undefined
+      ? {}
+      : {
+        sensitive_paths: {
+          ...(config.sensitivePaths.extra === undefined ? {} : { extra: [...config.sensitivePaths.extra] }),
+          ...(config.sensitivePaths.exclude === undefined ? {} : { exclude: [...config.sensitivePaths.exclude] }),
+        },
+      }),
   });
   const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`;
   try {
@@ -150,12 +170,20 @@ function validateProjectConfig(value: unknown, path: string): QiProjectConfig {
     : validateCapabilities(root.capabilities, path);
   const shell = root.shell === undefined ? undefined : validateShell(root.shell, path);
   const mounts = root.mounts === undefined ? undefined : validateMounts(root.mounts, path);
+  const sensitivePathGrants = root.sensitive_path_grants === undefined
+    ? undefined
+    : validateSensitivePathGrants(root.sensitive_path_grants, path);
+  const sensitivePaths = root.sensitive_paths === undefined
+    ? undefined
+    : validateSensitivePathPolicy(root.sensitive_paths, path);
   return {
     version: 1,
     ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(shell === undefined ? {} : { shell }),
     ...(mounts === undefined ? {} : { mounts }),
+    ...(sensitivePathGrants === undefined ? {} : { sensitivePathGrants }),
+    ...(sensitivePaths === undefined ? {} : { sensitivePaths }),
   };
 }
 
@@ -233,6 +261,45 @@ function validateMounts(value: unknown, path: string): ProjectMountConfig[] {
     if (table.mode !== "read") throw new TypeError(`${path}: mounts[${index}].mode must be \"read\"`);
     return { id: table.id, path: resolve(table.path), mode: "read" as const };
   });
+}
+
+function validateSensitivePathGrants(value: unknown, path: string): string[] {
+  if (!Array.isArray(value)) throw new TypeError(`${path}: sensitive_path_grants must be an array`);
+  const seen = new Set<string>();
+  const grants: string[] = [];
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      throw new TypeError(`${path}: sensitive_path_grants[${index}] must be a non-empty string`);
+    }
+    if (entry.includes("\\") || entry.startsWith("/") || /^[A-Za-z]:/.test(entry)) {
+      throw new TypeError(`${path}: sensitive_path_grants[${index}] must be a Workspace-relative path`);
+    }
+    const normalized = entry.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "") || ".";
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    grants.push(normalized);
+  }
+  return grants;
+}
+
+function validateSensitivePathPolicy(value: unknown, path: string): ProjectSensitivePathPolicy {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${path}: sensitive_paths must be a table`);
+  }
+  const table = value as Record<string, unknown>;
+  const readList = (key: "extra" | "exclude"): string[] | undefined => {
+    if (table[key] === undefined) return undefined;
+    if (!Array.isArray(table[key]) || !(table[key] as unknown[]).every((item) => typeof item === "string" && item.trim())) {
+      throw new TypeError(`${path}: sensitive_paths.${key} must be an array of non-empty strings`);
+    }
+    return [...new Set((table[key] as string[]).map((item) => item.replace(/\\/g, "/").trim()))];
+  };
+  const extra = readList("extra");
+  const exclude = readList("exclude");
+  return {
+    ...(extra === undefined ? {} : { extra }),
+    ...(exclude === undefined ? {} : { exclude }),
+  };
 }
 
 function isMissing(error: unknown): boolean {

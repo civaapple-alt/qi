@@ -21,9 +21,10 @@ limits. Optional frozen Run `mode` (`ask` / `plan` / `agent`) may only narrow ma
 Delegation intersects the requested child scope with the parent. `CredentialHandle` binds secret access to
 subject and intent while the secret stays behind the broker.
 
-`redactSensitiveText()` and `redactSensitiveValue()` provide the deterministic last-resort boundary for secret
-material discovered outside the broker, such as plaintext repository configuration. They return only sanitized
-values and category/count summaries; matched material is never included in metadata.
+`redactSensitiveText()` and `redactSensitiveValue()` provide a last-resort literal scrubber for extremely
+high-confidence credential shapes (Bearer values, provider tokens, URL userinfo, PEM blocks). Sensitive
+Workspace paths are gated by human content grants before file bodies reach the model; ordinary authorized
+reads round-trip as raw text for precise edit.
 
 ## Behavioral invariants
 
@@ -32,8 +33,9 @@ values and category/count summaries; matched material is never included in metad
 - Lease expiry and use limits are enforced independently of tool validation.
 - Delegation only narrows scope and emits an inspectable policy trace.
 - Credential material is not serialized into Session, context, or tool catalogs.
-- High-confidence credential assignments, authorization values, provider tokens, URL credentials, and private
-  keys are redacted before provider reuse or durable persistence.
+- Sensitive Workspace paths require an explicit human grant before content-exposing file tools return bodies.
+- Extremely high-confidence credential literals (provider tokens, PEM blocks, Bearer values, URL userinfo) may
+  still be redacted before provider reuse or durable persistence; source-code assignment forms are not rewritten.
 
 ## Failure semantics
 

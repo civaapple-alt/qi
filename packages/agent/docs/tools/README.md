@@ -83,7 +83,9 @@ automatic inference path, so a hand-picked manifest is exactly as trustworthy as
   an error-shaped payload. Failure details retain bounded process evidence for the next Step.
 - In Git Workspaces, shell execution records before/after state hashes and a bounded tracked diff when that
   command changed Git state; an unchanged command does not repeat a pre-existing diff as its own mutation.
-- Tool output is redacted before Effect Journal completion, model feedback, and Session settlement.
+- Tool output may still pass through narrow literal redaction (provider tokens, PEM blocks, Bearer values, URL
+  userinfo) before Effect Journal completion, model feedback, and Session settlement. Source-code assignment
+  forms are not rewritten; sensitive Workspace paths are gated by human content grants instead.
 - Optional process activity callbacks receive only redacted bounded snapshots; they are provisional observation,
   not Tool settlement or durable evidence.
 - Oversized or complete outputs can be stored as Artifacts instead of flooding context. `shell`, `verify`, and

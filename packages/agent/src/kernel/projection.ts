@@ -359,6 +359,12 @@ export interface WorkspaceMountView {
   addedAt: string;
 }
 
+export interface SensitivePathGrantView {
+  path: string;
+  source: "project_config" | "grant" | "command";
+  grantedAt: string;
+}
+
 export interface SessionView {
   sessionId: SessionId;
   title?: string;
@@ -370,6 +376,8 @@ export interface SessionView {
   modelConfiguration?: SessionModelConfiguration;
   mounts: Record<string, WorkspaceMountView>;
   mountOrder: string[];
+  sensitivePathGrants: Record<string, SensitivePathGrantView>;
+  sensitivePathGrantOrder: string[];
   currentRunId?: RunId;
   runs: Record<string, RunView>;
   runOrder: RunId[];
@@ -661,6 +669,8 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       mode: event.data.mode ?? "agent",
       mounts: {},
       mountOrder: [],
+      sensitivePathGrants: {},
+      sensitivePathGrantOrder: [],
       runs: {},
       runOrder: [],
       goals: {},
@@ -796,6 +806,28 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       }
       delete view.mounts[event.data.mountId];
       view.mountOrder = view.mountOrder.filter((id) => id !== event.data.mountId);
+      break;
+    }
+    case "workspace.sensitive_path.granted": {
+      const path = event.data.path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "") || ".";
+      if (view.sensitivePathGrants[path]) {
+        fail("SENSITIVE_PATH_ALREADY_GRANTED", `Sensitive path ${path} is already granted`);
+      }
+      view.sensitivePathGrants[path] = {
+        path,
+        source: event.data.source,
+        grantedAt: event.occurredAt,
+      };
+      view.sensitivePathGrantOrder.push(path);
+      break;
+    }
+    case "workspace.sensitive_path.revoked": {
+      const path = event.data.path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "") || ".";
+      if (!view.sensitivePathGrants[path]) {
+        fail("SENSITIVE_PATH_NOT_FOUND", `Sensitive path ${path} is not granted`);
+      }
+      delete view.sensitivePathGrants[path];
+      view.sensitivePathGrantOrder = view.sensitivePathGrantOrder.filter((entry) => entry !== path);
       break;
     }
     case "plan.revision.recorded": {

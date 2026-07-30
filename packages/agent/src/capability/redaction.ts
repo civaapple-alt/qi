@@ -1,5 +1,4 @@
 export type SensitiveDataKind =
-  | "credential-assignment"
   | "authorization"
   | "provider-token"
   | "private-key"
@@ -15,12 +14,12 @@ export interface RedactionResult<T> {
   readonly redactions: readonly RedactionSummary[];
 }
 
-const secretKey = String.raw`(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|auth[_-]?token|refresh[_-]?token)`;
 const alreadyRedacted = /^\[REDACTED:[a-z-]+\]$/i;
 
 /**
- * Removes high-confidence credential material without retaining the matched value.
- * This is a last-resort safety boundary, not a replacement for opaque credential handles.
+ * Removes extremely high-confidence credential literals without retaining the matched value.
+ * Source-code assignment forms are intentionally left alone so authorized file reads can round-trip
+ * into precise edit. Sensitive Workspace paths are gated by human grants instead (ADR-0001).
  */
 export function redactSensitiveText(input: string): RedactionResult<string> {
   const counts = new Map<SensitiveDataKind, number>();
@@ -30,29 +29,17 @@ export function redactSensitiveText(input: string): RedactionResult<string> {
   };
 
   let value = input;
-  value = value.replace(
-    new RegExp(`((?:["']?${secretKey}["']?)\\s*[:=]\\s*)(["'])([^"'\\r\\n]{1,4096})(["'])`, "gi"),
-    (match, prefix: string, open: string, candidate: string, close: string) => {
-      if (open !== close || alreadyRedacted.test(candidate.trim())) return match;
-      return `${prefix}${open}${record("credential-assignment")}${close}`;
-    },
-  );
-  value = value.replace(
-    new RegExp(`((?:["']?${secretKey}["']?)\\s*[:=]\\s*)([^\\s,;{}\\]"']{4,4096})`, "gi"),
-    (match, prefix: string, candidate: string) => {
-      if (alreadyRedacted.test(candidate) || looksLikeCodeReference(candidate)) return match;
-      return `${prefix}${record("credential-assignment")}`;
-    },
-  );
-  value = value.replace(/(authorization\s*:\s*bearer\s+)([^\s,;]{8,4096})/gi, (_match, prefix: string) => (
-    `${prefix}${record("authorization")}`
-  ));
-  value = value.replace(/\b((?:https?|wss?):\/\/[^\s\/:@]+:)([^\s\/@]+)(@)/gi, (_match, prefix: string, _secret: string, suffix: string) => (
-    `${prefix}${record("url-credential")}${suffix}`
-  ));
+  value = value.replace(/(authorization\s*:\s*bearer\s+)([^\s,;]{8,4096})/gi, (match, prefix: string, candidate: string) => {
+    if (alreadyRedacted.test(candidate.trim())) return match;
+    return `${prefix}${record("authorization")}`;
+  });
+  value = value.replace(/\b((?:https?|wss?):\/\/[^\s\/:@]+:)([^\s\/@]+)(@)/gi, (match, prefix: string, secret: string, suffix: string) => {
+    if (alreadyRedacted.test(secret.trim())) return match;
+    return `${prefix}${record("url-credential")}${suffix}`;
+  });
   value = value.replace(
     /\b(?:sk-[A-Za-z0-9_-]{16,}|xai-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16})\b/g,
-    () => record("provider-token"),
+    (match) => (alreadyRedacted.test(match) ? match : record("provider-token")),
   );
   value = value.replace(
     /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]{1,100000}?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
@@ -97,10 +84,6 @@ export function mergeRedactionSummaries(
   const counts = new Map<SensitiveDataKind, number>();
   for (const group of groups) merge(counts, group);
   return summaries(counts);
-}
-
-function looksLikeCodeReference(value: string): boolean {
-  return /^(?:process\.env\.|Deno\.env|os\.environ|env\(|System\.getenv|Type\.|String\(|optional|required|undefined|null|true|false|\$\{|<)/i.test(value);
 }
 
 function merge(counts: Map<SensitiveDataKind, number>, entries: readonly RedactionSummary[]): void {

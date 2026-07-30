@@ -332,6 +332,30 @@ export const SessionEventSchema = Type.Union([
     ),
   ),
   event(
+    "workspace.sensitive_path.granted",
+    Type.Object(
+      {
+        path: Type.String({ minLength: 1, maxLength: 4_000 }),
+        source: Type.Union([
+          Type.Literal("project_config"),
+          Type.Literal("grant"),
+          Type.Literal("command"),
+        ]),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
+    "workspace.sensitive_path.revoked",
+    Type.Object(
+      {
+        path: Type.String({ minLength: 1, maxLength: 4_000 }),
+        reason: Type.String({ minLength: 1, maxLength: 500 }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
     "plan.revision.recorded",
     Type.Object(
       {
@@ -536,7 +560,6 @@ export const SessionEventSchema = Type.Union([
           Type.Object(
             {
               kind: Type.Union([
-                Type.Literal("credential-assignment"),
                 Type.Literal("authorization"),
                 Type.Literal("provider-token"),
                 Type.Literal("private-key"),

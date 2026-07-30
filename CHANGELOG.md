@@ -32,6 +32,8 @@ steps and investigation history belong in pull requests, not release notes.
   session analysis resolve Session databases under `sessions/` then `archives/`.
 - Rich TUI welcome and line-mode startup headers show the complete complementary `Permissions enabled` /
   `Permissions disabled` partition after `--safe`, config, and CLI overrides.
+- ADR-0001 now gates sensitive Workspace paths with human content grants instead of rewriting source-code
+  assignment forms before they reach the model; authorized file bodies round-trip for precise `edit`.
 
 ### Deprecated
 
@@ -46,11 +48,18 @@ steps and investigation history belong in pull requests, not release notes.
   padding around every logical line.
 - Clarified Web context omissions with their block category and made Artifact-vs-Workspace effects explicit in
   the Run contract instead of presenting every non-read Action as an undifferentiated write.
+
 ### Security
 
+- Sensitive Workspace paths (for example `.env`) now require an explicit human grant before file bodies reach the
+  model. Project `sensitive_path_grants` / `[sensitive_paths]` load at CLI startup, rehydrate as Session audit
+  facts, and drive a Ctrl+G allow/deny panel on `SENSITIVE_PATH_GRANT_REQUIRED` without collapsing into mount
+  `PATH_GRANT_REQUIRED` flow. Authorized reads return raw text so precise `edit` can round-trip; assignment-style
+  content redaction (for example `password: &str`) no longer rewrites source for the model.
 - Image URLs use the existing DNS-pinned public-network boundary with independent byte limits, MIME plus
   magic-byte verification, HTTPS downgrade prevention, and Network capability enforcement. Image bytes and data
   URLs never enter Session events or SQLite.
+
 ### Documentation
 
 - Added ADR-0028 and synchronized protocol, Agent, AI, Node, TUI, and CLI contracts for image ingestion,

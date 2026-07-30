@@ -37,6 +37,18 @@ export interface ToolExecutionContext {
   mounts?: readonly WorkspaceMount[];
   /** Live mount snapshot so a mid-Run human grant applies to the next Action. */
   getMounts?: () => readonly WorkspaceMount[];
+  /**
+   * Workspace-relative paths whose file bodies may reach the model after a human grant.
+   * Prefer getSensitivePathGrants for mid-Run confirmations.
+   */
+  sensitivePathGrants?: readonly string[];
+  /** Live sensitive-path grant snapshot so a mid-Run confirmation applies to the next Action. */
+  getSensitivePathGrants?: () => readonly string[];
+  /** Optional project overlays for sensitive-path classification. */
+  sensitivePathPolicy?: {
+    readonly extra?: readonly string[];
+    readonly exclude?: readonly string[];
+  };
   signal?: AbortSignal;
   effectJournal?: EffectJournal;
   idempotencyScope?: string;

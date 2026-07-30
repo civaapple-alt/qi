@@ -132,6 +132,9 @@ export class InteractiveTui {
   /** Pending PATH_GRANT_REQUIRED directories awaiting a human allow/deny panel. */
   #pendingPathGrants: string[] = [];
   #pathGrantKey: string | undefined;
+  /** Pending SENSITIVE_PATH_GRANT_REQUIRED Workspace-relative paths. */
+  #pendingSensitivePathGrants: string[] = [];
+  #sensitivePathGrantKey: string | undefined;
   /** Manual or config theme preference; auto-detect must not override non-auto choices. */
   #themePreference: ThemeName = "auto";
   #terminalScheme: "dark" | "light" | undefined;
@@ -300,15 +303,19 @@ export class InteractiveTui {
 
   onEvent(event: SessionEvent): void {
     // Parent projection only; child Sessions stay isolated (tokens read via childView lookup on render).
-    if (event.type === "action.failed" && event.data.errorCode === "PATH_GRANT_REQUIRED") {
+    if (event.type === "action.failed" && event.data.errorCode === "SENSITIVE_PATH_GRANT_REQUIRED") {
+      const path = extractSensitiveGrantPath(event.data.modelOutput);
+      if (path) this.#queueSensitivePathGrant(path);
+    } else if (event.type === "action.failed" && event.data.errorCode === "PATH_GRANT_REQUIRED") {
       const path = extractGrantPath(event.data.modelOutput);
-      if (path) this.#queuePathGrant(path);
+      if (path && !isSensitiveGrantFailure(event.data.modelOutput)) this.#queuePathGrant(path);
     }
     const view = this.#runtime.view();
     if (!this.#presenter.applyCommitted(event, view)) {
       this.#presenter.update(this.#runtime.events(), view);
     }
     if (event.type === "run.question.asked") this.#maybeOfferRunQuestion();
+    this.#maybeOfferSensitivePathGrant();
     this.#maybeOfferPathGrant();
     // Authority / safety / context.compiled update Working strip only — keep the transcript cached.
     if (eventAffectsTranscript(event)) this.#render();
@@ -644,6 +651,7 @@ export class InteractiveTui {
     this.#maybeOfferRunQuestion();
     this.#maybeOfferPlanReview();
     this.#maybeOfferNextRun();
+    this.#maybeOfferSensitivePathGrant();
     this.#maybeOfferPathGrant();
   }
 
@@ -671,6 +679,7 @@ export class InteractiveTui {
       runQuestion: Boolean(questionSetId && questionSet?.status === "pending"),
       planReview: view?.pendingReview?.status === "pending",
       nextRun: view?.pendingQuestion?.status === "pending" && view.pendingQuestion.kind === "next_run",
+      sensitivePathGrant: this.#pendingSensitivePathGrants.length > 0,
       pathGrant: this.#pendingPathGrants.length > 0,
     });
     if (gate === "run-question" && questionSetId) {
@@ -685,6 +694,12 @@ export class InteractiveTui {
       this.#openNextRunPanel();
       return;
     }
+    const sensitivePath = this.#pendingSensitivePathGrants[0];
+    if (gate === "sensitive-path-grant" && sensitivePath) {
+      this.#sensitivePathGrantKey = sensitivePath;
+      this.#openSensitivePathGrantPanel(sensitivePath);
+      return;
+    }
     const path = this.#pendingPathGrants[0];
     if (gate === "path-grant" && path) {
       this.#pathGrantKey = path;
@@ -693,6 +708,88 @@ export class InteractiveTui {
     }
     this.#presenter.setNotice("No pending question, review, or permission request.");
     this.#renderChrome();
+  }
+
+  #queueSensitivePathGrant(path: string): void {
+    const normalized = normalizeSensitiveGrantPath(path);
+    if (this.#runtime.sensitivePathGrants().includes(normalized)) return;
+    if (!this.#pendingSensitivePathGrants.includes(normalized)) {
+      this.#pendingSensitivePathGrants.push(normalized);
+    }
+  }
+
+  #maybeOfferSensitivePathGrant(): void {
+    // Allow during an active Run so the next Action can see a mid-Run grant via getSensitivePathGrants.
+    if (this.#active.size > 0 || this.#panels.open) return;
+    const next = this.#pendingSensitivePathGrants[0];
+    if (!next) {
+      this.#sensitivePathGrantKey = undefined;
+      return;
+    }
+    if (this.#sensitivePathGrantKey === next) return;
+    if (!this.#canAutoOpenGate()) {
+      this.#deferGate("Sensitive file permission needs your attention");
+      return;
+    }
+    this.#sensitivePathGrantKey = next;
+    this.#openSensitivePathGrantPanel(next);
+  }
+
+  #openSensitivePathGrantPanel(path: string): void {
+    if (this.#panels.open) this.#panels.closeAll();
+    this.#panels.push(new ListPanel({
+      title: "Allow model to read sensitive file content?",
+      hints: `↑↓ select · Enter confirm · Esc deny · ${oneLineHint(path)}`,
+      items: [
+        {
+          id: "allow",
+          label: "Allow",
+          description: "Persist grant in project policy; file body may reach the model",
+        },
+        {
+          id: "deny",
+          label: "Deny",
+          description: "Keep blocked; Agent continues to see SENSITIVE_PATH_GRANT_REQUIRED",
+        },
+      ],
+      onClose: () => {
+        this.#pendingSensitivePathGrants = this.#pendingSensitivePathGrants.filter(
+          (candidate) => candidate !== path,
+        );
+        this.#sensitivePathGrantKey = undefined;
+        this.#presenter.setNotice(`Denied sensitive path ${path}`);
+        this.#panels.dismiss();
+        this.#maybeOfferSensitivePathGrant();
+        this.#render();
+      },
+      onSelect: (item) => {
+        this.#panels.closeAll();
+        void this.#settleSensitivePathGrant(path, item.id === "allow");
+      },
+    }));
+    this.#render();
+  }
+
+  async #settleSensitivePathGrant(path: string, allow: boolean): Promise<void> {
+    this.#pendingSensitivePathGrants = this.#pendingSensitivePathGrants.filter(
+      (candidate) => candidate !== path,
+    );
+    this.#sensitivePathGrantKey = undefined;
+    if (!allow) {
+      this.#presenter.setNotice(`Denied sensitive path ${path}`);
+      this.#maybeOfferSensitivePathGrant();
+      this.#render();
+      return;
+    }
+    try {
+      const granted = await this.#runtime.grantSensitivePath(path);
+      this.#presenter.setNotice(`Granted sensitive path ${granted}`);
+      this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+    } catch (error) {
+      this.#presenter.setNotice(message(error));
+    }
+    this.#maybeOfferSensitivePathGrant();
+    this.#render();
   }
 
   #queuePathGrant(path: string): void {
@@ -2512,24 +2609,49 @@ function grantDirectory(path: string): string {
   return trimmed;
 }
 
-function extractGrantPath(modelOutput: unknown): string | undefined {
+function normalizeSensitiveGrantPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/, "") || ".";
+}
+
+function parseFailurePayload(modelOutput: unknown): {
+  details?: { path?: unknown; kind?: unknown };
+  message?: unknown;
+} | undefined {
   if (!Array.isArray(modelOutput)) return undefined;
   for (const part of modelOutput) {
     if (!part || typeof part !== "object") continue;
     const text = (part as { text?: unknown }).text;
     if (typeof text !== "string") continue;
     try {
-      const parsed = JSON.parse(text) as { details?: { path?: unknown }; message?: unknown };
-      if (typeof parsed.details?.path === "string" && parsed.details.path.trim()) {
-        return parsed.details.path.trim();
-      }
-      const match = typeof parsed.message === "string"
-        ? parsed.message.match(/(?:grant panel|readable):\s*(.+)$/i)
-        : undefined;
-      if (match?.[1]) return match[1].trim();
+      return JSON.parse(text) as { details?: { path?: unknown; kind?: unknown }; message?: unknown };
     } catch {
       // Ignore non-JSON tool failure payloads.
     }
+  }
+  return undefined;
+}
+
+function isSensitiveGrantFailure(modelOutput: unknown): boolean {
+  return parseFailurePayload(modelOutput)?.details?.kind === "sensitive";
+}
+
+function extractSensitiveGrantPath(modelOutput: unknown): string | undefined {
+  const parsed = parseFailurePayload(modelOutput);
+  if (typeof parsed?.details?.path !== "string" || !parsed.details.path.trim()) return undefined;
+  if (parsed.details.kind !== undefined && parsed.details.kind !== "sensitive") return undefined;
+  return normalizeSensitiveGrantPath(parsed.details.path.trim());
+}
+
+function extractGrantPath(modelOutput: unknown): string | undefined {
+  const parsed = parseFailurePayload(modelOutput);
+  if (parsed) {
+    if (typeof parsed.details?.path === "string" && parsed.details.path.trim()) {
+      return parsed.details.path.trim();
+    }
+    const match = typeof parsed.message === "string"
+      ? parsed.message.match(/(?:grant panel|readable):\s*(.+)$/i)
+      : undefined;
+    if (match?.[1]) return match[1].trim();
   }
   return undefined;
 }

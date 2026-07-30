@@ -12,7 +12,7 @@ export function eventAffectsTranscript(event: SessionEvent): boolean {
   if (type === "authority.requested" || type === "authority.granted") return false;
   if (type.startsWith("safety.")) return false;
   if (type === "context.compiled") return false;
-  if (type.startsWith("workspace.mount.")) return false;
+  if (type.startsWith("workspace.mount.") || type.startsWith("workspace.sensitive_path.")) return false;
   if (type.startsWith("memory.")) return false;
   if (type.startsWith("presence.")) return false;
   if (type.startsWith("session.archive") || type.startsWith("session.restore")) return false;

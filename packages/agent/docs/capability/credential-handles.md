@@ -22,14 +22,20 @@ that credential-backed authority was used without serializing the credential.
 
 ## Repository-discovered secrets
 
-Opaque handles cannot protect a password that already exists in a file the Agent is authorized to read. Qi
-therefore applies the same high-confidence redactor to Tool output, provider-bound portable messages, model
-output, and EventWriter payloads. The replacement preserves surrounding structure while
-`safety.redaction.applied` records only the boundary, category, and count.
+Opaque handles cannot protect a password that already exists in a Workspace file. Qi therefore:
 
-This guard is intentionally narrower than general sensitive-data classification. Existing Session databases are
-not retroactively rewritten; exposure response still requires rotating the credential and deciding whether to
-retain the affected database.
+1. Classifies high-risk paths (for example `.env`, `*.pem`) before content-exposing tools execute.
+2. Lets discovery tools (`list` / `tree` / `find`) show those paths as metadata, optionally marked `sensitive`.
+3. Requires an explicit human grant before any file body from those paths enters tool settlement or model
+   feedback (`SENSITIVE_PATH_GRANT_REQUIRED`). Grants persist in project config and Session audit facts.
+4. Returns authorized file bodies as raw text so precise `edit` can round-trip.
+
+Last-resort content redaction remains only for extremely high-confidence literals (provider API tokens, PEM
+private-key blocks, URL userinfo, Bearer authorization values). It must not rewrite source-code assignment
+forms such as `password: &str`, and it is not a substitute for path grants.
+
+Existing Session databases are not retroactively rewritten; exposure response still requires rotating the
+credential and deciding whether to retain the affected database.
 
 `tests/workspace-safety.test.mjs` covers subject- and intent-bound resolution. `tests/safety-redaction.test.mjs`
-covers model-boundary and durable-event redaction.
+covers sensitive-path gating, source round-trip, and narrow literal redaction.

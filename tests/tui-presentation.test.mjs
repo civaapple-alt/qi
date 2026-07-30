@@ -113,14 +113,30 @@ test("attention policy protects active input and orders Ctrl+G gates", () => {
     runQuestion: true,
     planReview: true,
     nextRun: true,
+    sensitivePathGrant: true,
     pathGrant: true,
   }), "run-question");
   assert.equal(highestPriorityAttention({
     runQuestion: false,
     planReview: true,
     nextRun: true,
+    sensitivePathGrant: true,
     pathGrant: true,
   }), "plan-review");
+  assert.equal(highestPriorityAttention({
+    runQuestion: false,
+    planReview: false,
+    nextRun: false,
+    sensitivePathGrant: true,
+    pathGrant: true,
+  }), "sensitive-path-grant");
+  assert.equal(highestPriorityAttention({
+    runQuestion: false,
+    planReview: false,
+    nextRun: false,
+    sensitivePathGrant: false,
+    pathGrant: true,
+  }), "path-grant");
 });
 
 test("semantic theme aliases fall back for legacy palettes and NO_COLOR rendering", () => {
@@ -2010,7 +2026,7 @@ test("accepted Formal Plan preview caps at 200 rendered lines and points to the 
 
 test("background ProcessTasks remain visible after their Run and can be stopped explicitly", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-task-"));
-  const taskSecret = "fixture-process-task-secret-9274";
+  const taskSecret = "sk-abcdefghijklmnopqrstuvwxyz012345";
   const activities = [];
   const model = new ScriptedModelPort([
     [
@@ -2020,7 +2036,7 @@ test("background ProcessTasks remain visible after their Run and can be stopped 
         name: "task",
         input: {
           command: process.execPath,
-          args: ["-e", `process.on('SIGTERM',()=>{}); console.log('api_key=${taskSecret}'); setInterval(() => console.log('tick'), 100)`],
+          args: ["-e", `process.on('SIGTERM',()=>{}); console.log('token ${taskSecret}'); setInterval(() => console.log('tick'), 100)`],
           lifetimeMs: 10_000,
         },
       },

@@ -8,15 +8,25 @@ historical records.
 For package ownership and the end-to-end model, see [system-design.md](system-design.md). Package-local details
 belong in `packages/*/README.md` and `packages/*/docs/`.
 
-## ADR-0001: redact secrets at model and durable-event boundaries
+## ADR-0001: gate sensitive paths before content reaches the model
 
-- Tool output is sanitized before effect settlement, model feedback, and Session events.
-- Portable messages are sanitized immediately before provider requests.
-- Event payloads are sanitized as a final persistence guard.
-- Redaction emits category/count audit facts, never the matched value.
-- The policy targets high-confidence credential shapes; it is not a general PII detector.
+- Discovery tools (`list`, `tree`, `find`) may expose sensitive file **paths** as metadata so the operator and
+  model can locate them. They must not return file bodies for those paths.
+- Content-exposing file tools (`read`, content `search`/`grep`, `edit`, `write`, and equivalent) classify the
+  target path before execute. Unclassified ordinary Workspace files may round-trip as raw text so precise `edit`
+  stays exact.
+- Paths classified as sensitive require an explicit human grant before any file body enters tool settlement or
+  model feedback. Grants are durable project configuration plus Session audit facts, and rehydrate into runtime
+  allowlists for later Actions.
+- Denial fails closed before the executor reads bytes (`SENSITIVE_PATH_GRANT_REQUIRED`), mirroring
+  `PATH_GRANT_REQUIRED` for outside-Workspace mounts. Do not hold a completed Action payload for post-read
+  approval.
+- Opaque credential handles remain the preferred transport for provider and execution-side secrets.
+- Last-resort content redaction, when retained, targets only extremely high-confidence literal shapes (for
+  example provider API tokens and PEM private-key blocks). It must not rewrite source-code assignment forms
+  such as `password: &str` or `jwt_secret: env::var(...)`, and it is not a substitute for path grants.
 
-Opaque credential handles remain the preferred transport. Previously persisted secrets are not silently rewritten.
+Previously persisted Session databases are not silently rewritten when this policy changes.
 
 ## ADR-0002: separate model window, output reserve, and working context
 

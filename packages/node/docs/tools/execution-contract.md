@@ -64,6 +64,12 @@ permission bits of an existing file so editing a script does not silently remove
 for creation or deliberate full replacement. Existing mutation targets must be regular, non-symlink files;
 directory replacement and mutation through a symbolic-link alias fail before content changes.
 
+Sensitive Workspace paths (for example `.env`, `*.pem`) may appear in `list` / `tree` / `find` metadata, but
+content-exposing tools (`read`, content `search`, `edit`, `write`) fail closed with
+`SENSITIVE_PATH_GRANT_REQUIRED` until the operator grants that Workspace-relative path. Grants are project
+durable and Session-audited; authorized bodies round-trip as raw text for precise `edit`. See
+[ADR 0001](../../../design/decisions.md#adr-0001-gate-sensitive-paths-before-content-reaches-the-model).
+
 After `EDIT_TARGET_NOT_FOUND`, reread the file and retry `edit` with a current unique fragment. A generally
 authorized shell process can still change Workspace files, but it is not the preferred fallback for editing:
 doing so gives up the dedicated tool's per-file freshness and unique-target assertions. Git-backed shell evidence

@@ -77,8 +77,10 @@ import {
   shellProfileResource,
   verificationResource,
   writeVerificationManifest,
+  normalizeWorkspaceRelativePath,
   type PreparedVerificationProfiles,
   type RegistrationHandle,
+  type SensitivePathPolicy,
   type ShellProfileSnapshot,
   type VerificationCandidate,
   type VerificationProfile,
@@ -155,6 +157,8 @@ export interface TuiRuntimeOptions {
   skillCompatibilityRoots?: readonly string[];
   projectConfigPath?: string;
   mounts?: readonly RuntimeMount[];
+  sensitivePathGrants?: readonly string[];
+  sensitivePathPolicy?: SensitivePathPolicy;
   onEvent?: (event: SessionEvent) => void;
   onActivity?: (activity: RuntimeActivity) => void;
   interactiveQuestions?: boolean;
@@ -219,6 +223,8 @@ export class TuiRuntime {
   #codeactRuntime: "docker" | "podman" | undefined;
   #verificationProfiles: readonly VerificationProfile[];
   #mounts: RuntimeMount[];
+  #sensitivePathGrants: string[];
+  #sensitivePathPolicy: SensitivePathPolicy;
   #skillSnapshot: readonly CatalogSkill[];
   #activeController: AbortController | undefined;
   #allowWrite = false;
@@ -306,6 +312,10 @@ export class TuiRuntime {
       mode: "read" as const,
       source: mount.source,
     }));
+    this.#sensitivePathGrants = [...(options.sensitivePathGrants ?? [])].map((path) =>
+      normalizeWorkspaceRelativePath(path),
+    );
+    this.#sensitivePathPolicy = freezeSensitivePathPolicy(options.sensitivePathPolicy);
     this.skillRoots = Object.freeze({ workspace: skills.workspaceSkillsRoot, user: skills.userSkillsRoot });
   }
 
@@ -486,8 +496,20 @@ export class TuiRuntime {
       options.workspaceRoot,
       resolveShellConfig(options.shell, false),
     );
+    const projectConfigPath = options.projectConfigPath ?? defaultProjectConfigPath(options.workspaceRoot);
+    const projectConfig = await loadProjectConfig(projectConfigPath);
     const runtime = new TuiRuntime(
-      { ...options, sessionId: runtimeSessionId },
+      {
+        ...options,
+        sessionId: runtimeSessionId,
+        projectConfigPath,
+        sensitivePathGrants: options.sensitivePathGrants
+          ?? projectConfig.config.sensitivePathGrants
+          ?? [],
+        sensitivePathPolicy: options.sensitivePathPolicy
+          ?? projectConfig.config.sensitivePaths
+          ?? {},
+      },
       eventStore,
       ownedStore,
       artifactStore,
@@ -855,6 +877,16 @@ export class TuiRuntime {
   getMounts = (): readonly WorkspaceMount[] =>
     this.#mounts.map((mount) => ({ id: mount.id, path: mount.path, mode: mount.mode }));
 
+  sensitivePathGrants(): readonly string[] {
+    return this.#sensitivePathGrants;
+  }
+
+  sensitivePathPolicy(): SensitivePathPolicy {
+    return this.#sensitivePathPolicy;
+  }
+
+  getSensitivePathGrants = (): readonly string[] => this.#sensitivePathGrants;
+
   async addMount(
     absolutePath: string,
     source: RuntimeMount["source"] = "command",
@@ -931,6 +963,61 @@ export class TuiRuntime {
         mode: "read",
         source: mount.source,
       }, { kind: "runtime", id: "mount_reconciler" });
+    }
+  }
+
+  async grantSensitivePath(relativePath: string): Promise<string> {
+    const normalized = normalizeWorkspaceRelativePath(relativePath);
+    if (normalized.startsWith("mount:")) {
+      throw new TypeError(`Sensitive path grants apply to Workspace-relative paths, not mounts: ${normalized}`);
+    }
+    if (this.#sensitivePathGrants.includes(normalized)) return normalized;
+    const nextGrants = [...this.#sensitivePathGrants, normalized];
+    await this.#persistSensitivePathGrants(nextGrants);
+    this.#sensitivePathGrants = nextGrants;
+    this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
+    this.#humanControl.grantSensitivePath(this.sessionId, normalized, "grant");
+    return normalized;
+  }
+
+  async revokeSensitivePath(
+    relativePath: string,
+    reason = "User revoked sensitive path grant",
+  ): Promise<void> {
+    const normalized = normalizeWorkspaceRelativePath(relativePath);
+    if (!this.#sensitivePathGrants.includes(normalized)) {
+      throw new TypeError(`Unknown sensitive path grant: ${normalized}`);
+    }
+    const nextGrants = this.#sensitivePathGrants.filter((path) => path !== normalized);
+    await this.#persistSensitivePathGrants(nextGrants);
+    this.#sensitivePathGrants = nextGrants;
+    this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
+    this.#humanControl.revokeSensitivePath(this.sessionId, normalized, reason);
+  }
+
+  /** Reconcile Session audit projection to the effective sensitive-path grant allowlist. */
+  syncSensitivePathEvents(): void {
+    const view = this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
+    const effective = new Set(this.#sensitivePathGrants.map((path) => normalizeWorkspaceRelativePath(path)));
+    for (const projected of Object.keys(view.sensitivePathGrants)) {
+      if (!effective.has(projected)) {
+        this.#humanControl.revokeSensitivePath(
+          this.sessionId,
+          projected,
+          "Grant is absent from effective project policy",
+          { kind: "runtime", id: "sensitive_path_reconciler" },
+        );
+      }
+    }
+    for (const path of this.#sensitivePathGrants) {
+      const normalized = normalizeWorkspaceRelativePath(path);
+      if (view.sensitivePathGrants[normalized]) continue;
+      this.#humanControl.grantSensitivePath(
+        this.sessionId,
+        normalized,
+        "project_config",
+        { kind: "runtime", id: "sensitive_path_reconciler" },
+      );
     }
   }
 
@@ -1019,6 +1106,7 @@ export class TuiRuntime {
     try {
       this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
       this.syncMountEvents();
+      this.syncSensitivePathEvents();
       const mode = this.mode();
       const model = this.#resolveModel();
       const capabilities = await this.#modelPort.capabilities(model);
@@ -1064,6 +1152,8 @@ export class TuiRuntime {
         effectJournal: this.#effectJournal,
         signal: controller.signal,
         getMounts: this.getMounts,
+        getSensitivePathGrants: this.getSensitivePathGrants,
+        sensitivePathPolicy: this.#sensitivePathPolicy,
       }));
       this.#humanControl.askNextRunQuestion(this.sessionId, result.runId);
       return result;
@@ -1413,6 +1503,7 @@ export class TuiRuntime {
             mode: "read" as const,
           })),
         }),
+      ...this.#sensitivePathConfigFields(),
     };
     await saveProjectConfig(this.#projectConfigPath, next);
   }
@@ -1425,8 +1516,44 @@ export class TuiRuntime {
       ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
       ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
       mounts: mounts.map((mount) => ({ id: mount.id, path: mount.path, mode: "read" as const })),
+      ...this.#sensitivePathConfigFields(),
     };
     await saveProjectConfig(this.#projectConfigPath, next);
+  }
+
+  async #persistSensitivePathGrants(grants: readonly string[] = this.#sensitivePathGrants): Promise<void> {
+    const loaded = await loadProjectConfig(this.#projectConfigPath);
+    const next: QiProjectConfig = {
+      version: 1,
+      ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
+      ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
+      ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
+      ...(this.#mounts.length === 0
+        ? {}
+        : {
+          mounts: this.#mounts.map((mount) => ({
+            id: mount.id,
+            path: mount.path,
+            mode: "read" as const,
+          })),
+        }),
+      ...(grants.length === 0 ? {} : { sensitivePathGrants: [...grants] }),
+      ...(hasSensitivePathPolicy(this.#sensitivePathPolicy)
+        ? { sensitivePaths: cloneSensitivePathPolicy(this.#sensitivePathPolicy) }
+        : {}),
+    };
+    await saveProjectConfig(this.#projectConfigPath, next);
+  }
+
+  #sensitivePathConfigFields(): Pick<QiProjectConfig, "sensitivePathGrants" | "sensitivePaths"> {
+    return {
+      ...(this.#sensitivePathGrants.length === 0
+        ? {}
+        : { sensitivePathGrants: [...this.#sensitivePathGrants] }),
+      ...(hasSensitivePathPolicy(this.#sensitivePathPolicy)
+        ? { sensitivePaths: cloneSensitivePathPolicy(this.#sensitivePathPolicy) }
+        : {}),
+    };
   }
 }
 
@@ -1438,6 +1565,21 @@ export function contextBudgetFromWindow(contextWindowTokens: number, outputReser
     throw new RangeError("outputReserveTokens must be a positive integer smaller than the model window");
   }
   return contextWindowTokens - outputReserveTokens;
+}
+
+function freezeSensitivePathPolicy(policy: SensitivePathPolicy | undefined): SensitivePathPolicy {
+  return Object.freeze(cloneSensitivePathPolicy(policy ?? {}));
+}
+
+function cloneSensitivePathPolicy(policy: SensitivePathPolicy): SensitivePathPolicy {
+  return {
+    ...(policy.extra === undefined ? {} : { extra: Object.freeze([...policy.extra]) }),
+    ...(policy.exclude === undefined ? {} : { exclude: Object.freeze([...policy.exclude]) }),
+  };
+}
+
+function hasSensitivePathPolicy(policy: SensitivePathPolicy): boolean {
+  return (policy.extra?.length ?? 0) > 0 || (policy.exclude?.length ?? 0) > 0;
 }
 
 function leaseExpiry(): string {

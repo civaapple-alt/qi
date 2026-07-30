@@ -20,7 +20,8 @@ runtime parsers. Producers and consumers must agree here before a new fact can e
 carry distinct prefixes. Every durable event has a discriminated `type`, identity links, actor metadata, sequence,
 and timestamp. Mode, Plan revision/review, and control Question events are first-class Session facts
 ([ADR 0011](../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)). Read-only Workspace mounts use
-`workspace.mount.added` / `workspace.mount.removed`
+`workspace.mount.added` / `workspace.mount.removed` /
+`workspace.sensitive_path.granted` / `workspace.sensitive_path.revoked`
 ([ADR 0015](../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts)). `parseSessionEvent()` is the runtime boundary
 for untrusted serialized input.
 

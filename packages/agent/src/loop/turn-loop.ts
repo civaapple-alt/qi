@@ -95,6 +95,13 @@ export interface TurnRequest {
   signal?: AbortSignal;
   /** Live read-only mounts; called when building each Action context. */
   getMounts?: () => readonly import("@civaapple/qi-agent/tools").WorkspaceMount[];
+  /** Live sensitive-path grants; called when building each Action context. */
+  getSensitivePathGrants?: () => readonly string[];
+  /** Optional project overlays for sensitive-path classification. */
+  sensitivePathPolicy?: {
+    readonly extra?: readonly string[];
+    readonly exclude?: readonly string[];
+  };
 }
 
 export interface TurnResult {
@@ -674,6 +681,13 @@ export class TurnLoop {
             mode: frozenMode,
             mounts: request.getMounts?.() ?? [],
             ...(request.getMounts === undefined ? {} : { getMounts: request.getMounts }),
+            sensitivePathGrants: request.getSensitivePathGrants?.() ?? [],
+            ...(request.getSensitivePathGrants === undefined
+              ? {}
+              : { getSensitivePathGrants: request.getSensitivePathGrants }),
+            ...(request.sensitivePathPolicy === undefined
+              ? {}
+              : { sensitivePathPolicy: request.sensitivePathPolicy }),
             ...(request.effectJournal === undefined ? {} : { effectJournal: request.effectJournal }),
             idempotencyScope: runId,
             ...(request.signal === undefined ? {} : { signal: request.signal }),

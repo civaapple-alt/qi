@@ -49,7 +49,7 @@ export const qiSelfModel: QiSelfModel = parseQiSelfModel({
     invariant("no-self-authorization", "Self-introspection cannot grant authority, publish, or self-certify semantic success.", "design/decisions.md#adr-0019-make-self-understanding-read-only-and-governed"),
   ],
   decisions: [
-    decision("0001", "Redact secrets at model and durable-event boundaries", "adr-0001-redact-secrets-at-model-and-durable-event-boundaries"),
+    decision("0001", "Gate sensitive paths before content reaches the model", "adr-0001-gate-sensitive-paths-before-content-reaches-the-model"),
     decision("0002", "Separate model window, output reserve, and working context", "adr-0002-separate-model-window-output-reserve-and-working-context"),
     decision("0003", "Use freshness-checked precise file mutation", "adr-0003-use-freshness-checked-precise-file-mutation"),
     decision("0004", "Discover Skills progressively and install through a bounded service", "adr-0004-discover-skills-progressively-and-install-them-through-a-bounded-service"),

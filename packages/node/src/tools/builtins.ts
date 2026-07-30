@@ -12,6 +12,11 @@ import { ToolFailure } from "@civaapple/qi-agent/tools";
 import { storeTruncatedOutputArtifact, truncatedOutputCaptureLimitBytes } from "./output-artifact.js";
 import { defineTool, type AnyToolDefinition, type ToolExecutionContext } from "@civaapple/qi-agent/tools";
 import {
+  assertSensitiveContentAllowed,
+  isSensitiveWorkspacePath,
+  sensitivePathPolicyFromContext,
+} from "./sensitive-paths.js";
+import {
   formatAccessiblePath,
   isRegularFile,
   mountsFromContext,
@@ -62,6 +67,7 @@ interface FindEntry {
   path: string;
   type: FindFileType;
   modifiedAt: string;
+  sensitive?: boolean;
 }
 
 export const readTool = defineTool({
@@ -97,6 +103,7 @@ export const readTool = defineTool({
   resources: (input) => [`file:${input.path}`],
   async execute(input, context) {
     const request = input as { path: string; startLine?: number; maxLines?: number };
+    assertSensitiveContentAllowed(request.path, context);
     const mounts = mountsFromContext(context);
     const resolved = await resolveAccessiblePath(context.workspaceRoot, request.path, mounts);
     if (!(await isRegularFile(resolved.absolute))) {
@@ -157,6 +164,7 @@ export const listTool = defineTool({
           {
             path: Type.String(),
             type: Type.Union([Type.Literal("file"), Type.Literal("directory")]),
+            sensitive: Type.Optional(Type.Boolean()),
           },
           { additionalProperties: false },
         ),
@@ -170,13 +178,14 @@ export const listTool = defineTool({
   async execute(input, context) {
     const request = input as { path?: string; recursive?: boolean; maxEntries?: number };
     const mounts = mountsFromContext(context);
+    const policy = sensitivePathPolicyFromContext(context);
     const resolved = await resolveAccessiblePath(context.workspaceRoot, request.path ?? ".", mounts);
     const rootInfo = await stat(resolved.absolute);
     if (!rootInfo.isDirectory()) {
       throw new ToolFailure("NOT_A_DIRECTORY", `${request.path ?? "."} is not a directory`);
     }
     const maximum = request.maxEntries ?? 200;
-    const entries: Array<{ path: string; type: "file" | "directory" }> = [];
+    const entries: Array<{ path: string; type: "file" | "directory"; sensitive?: boolean }> = [];
     let truncated = false;
 
     const visit = async (directory: string): Promise<void> => {
@@ -190,9 +199,12 @@ export const listTool = defineTool({
         }
         const childPath = resolve(directory, child.name);
         if (!child.isDirectory() && !child.isFile()) continue;
+        const path = formatAccessiblePath(resolved, context.workspaceRoot, mounts, childPath);
+        const sensitive = child.isFile() && isSensitiveWorkspacePath(path, policy);
         entries.push({
-          path: formatAccessiblePath(resolved, context.workspaceRoot, mounts, childPath),
+          path,
           type: child.isDirectory() ? "directory" : "file",
+          ...(sensitive ? { sensitive: true } : {}),
         });
         if (request.recursive && child.isDirectory()) {
           await visit(childPath);
@@ -232,6 +244,7 @@ export const writeTool = defineTool({
   resources: (input) => [`file:${input.path}`],
   async execute(input, context) {
     const requested = input as { path: string; content: string; expectedSha256: string | null };
+    assertSensitiveContentAllowed(requested.path, context);
     let path: string;
     let exists = true;
     try {
@@ -309,6 +322,7 @@ export const editTool = defineTool({
       expectedSha256: string;
       replaceAll?: boolean;
     };
+    assertSensitiveContentAllowed(requested.path, context);
     const path = await resolveWorkspaceEntry(context.workspaceRoot, requested.path);
     if (!(await isRegularFile(path))) throw new ToolFailure("NOT_A_FILE", `${requested.path} is not a regular file`);
     const previousMode = (await stat(path)).mode & 0o777;
@@ -473,11 +487,28 @@ export const searchTool = defineTool({
       globs?: string[];
       maxResults?: number;
     };
+    assertSensitiveContentAllowed(request.path ?? ".", context);
     const scope = await resolvePathScope(context, request.path ?? ".");
+    const policy = sensitivePathPolicyFromContext(context);
+    const grants = new Set(
+      (context.getSensitivePathGrants?.() ?? context.sensitivePathGrants ?? []).map((path) =>
+        path.replace(/\\/g, "/").replace(/^\.\//, ""),
+      ),
+    );
+    const allowContentPath = (toolPath: string): boolean => {
+      if (!isSensitiveWorkspacePath(toolPath, policy)) return true;
+      return grants.has(toolPath.replace(/\\/g, "/").replace(/^\.\//, ""));
+    };
     const maximum = request.maxResults ?? 100;
     const ripgrep = await findTrustedExecutable("rg", scope.processRoot);
     if (ripgrep) {
-      return searchWithRipgrep(ripgrep, request, scope, maximum, context.signal);
+      const result = await searchWithRipgrep(ripgrep, request, scope, maximum, context.signal);
+      const matches = result.matches.filter((match) => allowContentPath(match.path));
+      return {
+        matches,
+        truncated: result.truncated || matches.length < result.matches.length,
+        engine: result.engine,
+      };
     }
     if (request.globs?.length) throw new ToolFailure("RG_UNAVAILABLE", "Glob content search requires ripgrep on PATH");
     let matchesLine: (line: string) => boolean;
@@ -497,6 +528,8 @@ export const searchTool = defineTool({
     let truncated = false;
 
     for await (const file of walkFiles(scope.startAbsolute)) {
+      const toolPath = scope.formatPath(file);
+      if (!allowContentPath(toolPath)) continue;
       const info = await stat(file);
       if (info.size > 1_000_000) continue;
       const buffer = await readFile(file);
@@ -510,7 +543,7 @@ export const searchTool = defineTool({
           return { matches, truncated, engine: "node" as const };
         }
         matches.push({
-          path: scope.formatPath(file),
+          path: toolPath,
           line: index + 1,
           text,
         });
@@ -556,6 +589,7 @@ export const findTool = defineTool({
             Type.Literal("symlink"),
           ]),
           modifiedAt: Type.String(),
+          sensitive: Type.Optional(Type.Boolean()),
         },
         { additionalProperties: false },
       )),
@@ -1428,10 +1462,18 @@ async function findWorkspaceEntries(
   if (!(await stat(scope.startAbsolute)).isDirectory()) {
     throw new ToolFailure("NOT_A_DIRECTORY", `${request.path ?? "."} is not a directory`);
   }
+  const policy = sensitivePathPolicyFromContext(context);
+  const markSensitive = (entries: FindEntry[]): FindEntry[] => entries.map((entry) => {
+    if (entry.type !== "file" || !isSensitiveWorkspacePath(entry.path, policy)) return entry;
+    return { ...entry, sensitive: true };
+  });
   const bounds = parseModificationBounds(request.modifiedAfter, request.modifiedBefore);
   const maximum = request.maxResults ?? 100;
   const fd = await findTrustedExecutable("fd", scope.processRoot);
-  if (!fd) return findWithNode(request, scope, bounds, maximum);
+  if (!fd) {
+    const nodeResult = await findWithNode(request, scope, bounds, maximum);
+    return { ...nodeResult, entries: markSensitive(nodeResult.entries) };
+  }
 
   const mode = resolveFindMode(request);
   const args = [
@@ -1463,7 +1505,11 @@ async function findWorkspaceEntries(
     entries.push({ path: scope.formatPath(absolute), type: fileType(info), modifiedAt: info.mtime.toISOString() });
   }
   entries.sort((left, right) => left.path.localeCompare(right.path));
-  return { entries, truncated: paths.length > maximum || result.truncated, engine: "fd" };
+  return {
+    entries: markSensitive(entries),
+    truncated: paths.length > maximum || result.truncated,
+    engine: "fd",
+  };
 }
 
 async function findWithNode(
@@ -1533,7 +1579,11 @@ function renderDirectoryTree(
   scope: PathScope,
   entries: readonly FindEntry[],
 ): string {
-  interface TreeNode { type: FindFileType; children: Map<string, TreeNode> }
+  interface TreeNode {
+    type: FindFileType;
+    sensitive?: boolean;
+    children: Map<string, TreeNode>;
+  }
   const root: TreeNode = { type: "directory", children: new Map() };
   for (const entry of entries) {
     const absolute = scope.resolveLogicalAbsolute(entry.path);
@@ -1546,8 +1596,14 @@ function renderDirectoryTree(
       if (!part) continue;
       let child = current.children.get(part);
       if (!child) {
-        child = { type: index === parts.length - 1 ? entry.type : "directory", children: new Map() };
+        child = {
+          type: index === parts.length - 1 ? entry.type : "directory",
+          children: new Map(),
+          ...(index === parts.length - 1 && entry.sensitive ? { sensitive: true } : {}),
+        };
         current.children.set(part, child);
+      } else if (index === parts.length - 1 && entry.sensitive) {
+        child.sensitive = true;
       }
       current = child;
     }
@@ -1557,7 +1613,8 @@ function renderDirectoryTree(
     const children = [...node.children.entries()].sort(([left], [right]) => left.localeCompare(right));
     children.forEach(([name, child], index) => {
       const last = index === children.length - 1;
-      lines.push(`${prefix}${last ? "└──" : "├──"} ${name}${child.type === "directory" ? "/" : ""}`);
+      const marker = child.sensitive ? " [sensitive]" : "";
+      lines.push(`${prefix}${last ? "└──" : "├──"} ${name}${child.type === "directory" ? "/" : ""}${marker}`);
       renderChildren(child, `${prefix}${last ? "    " : "│   "}`);
     });
   };

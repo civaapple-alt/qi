@@ -125,6 +125,38 @@ export class HumanControlService {
     return requireView(writer.view);
   }
 
+  grantSensitivePath(
+    sessionId: SessionId,
+    path: string,
+    source: "project_config" | "grant" | "command" = "grant",
+    actor: EventActor = { kind: "user", id: "user" },
+  ): SessionView {
+    const writer = this.#writer(sessionId);
+    requireView(writer.view);
+    const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "") || ".";
+    if (writer.view?.sensitivePathGrants[normalized]) return requireView(writer.view);
+    writer.append(
+      "workspace.sensitive_path.granted",
+      { path: normalized, source },
+      actor,
+    );
+    return requireView(writer.view);
+  }
+
+  revokeSensitivePath(
+    sessionId: SessionId,
+    path: string,
+    reason: string,
+    actor: EventActor = { kind: "user", id: "user" },
+  ): SessionView {
+    const writer = this.#writer(sessionId);
+    requireView(writer.view);
+    const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "") || ".";
+    if (!writer.view?.sensitivePathGrants[normalized]) return requireView(writer.view);
+    writer.append("workspace.sensitive_path.revoked", { path: normalized, reason }, actor);
+    return requireView(writer.view);
+  }
+
   recordPlanRevision(
     sessionId: SessionId,
     input: PlanRevisionInput,
