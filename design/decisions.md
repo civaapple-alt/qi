@@ -392,6 +392,41 @@ less responsive.
   fixture. Rejected alternatives are an unbounded transcript, a second UI state machine, inferred retries,
   modal focus stealing, and hiding all tool facts behind an opaque summary.
 
+## ADR-0028: persist ordered media references and materialize provider payloads late
+
+Pressure: design, frontend, document, and reporting work frequently starts with screenshots or reference images.
+Passing an image URL directly to a provider delegates network authority, while persisting data URLs inflates the
+event stream and can leak binary content into logs, redaction, and context accounting.
+
+- `run.triggered` may carry an ordered sequence of text and image parts in addition to the legacy human-readable
+  `input` string. Image parts contain only bounded provenance, dimensions, media types, byte counts, and
+  content-addressed original/prepared Artifact references. Session events never contain image bytes or data URLs.
+- Node owns image acquisition and preprocessing. Clipboard bytes and Network-authorized public URL downloads pass
+  the same MIME, magic-byte, decode-size, pixel-count, dimension, count, and aggregate-byte checks before a Run is
+  committed. Provider-side URL fetching is not an ingestion path.
+- Original and prepared images are retained as project-private Artifacts. The prepared image is the default model
+  view; an explicitly authorized read-only image Action may derive a bounded crop from an original attachment.
+  Skills, prompts, and provider capabilities do not grant that Action authority.
+- The Agent restores ordered image parts from durable Run history while they fit the Context Compiler budget.
+  Missing or digest-invalid Artifacts become an explicit image-unavailable text part. They never become fabricated
+  visual context.
+- Artifact references are recursively verified and converted to ephemeral data URLs only at the final provider
+  boundary and only after sensitive-text redaction. Provider payload bytes therefore do not enter Session truth,
+  Artifact metadata, telemetry, or text redaction.
+- Model profiles declare input modalities. A request containing an image fails before provider I/O unless the
+  selected profile enables image input. OpenAI-compatible endpoints deny image input by default and require an
+  explicit operator opt-in.
+- Text and image parts share one context budget. Image cost uses a conservative dimension/tile estimate rather
+  than the serialized base64 length. Tool-result images remain associated with their tool call while adapters may
+  emit a synthetic user media message when required by a provider wire format.
+- Compatibility is additive: old `run.triggered` events synthesize one text part from `input`, string prompt APIs
+  remain valid, and the SQLite generation does not change. Version one exposes images only; video stays a future
+  protocol extension even when a provider advertises video support.
+- Required evidence covers old/new replay, absence of base64 in events and SQLite, preprocessing and adversarial
+  decode limits, public-network policy, model capability denial before I/O, adapter request shapes, late Artifact
+  materialization, missing-Artifact recovery, image Action authorization, ordered TTY composition, and queued
+  follow-ups.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

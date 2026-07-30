@@ -54,6 +54,13 @@ while legacy `control.question.*` remains the between-Run compatibility path.
 `qi-agent` does not depend on `qi-node`, `qi-tui`, or an application. Node filesystem, process, database,
 credential-file, network, and package-acquisition implementations stay behind ports.
 
+`TurnRequest.content` and the structured `QiAgent.prompt()` overload accept ordered durable text/image parts
+while the string API remains compatible. Image parts enter conversation as prepared Artifact references.
+Immediately before provider I/O—and after sensitive-text redaction—the Loop verifies each digest and media type,
+then creates an ephemeral data URL. Restored images use dimension-based context estimates; a missing or invalid
+historical Artifact becomes an explicit image-unavailable text part. A current image on a text-only model fails
+before the provider is called.
+
 ```ts
 import { QiAgent } from "@civaapple/qi-agent";
 import { defineTool } from "@civaapple/qi-agent/tools";

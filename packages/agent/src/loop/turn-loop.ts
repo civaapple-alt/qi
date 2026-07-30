@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   mergeRedactionSummaries,
   modeAllowsIntent,
@@ -22,7 +22,14 @@ import {
   type SessionView,
 } from "@civaapple/qi-agent/kernel";
 import type { ModelContentPart, ModelEvent, ModelMessage, ModelPort, ModelRef } from "@civaapple/qi-ai";
-import { createId, type RunId, type SessionEvent, type SessionId, type StepId } from "@civaapple/qi-protocol";
+import {
+  createId,
+  type RunId,
+  type RunInputPart,
+  type SessionEvent,
+  type SessionId,
+  type StepId,
+} from "@civaapple/qi-protocol";
 import {
   AuthorityDeniedError,
   ToolFailure,
@@ -53,6 +60,8 @@ export interface TurnRequest {
   title?: string;
   subject: string;
   input: string;
+  /** Ordered durable human input. Omit for the legacy text-only path. */
+  content?: readonly RunInputPart[];
   model: ModelRef;
   contextBlocks: readonly ContextBlock[];
   contextBudgetTokens: number;
@@ -199,6 +208,10 @@ export class TurnLoop {
     if (!Number.isInteger(historyBudgetTokens) || historyBudgetTokens < 0) {
       throw new RangeError("historyBudgetTokens must be a non-negative integer");
     }
+    validateTurnContent(request.input, request.content);
+    if (request.existingRunId === undefined) {
+      await assertImageCapability(this.#modelPort, request.model, request.content);
+    }
     const writer = new EventWriter(this.#eventStore, request.sessionId, this.#clock, this.#onEvent);
     const history = compileConversationHistory(
       writer.view,
@@ -220,6 +233,7 @@ export class TurnLoop {
     const runMode = request.mode ?? sessionMode;
     let runId: RunId;
     let runInput = request.input;
+    let runContent = request.content === undefined ? undefined : request.content.map((part) => ({ ...part }));
     if (request.existingRunId) {
       const existing = writer.view?.runs[request.existingRunId];
       if (!existing || existing.status !== "triggered") {
@@ -227,6 +241,8 @@ export class TurnLoop {
       }
       runId = request.existingRunId;
       runInput = existing.input ?? request.input;
+      runContent = existing.content ?? runContent;
+      await assertImageCapability(this.#modelPort, request.model, runContent);
     } else {
       runId = createId("run") as RunId;
       writer.append(
@@ -235,6 +251,7 @@ export class TurnLoop {
           runId,
           trigger: "user",
           input: request.input,
+          ...(runContent === undefined ? {} : { content: runContent }),
           mode: runMode,
           ...(request.planBinding === undefined ? {} : { planBinding: request.planBinding }),
         },
@@ -246,7 +263,7 @@ export class TurnLoop {
 
     const conversation: ModelMessage[] = [
       ...historyConversation,
-      { role: "user", content: [{ type: "text", text: runInput }] },
+      { role: "user", content: toModelInputParts(runInput, runContent, false) },
     ];
     const settledExchanges: SettledActionExchange[] = [];
     let finalText = "";
@@ -381,12 +398,16 @@ export class TurnLoop {
       try {
         const modelInput = redactSensitiveValue([...compiled.messages, ...conversation]);
         this.#recordRedactions(writer, "model-input", modelInput.redactions, { runId, stepId });
+        const materializedMessages = await materializeArtifactImages(
+          modelInput.value,
+          request.artifactStore,
+        );
         modelResult = await aggregateModelEvents(
           this.#modelPort.stream(
             {
               requestId,
               model: request.model,
-              messages: modelInput.value,
+              messages: materializedMessages,
               tools: catalog.map((tool) => tool.model),
               ...(request.maxOutputTokens === undefined ? {} : { maxOutputTokens: request.maxOutputTokens }),
               metadata: {
@@ -1471,11 +1492,180 @@ function deterministicBudgetHandoff(
   ].join("\n");
 }
 
-function estimateMessages(messages: readonly ModelMessage[]): number {
-  return messages.reduce(
-    (total, message) => total + approximateTokenEstimator.estimate(JSON.stringify(message)),
-    0,
+function validateTurnContent(input: string, content: readonly RunInputPart[] | undefined): void {
+  if (!input.trim() && (content === undefined || content.length === 0)) {
+    throw new TypeError("Turn input must contain text or an image");
+  }
+  if (content === undefined) return;
+  const images = content.filter((part) => part.type === "image");
+  if (images.length > 8) throw new RangeError("A Turn may contain at most 8 images");
+  const preparedBytes = images.reduce((total, image) => total + image.byteLength, 0);
+  if (preparedBytes > 20 * 1024 * 1024) {
+    throw new RangeError("Prepared images may total at most 20 MiB per Turn");
+  }
+}
+
+async function assertImageCapability(
+  modelPort: ModelPort,
+  model: ModelRef,
+  content: readonly RunInputPart[] | undefined,
+): Promise<void> {
+  if (!content?.some((part) => part.type === "image")) return;
+  const capabilities = await modelPort.capabilities(model);
+  if (!capabilities.input.has("image")) {
+    throw new TypeError(
+      `Model ${model.provider}/${model.model} does not support image input; switch models or explicitly enable image input for this compatible endpoint`,
+    );
+  }
+}
+
+function toModelInputParts(
+  legacyInput: string,
+  content: readonly RunInputPart[] | undefined,
+  historical: boolean,
+): ModelContentPart[] {
+  if (content === undefined) return [{ type: "text", text: legacyInput }];
+  const result: ModelContentPart[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
+      result.push({ type: "text", text: part.text });
+      continue;
+    }
+    const changes = [
+      part.downsampled ? "downsampled" : undefined,
+      part.formatChanged ? "format converted" : undefined,
+      part.orientationApplied ? "EXIF orientation applied" : undefined,
+    ].filter((value): value is string => value !== undefined);
+    result.push({
+      type: "text",
+      text: [
+        `[Image attachment: ${part.originalWidth}×${part.originalHeight} ${part.originalMediaType}`,
+        `prepared as ${part.width}×${part.height} ${part.mediaType}`,
+        changes.length === 0 ? "without visual preprocessing" : changes.join(", "),
+        `original ${part.originalArtifactRef}]`,
+      ].join("; "),
+    });
+    result.push({
+      type: "artifact",
+      ref: part.preparedArtifactRef,
+      mediaType: part.mediaType,
+      width: part.width,
+      height: part.height,
+      ...(historical ? { fallbackText: `[Image unavailable: ${part.originalWidth}×${part.originalHeight}]` } : {}),
+    });
+  }
+  return result;
+}
+
+async function materializeArtifactImages(
+  messages: readonly ModelMessage[],
+  artifactStore: ArtifactStore,
+): Promise<ModelMessage[]> {
+  const result: ModelMessage[] = [];
+  for (const message of messages) {
+    const content: ModelContentPart[] = [];
+    for (const part of message.content) {
+      content.push(await materializePart(part, artifactStore));
+    }
+    result.push({ role: message.role, content });
+  }
+  return result;
+}
+
+async function materializePart(
+  part: ModelContentPart,
+  artifactStore: ArtifactStore,
+): Promise<ModelContentPart> {
+  if (part.type === "artifact") {
+    try {
+      return await materializeArtifactPart(part, artifactStore);
+    } catch (error) {
+      if (part.fallbackText !== undefined) return { type: "text", text: part.fallbackText };
+      throw error;
+    }
+  }
+  if (part.type !== "tool-result") return structuredClone(part);
+  return {
+    ...part,
+    output: await materializeNestedArtifacts(part.output, artifactStore),
+  };
+}
+
+async function materializeNestedArtifacts(value: unknown, artifactStore: ArtifactStore): Promise<unknown> {
+  if (isArtifactContentPart(value)) return materializePart(value, artifactStore);
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((item) => materializeNestedArtifacts(item, artifactStore)));
+  }
+  if (typeof value !== "object" || value === null) return value;
+  const entries = await Promise.all(
+    Object.entries(value).map(async ([key, item]) => [key, await materializeNestedArtifacts(item, artifactStore)]),
   );
+  return Object.fromEntries(entries);
+}
+
+function isArtifactContentPart(value: unknown): value is Extract<ModelContentPart, { type: "artifact" }> {
+  return typeof value === "object" && value !== null &&
+    (value as { type?: unknown }).type === "artifact" &&
+    typeof (value as { ref?: unknown }).ref === "string";
+}
+
+async function materializeArtifactPart(
+  part: Extract<ModelContentPart, { type: "artifact" }>,
+  artifactStore: ArtifactStore,
+): Promise<Extract<ModelContentPart, { type: "image" }>> {
+  const stored = await artifactStore.get(part.ref);
+  const digest = createHash("sha256").update(stored.content).digest("hex");
+  if (part.ref !== `artifact://${digest}`) {
+    throw new ToolFailure("ARTIFACT_DIGEST_MISMATCH", `Artifact digest does not match ${part.ref}`);
+  }
+  const mediaType = stored.mediaType.trim().toLowerCase();
+  if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mediaType)) {
+    throw new ToolFailure("ARTIFACT_MEDIA_TYPE", `Artifact ${part.ref} is not a supported image`);
+  }
+  if (part.mediaType !== undefined && part.mediaType !== mediaType) {
+    throw new ToolFailure(
+      "ARTIFACT_MEDIA_TYPE",
+      `Artifact ${part.ref} media type is ${mediaType}, expected ${part.mediaType}`,
+    );
+  }
+  return {
+    type: "image",
+    uri: `data:${mediaType};base64,${encodeBase64(stored.content)}`,
+    mediaType,
+    ...(part.width === undefined ? {} : { width: part.width }),
+    ...(part.height === undefined ? {} : { height: part.height }),
+  };
+}
+
+function encodeBase64(content: Uint8Array): string {
+  const chunks: string[] = [];
+  for (let offset = 0; offset < content.byteLength; offset += 32_768) {
+    chunks.push(String.fromCharCode(...content.subarray(offset, offset + 32_768)));
+  }
+  return btoa(chunks.join(""));
+}
+
+function estimateMessages(messages: readonly ModelMessage[]): number {
+  let imageTokens = 0;
+  const withoutImagePayloads = messages.map((message) => ({
+    ...message,
+    content: message.content.map((part) => stripImagePayloadForEstimate(part)),
+  }));
+  function stripImagePayloadForEstimate(value: unknown): unknown {
+    if (typeof value !== "object" || value === null) return value;
+    if (Array.isArray(value)) return value.map(stripImagePayloadForEstimate);
+    const candidate = value as Record<string, unknown>;
+    if (candidate.type === "image" || candidate.type === "artifact") {
+      const width = typeof candidate.width === "number" ? candidate.width : 1024;
+      const height = typeof candidate.height === "number" ? candidate.height : 1024;
+      imageTokens += 85 + 170 * Math.ceil(width / 512) * Math.ceil(height / 512);
+      return { type: candidate.type, mediaType: candidate.mediaType, width, height };
+    }
+    return Object.fromEntries(
+      Object.entries(candidate).map(([key, item]) => [key, stripImagePayloadForEstimate(item)]),
+    );
+  }
+  return approximateTokenEstimator.estimate(JSON.stringify(withoutImagePayloads)) + imageTokens;
 }
 
 function compactExchangeSummary(
@@ -1562,7 +1752,7 @@ function compileConversationHistory(
   const turns: Array<{ runId: RunId; messages: ModelMessage[]; facts: string }> = [];
   for (const runId of view.runOrder) {
     const run = view.runs[runId];
-    if (!run || run.trigger !== "user" || !run.input) continue;
+    if (!run || run.trigger !== "user" || (!run.input && !run.content?.length)) continue;
     const isCompleted = run.status === "completed";
     const isBudgetHandoff = run.status === "parked"
       && run.terminal?.reason === "budget"
@@ -1585,7 +1775,7 @@ function compileConversationHistory(
       runId,
       facts: formatRunHistoryFacts(run),
       messages: [
-        { role: "user", content: [{ type: "text", text: run.input }] },
+        { role: "user", content: toModelInputParts(run.input ?? "", run.content, true) },
         { role: "assistant", content: [{ type: "text", text: narrative }] },
       ],
     });
@@ -1596,10 +1786,7 @@ function compileConversationHistory(
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
     if (!turn) continue;
-    const turnTokens = turn.messages.reduce(
-      (total, message) => total + approximateTokenEstimator.estimate(JSON.stringify(message)),
-      0,
-    );
+    const turnTokens = estimateMessages(turn.messages);
     if (usedTokens + turnTokens > budgetTokens) break;
     selected.unshift(turn);
     usedTokens += turnTokens;

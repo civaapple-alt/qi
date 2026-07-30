@@ -27,6 +27,7 @@ export interface ProviderModelProfile {
   readonly id: string;
   readonly displayName: string;
   readonly contextTokens: number;
+  readonly inputModalities?: readonly ("text" | "image")[];
   readonly thinking?: ProviderModelThinking;
 }
 
@@ -41,6 +42,8 @@ export interface ProviderProfile {
   readonly contextTokens: number;
   readonly models?: readonly ProviderModelProfile[];
   readonly capabilities: ProviderTransportCapabilities;
+  /** Input modalities enabled by the official profile. Custom compatible endpoints remain text-only by default. */
+  readonly inputModalities?: readonly ("text" | "image")[];
   /** Environment variable preferred for official API-key auth. */
   readonly envApiKey?: string;
   readonly envBaseURL?: string;
@@ -77,6 +80,7 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
     authSchemes: ["api-key"],
     defaultModel: "gpt-5.4-mini",
     contextTokens: 128_000,
+    inputModalities: ["text", "image"],
     capabilities: { ...responsesCaps },
     envApiKey: "OPENAI_API_KEY",
     envBaseURL: "OPENAI_BASE_URL",
@@ -109,32 +113,36 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
         id: "k3",
         displayName: "Kimi K3",
         contextTokens: 1_048_576,
+        inputModalities: ["text", "image"],
         thinking: {
           mode: "effort",
-          supportedEfforts: ["low", "high", "max"],
-          defaultEffort: "high",
+          supportedEfforts: ["max"],
+          defaultEffort: "max",
         },
       },
       {
         id: "k3-256k",
         displayName: "Kimi K3 256K",
         contextTokens: 262_144,
+        inputModalities: ["text", "image"],
         thinking: {
           mode: "effort",
-          supportedEfforts: ["low", "high", "max"],
-          defaultEffort: "high",
+          supportedEfforts: ["max"],
+          defaultEffort: "max",
         },
       },
       {
         id: "kimi-for-coding",
         displayName: "Kimi K2.7 Code",
         contextTokens: 262_144,
+        inputModalities: ["text", "image"],
         thinking: { mode: "toggle" },
       },
       {
         id: "kimi-for-coding-highspeed",
         displayName: "Kimi K2.7 Code HighSpeed",
         contextTokens: 262_144,
+        inputModalities: ["text", "image"],
         thinking: { mode: "toggle" },
       },
     ],
@@ -247,7 +255,8 @@ export function modelCapabilitiesFromProfile(
   if (reasoning) output.add("reasoning");
   if (toolCalls) output.add("action");
   const input = new Set<"text" | "image" | "artifact">(["text"]);
-  if (narrowing.imageInput ?? profile.wireApi === "responses") input.add("image");
+  const profileImageInput = (modelProfile?.inputModalities ?? profile.inputModalities)?.includes("image") ?? false;
+  if (narrowing.imageInput ?? profileImageInput) input.add("image");
   return {
     input,
     output,

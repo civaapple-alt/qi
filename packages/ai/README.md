@@ -15,6 +15,13 @@ adapter streams portable text/reasoning/action boundaries; Agent lifecycle polic
 materially different models; callers can inspect them with `getProviderModelProfile` and
 `providerModelContextTokens`.
 
+Profiles also declare input modalities. Kimi K3 and the known Kimi Coding models accept image parts; K3 uses a
+1,048,576-token window and `max`-only/default thinking. OpenAI Responses accepts images. Custom
+OpenAI-compatible Chat Completions endpoints deny image input unless `imageInput` is explicitly enabled by the
+operator. Chat Completions sends portable user text/images as a standard content array; image-bearing Tool
+results keep their Tool call/output message and add a following synthetic user media message. Artifact
+references must be verified and materialized before either adapter is invoked.
+
 ```ts
 import { createModelPortForProfile } from "@civaapple/qi-ai";
 import { compileContext } from "@civaapple/qi-ai/context";

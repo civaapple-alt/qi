@@ -39,12 +39,14 @@ export interface ResolveProviderConfigInput {
   readonly baseURL?: string;
   readonly reasoningEffort?: string;
   readonly accountAlias?: string;
+  readonly imageInput?: boolean;
   readonly defaults?: {
     readonly provider?: string;
     readonly model?: string;
     readonly baseURL?: string;
     readonly reasoningEffort?: string;
     readonly accountAlias?: string;
+    readonly imageInput?: boolean;
   };
   readonly environment?: ProviderEnvironment | NodeJS.ProcessEnv;
   /** When true, missing credentials become authStatus=missing instead of throwing. */
@@ -62,6 +64,7 @@ export interface ProviderConfig {
   readonly accountAlias: string;
   readonly authStatus: "ready" | "missing";
   readonly wireApi: ProviderProfile["wireApi"];
+  readonly imageInput?: boolean;
 }
 
 export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): ProviderConfig {
@@ -113,8 +116,15 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
   if (requestedReasoningEffort !== undefined && provider !== "kimi") {
     throw new TypeError("reasoning effort is currently supported only by the Kimi provider");
   }
-  const reasoningEffort = provider === "kimi"
+  const normalizedReasoningEffort = provider === "kimi"
     ? normalizeKimiReasoningEffort(requestedReasoningEffort)
+    : undefined;
+  const reasoningEffort = provider === "kimi" && (model === "k3" || model === "k3-256k") &&
+      normalizedReasoningEffort !== undefined && normalizedReasoningEffort !== "none"
+    ? "max"
+    : normalizedReasoningEffort;
+  const imageInput = provider === "compatible"
+    ? input.imageInput ?? matchingDefaults?.imageInput
     : undefined;
 
   return {
@@ -128,6 +138,7 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
     accountAlias,
     authStatus: apiKey ? "ready" : "missing",
     wireApi: profile.wireApi,
+    ...(imageInput === undefined ? {} : { imageInput }),
   };
 }
 

@@ -46,11 +46,17 @@ export interface QiUiConfig {
   readonly timelineDensity?: ConfigTimelineDensity;
 }
 
+export interface QiImageConfig {
+  readonly maxEdgePx?: number;
+  readonly readByteBudget?: number;
+}
+
 /** Non-secret OpenAI-compatible endpoint catalog entry (secrets stay sealed). */
 export interface CompatibleEndpoint {
   readonly name: string;
   readonly baseURL: string;
   readonly model: string;
+  readonly imageInput?: boolean;
 }
 
 export interface QiUserConfig {
@@ -70,6 +76,7 @@ export interface QiUserConfig {
   readonly shell?: QiShellConfig;
   readonly memory?: QiMemoryConfig;
   readonly ui?: QiUiConfig;
+  readonly image?: QiImageConfig;
 }
 
 export interface LoadedUserConfig {
@@ -160,7 +167,12 @@ export async function persistUserProviderDefaults(
       model: selection.model,
     })
     : loaded.config.compatible;
-  const reasoningEffort = selection.reasoningEffort ?? loaded.config.reasoningEffort;
+  const requestedReasoningEffort = selection.reasoningEffort ?? loaded.config.reasoningEffort;
+  const reasoningEffort = selection.provider === "kimi" &&
+      (selection.model === "k3" || selection.model === "k3-256k") &&
+      requestedReasoningEffort !== undefined && requestedReasoningEffort !== "none"
+    ? "max"
+    : requestedReasoningEffort;
   const contextWindowTokens = selection.contextWindowTokens ?? loaded.config.contextWindowTokens;
   const next: QiUserConfig = {
     version: 1,
@@ -181,6 +193,7 @@ export async function persistUserProviderDefaults(
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
     ...(loaded.config.memory === undefined ? {} : { memory: loaded.config.memory }),
+    ...(loaded.config.image === undefined ? {} : { image: loaded.config.image }),
   };
   await saveUserConfig(absolute, next);
   return { path: absolute, exists: true, config: next };
@@ -240,6 +253,7 @@ export async function removeCompatibleEndpoint(
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
     ...(loaded.config.memory === undefined ? {} : { memory: loaded.config.memory }),
+    ...(loaded.config.image === undefined ? {} : { image: loaded.config.image }),
   };
   await saveUserConfig(absolute, next);
   return { path: absolute, exists: true, config: next };
@@ -250,10 +264,15 @@ export function upsertCompatibleEndpoint(
   entry: CompatibleEndpoint,
 ): readonly CompatibleEndpoint[] {
   const name = normalizeAccountAlias(entry.name);
+  const previous = existing?.find((item) => item.name === name);
+  const imageInput = entry.imageInput ?? previous?.imageInput;
   const next: CompatibleEndpoint = {
     name,
     baseURL: validateProviderBaseURL(entry.baseURL, "compatible base URL"),
     model: entry.model.trim(),
+    ...(imageInput === undefined
+      ? {}
+      : { imageInput }),
   };
   if (!next.model) throw new TypeError("compatible model is required");
   const others = (existing ?? []).filter((item) => item.name !== name);
@@ -338,6 +357,7 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
     name: entry.name,
     base_url: entry.baseURL,
     model: entry.model,
+    ...(entry.imageInput === undefined ? {} : { image_input: entry.imageInput }),
   }));
   validateUserConfig(
     {
@@ -380,6 +400,16 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
               ...(config.ui.timelineDensity === undefined
                 ? {}
                 : { timeline_density: config.ui.timelineDensity }),
+            },
+          }),
+      ...(config.image === undefined
+        ? {}
+        : {
+            image: {
+              ...(config.image.maxEdgePx === undefined ? {} : { max_edge_px: config.image.maxEdgePx }),
+              ...(config.image.readByteBudget === undefined
+                ? {}
+                : { read_byte_budget: config.image.readByteBudget }),
             },
           }),
     },
@@ -428,6 +458,16 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
             ...(config.ui.timelineDensity === undefined
               ? {}
               : { timeline_density: config.ui.timelineDensity }),
+          },
+        }),
+    ...(config.image === undefined
+      ? {}
+      : {
+          image: {
+            ...(config.image.maxEdgePx === undefined ? {} : { max_edge_px: config.image.maxEdgePx }),
+            ...(config.image.readByteBudget === undefined
+              ? {}
+              : { read_byte_budget: config.image.readByteBudget }),
           },
         }),
   });
@@ -486,6 +526,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "shell",
     "memory",
     "ui",
+    "image",
   ], path);
   const version = root.version ?? 1;
   if (version !== 1) throw new TypeError(`${path}: version must be 1`);
@@ -502,7 +543,11 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   const baseURL = optionalStringField(root.base_url, `${path}: base_url`, 2_048);
   const accountAlias = optionalStringField(root.account_alias, `${path}: account_alias`, 128);
   const rawReasoningEffort = optionalStringField(root.reasoning_effort, `${path}: reasoning_effort`, 32);
-  const reasoningEffort = normalizeKimiReasoningEffort(rawReasoningEffort);
+  const normalizedReasoningEffort = normalizeKimiReasoningEffort(rawReasoningEffort);
+  const reasoningEffort = provider === "kimi" && (model === "k3" || model === "k3-256k") &&
+      normalizedReasoningEffort !== undefined && normalizedReasoningEffort !== "none"
+    ? "max"
+    : normalizedReasoningEffort;
   const compatible = optionalCompatibleList(root.compatible, `${path}: compatible`);
   const contextWindowTokens = optionalIntegerField(
     root.context_window_tokens,
@@ -571,6 +616,27 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     );
     ui = timelineDensity === undefined ? {} : { timelineDensity };
   }
+  let image: QiImageConfig | undefined;
+  if (root.image !== undefined) {
+    const table = requireTable(root.image, `${path}: image`);
+    assertOnlyKeys(table, ["max_edge_px", "read_byte_budget"], `${path}: image`);
+    const maxEdgePx = optionalIntegerField(
+      table.max_edge_px,
+      `${path}: image.max_edge_px`,
+      256,
+      8_192,
+    );
+    const readByteBudget = optionalIntegerField(
+      table.read_byte_budget,
+      `${path}: image.read_byte_budget`,
+      65_536,
+      4 * 1024 * 1024,
+    );
+    image = {
+      ...(maxEdgePx === undefined ? {} : { maxEdgePx }),
+      ...(readByteBudget === undefined ? {} : { readByteBudget }),
+    };
+  }
   return {
     version: 1,
     ...(language === undefined ? {} : { language }),
@@ -587,6 +653,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(shell === undefined ? {} : { shell }),
     ...(memory === undefined ? {} : { memory }),
     ...(ui === undefined ? {} : { ui }),
+    ...(image === undefined ? {} : { image }),
   };
 }
 
@@ -597,7 +664,7 @@ function optionalCompatibleList(value: unknown, label: string): readonly Compati
   const seen = new Set<string>();
   const entries = value.map((entry, index) => {
     const table = requireTable(entry, `${label}[${index}]`);
-    assertOnlyKeys(table, ["name", "base_url", "model"], `${label}[${index}]`);
+    assertOnlyKeys(table, ["name", "base_url", "model", "image_input"], `${label}[${index}]`);
     const nameRaw = optionalStringField(table.name, `${label}[${index}].name`, 64);
     if (nameRaw === undefined) throw new TypeError(`${label}[${index}].name is required`);
     let name: string;
@@ -612,10 +679,12 @@ function optionalCompatibleList(value: unknown, label: string): readonly Compati
     if (baseURLRaw === undefined) throw new TypeError(`${label}[${index}].base_url is required`);
     const model = optionalStringField(table.model, `${label}[${index}].model`, 256);
     if (model === undefined) throw new TypeError(`${label}[${index}].model is required`);
+    const imageInput = optionalBooleanField(table.image_input, `${label}[${index}].image_input`);
     return {
       name,
       baseURL: validateProviderBaseURL(baseURLRaw, `${label}[${index}].base_url`),
       model,
+      ...(imageInput === undefined ? {} : { imageInput }),
     };
   });
   return Object.freeze(entries);

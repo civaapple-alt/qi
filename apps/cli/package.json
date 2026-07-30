@@ -20,6 +20,9 @@
     "@sinclair/typebox": "0.34.52",
     "smol-toml": "1.7.0"
   },
+  "optionalDependencies": {
+    "@mariozechner/clipboard": "^0.3.9"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/civaapple-alt/qi.git",

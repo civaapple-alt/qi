@@ -51,6 +51,7 @@ export interface LoginRoutingOptions {
   readonly baseURL?: string;
   readonly reasoningEffort?: string;
   readonly contextWindowTokens?: number;
+  readonly imageInput?: boolean;
 }
 
 export class AuthSession {
@@ -109,7 +110,16 @@ export class AuthSession {
       this.#config.profile,
       this.#config.model,
     )?.thinking?.defaultEffort;
-    const effectiveEffort = this.#config.reasoningEffort ?? modelDefaultEffort;
+    const supportedEfforts = getProviderModelProfile(
+      this.#config.profile,
+      this.#config.model,
+    )?.thinking?.supportedEfforts;
+    const configuredEffort = this.#config.reasoningEffort;
+    const effectiveEffort = configuredEffort === "none"
+      ? "none"
+      : configuredEffort !== undefined && supportedEfforts?.includes(configuredEffort)
+        ? configuredEffort
+        : modelDefaultEffort ?? configuredEffort;
     return {
       provider: this.#config.provider,
       accountAlias: this.#config.accountAlias,
@@ -210,7 +220,7 @@ export class AuthSession {
           : { contextWindowTokens: String(contextWindowTokens) }),
       },
     });
-    const { reasoningEffort: _previousEffort, ...previousConfig } = this.#config;
+    const { reasoningEffort: _previousEffort, imageInput: _previousImageInput, ...previousConfig } = this.#config;
     this.#config = withoutApiKey({
       ...previousConfig,
       provider,
@@ -313,7 +323,18 @@ export class AuthSession {
         },
       });
     }
-    const { reasoningEffort: _previousEffort, ...previousConfig } = this.#config;
+    const imageInput = provider === "compatible"
+      ? routing?.imageInput ?? (
+          provider === this.#config.provider && this.#config.accountAlias === normalizedAlias
+            ? this.#config.imageInput
+            : false
+        )
+      : undefined;
+    const {
+      reasoningEffort: _previousEffort,
+      imageInput: _previousImageInput,
+      ...previousConfig
+    } = this.#config;
     this.#config = withoutApiKey({
       ...previousConfig,
       provider,
@@ -325,6 +346,7 @@ export class AuthSession {
       endpointTrust: classifyProfileEndpoint(profile, baseURL),
       authStatus: "ready",
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+      ...(imageInput === undefined ? {} : { imageInput }),
     });
     if (contextWindowTokens !== undefined) {
       this.#contextWindowTokens = contextWindowTokens;
@@ -398,7 +420,7 @@ export class AuthSession {
           : { contextWindowTokens: String(contextWindowTokens) }),
       },
     });
-    const { reasoningEffort: _previousEffort, ...previousConfig } = this.#config;
+    const { reasoningEffort: _previousEffort, imageInput: _previousImageInput, ...previousConfig } = this.#config;
     this.#config = {
       ...previousConfig,
       provider: "kimi",
@@ -492,6 +514,7 @@ export class AuthSession {
       ...(this.#config.reasoningEffort === undefined
         ? {}
         : { reasoningEffort: this.#config.reasoningEffort }),
+      ...(this.#config.imageInput === undefined ? {} : { imageInput: this.#config.imageInput }),
     });
     this.#config = withoutApiKey({ ...this.#config, authStatus: "ready" });
   }

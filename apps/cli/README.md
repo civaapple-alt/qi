@@ -171,6 +171,31 @@ is preserved as one message. A compact pixel mark appears before the first Run, 
 Session timeline. Each Run injects at most the Workspace-root `AGENTS.md` (≤64 KiB, non-symlink) as bounded
 workspace instructions; nested `AGENTS.md` files are not auto-loaded.
 
+In a rich TTY, `Ctrl+V` first checks the system clipboard for an image and otherwise inserts clipboard text.
+Successful image paste inserts `[image #N (W×H)]`; deleting or changing that exact placeholder detaches the
+image. Multiple text/image parts and queued follow-ups retain their order. Line mode has no clipboard entry but
+recognizes Markdown image URLs, standalone URLs, and embedded URLs with a known image extension. URL ingestion
+requires Network permission and verifies the HTTP media type and magic bytes before preprocessing; a failed
+explicit candidate leaves the editor text intact and blocks submission.
+
+Image preprocessing defaults can be set globally:
+
+```toml
+[image]
+max_edge_px = 2000
+read_byte_budget = 262144
+
+[[compatible]]
+name = "my-vision-endpoint"
+base_url = "https://example.com/v1"
+model = "vision-model"
+image_input = true
+```
+
+OpenAI-compatible endpoints are text-only without `image_input = true`. A Turn supports at most eight images and
+20 MiB of prepared image data. The timeline displays committed metadata rather than maintaining a separate UI
+attachment truth.
+
 CLI flags are parsed by a pure helper that supports credential-free `--help`/`--version`. Bare `qi` uses the
 current directory as the Workspace (optional positional `qi PATH` or `--workspace PATH`). `--data PATH`
 names the exact Qi project-private data directory; when omitted it defaults to

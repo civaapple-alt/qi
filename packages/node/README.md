@@ -22,6 +22,7 @@ Controlled entrypoints:
 | `./storage` | SQLite Session and Memory stores plus encrypted credential-file storage |
 | `./workspace` | local/container/worktree/process adapters and SQLite EffectJournal |
 | `./tools` | filesystem, Git, Shell, Verify, Network, and Artifact Tool implementations |
+| `./media` | image URL/clipboard ingestion, MIME/magic validation, preprocessing, Artifact storage, and `read_image` |
 | `./skills` | declaration-only Skill/Agent loading and dedicated Skill writes |
 | `./mcp` | quarantined MCP discovery and explicit binding |
 | `./codeact` | container-isolated short programs with ordinary nested Tool authority |
@@ -63,6 +64,13 @@ atomic writes.
 
 Formal Plan revisions are stored at immutable content-hash paths under the machine-private project root.
 Ordinary file tools cannot read or edit that directory; `plan_document read/edit` is the bounded access path.
+
+Image ingestion supports PNG, JPEG, GIF, and WebP with a 64 MiB source limit and 100 MP decode guard. The default
+prepared view is bounded to a 2000 px longest edge and 3.75 MiB; transparent images stay PNG, JPEG encoding uses
+quality/size ladders, and animated GIF/WebP passes only when already within limits. Both original and prepared
+bytes are content-addressed under project `artifacts/`. Public URL reads reuse DNS pinning, private/local denial,
+default ports, redirect/HTTPS policy, cancellation, and timeout rules while retaining a separate image byte
+budget from the 1 MiB text `fetch` Tool.
 
 `SqliteEventStore` keeps a non-persistent, version-checked projection cache for the running process. Normal
 append validates only the new batch and advances that cache inside the existing transaction; restart, version

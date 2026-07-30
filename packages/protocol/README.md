@@ -41,6 +41,9 @@ for untrusted serialized input.
   complete document and do not require items.
 - `run.triggered` may freeze `mode` and a Plan binding. Formal Plan bindings omit `planItemId`; legacy bindings
   retain it.
+- `run.triggered.content` optionally records ordered `RunInputPart` text/image metadata. Images contain only
+  source, dimensions, byte counts, media types, and original/prepared `artifact://` references; binary bytes and
+  provider data URLs are forbidden. Older events without `content` remain text-only through `input`.
 - `work.plan.updated` records implementation navigation independently from Formal Plan review and completion
   evidence.
 - `run.question.*` settles a blocking Question inside one Run and remains distinct from between-Run

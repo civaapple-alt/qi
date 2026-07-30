@@ -816,6 +816,26 @@ test("chat-only Runs match the Cursor-style compact transcript", () => {
         mode: "agent",
         status: "completed",
         input: "hi",
+        content: [
+          { type: "text", text: "hi" },
+          {
+            type: "image",
+            source: "clipboard",
+            originalArtifactRef: `artifact://${"a".repeat(64)}`,
+            preparedArtifactRef: `artifact://${"b".repeat(64)}`,
+            originalMediaType: "image/png",
+            mediaType: "image/jpeg",
+            originalByteLength: 5000000,
+            byteLength: 100000,
+            originalWidth: 2400,
+            originalHeight: 1200,
+            width: 1200,
+            height: 600,
+            downsampled: true,
+            formatChanged: true,
+            orientationApplied: false,
+          },
+        ],
         stepOrder: ["stp_1"],
         steps: {
           stp_1: {
@@ -847,6 +867,7 @@ test("chat-only Runs match the Cursor-style compact transcript", () => {
   const rendered = presenter.render(80).join("\n");
   assert.match(rendered, /Qi  v0\.4\.0/);
   assert.match(rendered, /⟦user⟧hi/);
+  assert.match(rendered, /image #1 · clipboard · 2400×1200 → 1200×600 · image\/png → image\/jpeg/);
   assert.match(rendered, /^Hi — what would you like to work on\?$/m);
   assert.doesNotMatch(rendered, /Step 1\/1/);
   assert.doesNotMatch(rendered, /── Handoff ──/);

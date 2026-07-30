@@ -12,7 +12,12 @@ import {
   type Terminal,
 } from "@earendil-works/pi-tui";
 import { dirname, resolve } from "node:path";
-import type { SessionEvent, SessionId } from "@civaapple/qi-protocol";
+import type {
+  RunImagePart,
+  RunInputPart,
+  SessionEvent,
+  SessionId,
+} from "@civaapple/qi-protocol";
 import { nextSessionMode, type RuntimeActivity, type SessionMode } from "@civaapple/qi-agent/loop";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import type { AuthSession, AuthSessionStatus } from "./auth.js";
@@ -77,6 +82,8 @@ import { eventAffectsTranscript } from "./paint.js";
 import { TuiPresenter, USER_MESSAGE_PREFIX } from "./presenter.js";
 import type { TuiRuntime } from "./runtime.js";
 import { applyTheme, theme, type ThemeName } from "./theme/index.js";
+import { readClipboardPaste } from "./clipboard.js";
+import { imagePlaceholder, structuredComposerContent } from "./image-composer.js";
 
 export type InteractiveExit =
   | { kind: "quit" }
@@ -99,6 +106,8 @@ export class InteractiveTui {
   readonly #panels: PanelHost;
   readonly #followUps = new FollowUpQueue();
   readonly #active = new Set<Promise<void>>();
+  readonly #composerImages = new Map<string, RunImagePart>();
+  #nextImageNumber = 1;
   #closing = false;
   #exit: InteractiveExit = { kind: "quit" };
   #resolveClosed: ((exit: InteractiveExit) => void) | undefined;
@@ -206,6 +215,10 @@ export class InteractiveTui {
         this.#cycleMode();
         return { consume: true };
       }
+      if (matchesKey(data, "ctrl+v")) {
+        this.#startClipboardPaste();
+        return { consume: true };
+      }
       if (this.#handleFollowUpKeys(data)) return { consume: true };
       if (this.#editor.getText().length === 0 && !this.#runtime.active && this.#active.size === 0) {
         if (matchesKey(data, "1") || matchesKey(data, "2") || matchesKey(data, "3")) {
@@ -222,6 +235,7 @@ export class InteractiveTui {
       }
       if (this.#editor.getText().length > 0) {
         this.#editor.setText("");
+        this.#composerImages.clear();
         this.#presenter.setNotice(undefined);
         this.#render();
         return { consume: true };
@@ -339,13 +353,15 @@ export class InteractiveTui {
   #handleInput(raw: string): void {
     const input = raw.trim();
     if (!input) return;
+    const content = structuredComposerContent(raw, this.#composerImages);
+    this.#composerImages.clear();
     this.#editor.addToHistory(raw);
     this.#editor.setText("");
     // A notice describes the interaction that just finished. Retire it as soon as
     // the operator begins the next one; that interaction may publish a fresh notice.
     this.#presenter.setNotice(undefined);
     if (this.#followUps.editing) {
-      this.#followUps.commitEdit(input);
+      this.#followUps.commitEdit(input, content);
       this.#followUps.clearSelection();
       this.#presenter.setNotice(undefined);
       this.#render();
@@ -358,7 +374,7 @@ export class InteractiveTui {
       return;
     }
     if (this.#runtime.active) {
-      this.#followUps.enqueue(input);
+      this.#followUps.enqueue(input, content);
       this.#presenter.setNotice(t(this.#presenter.locale(), "followups.queued"));
       this.#render();
       return;
@@ -384,7 +400,52 @@ export class InteractiveTui {
       // Esc dismissed the panel: ordinary chat is fine; reopen with /next.
     }
     // Plan Q&A / supplements stay in Plan mode; plan_document stays gated until revise or start.
-    this.#startUserRun(input);
+    this.#startUserRun(input, content);
+  }
+
+  #startClipboardPaste(): void {
+    let operation: Promise<void>;
+    operation = this.#pasteClipboard().finally(() => {
+      this.#active.delete(operation);
+      this.#render();
+    });
+    this.#active.add(operation);
+  }
+
+  async #pasteClipboard(): Promise<void> {
+    const paste = await readClipboardPaste();
+    if (paste.type === "text") {
+      this.#editor.insertTextAtCursor?.(paste.text);
+      return;
+    }
+    if (paste.type === "empty") return;
+    try {
+      const image = await this.#runtime.ingestClipboardImage(paste.bytes);
+      const placeholder = imagePlaceholder(this.#nextImageNumber++, image);
+      this.#composerImages.set(placeholder, image);
+      this.#editor.insertTextAtCursor?.(placeholder);
+      this.#presenter.setNotice(
+        `Attached ${image.width}×${image.height} ${image.mediaType}${image.downsampled ? " (downsampled)" : ""}.`,
+      );
+    } catch (error) {
+      this.#presenter.setNotice(
+        `Image paste failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  #restoreComposerImages(item: { text: string; content?: readonly RunInputPart[] } | undefined): void {
+    this.#composerImages.clear();
+    if (!item?.content) return;
+    const images = item.content.filter((part): part is RunImagePart => part.type === "image");
+    let imageIndex = 0;
+    for (const match of item.text.matchAll(/\[image #(\d+) \(\d+×\d+\)\]/g)) {
+      const image = images[imageIndex++];
+      if (!image) break;
+      this.#composerImages.set(match[0], { ...image });
+      const number = Number(match[1]);
+      if (Number.isInteger(number)) this.#nextImageNumber = Math.max(this.#nextImageNumber, number + 1);
+    }
   }
 
   #handleFollowUpKeys(data: string): boolean {
@@ -395,6 +456,7 @@ export class InteractiveTui {
       if (this.#followUps.editing) {
         this.#followUps.cancelEdit();
         this.#editor.setText("");
+        this.#composerImages.clear();
         this.#followUps.clearSelection();
         this.#render();
         return true;
@@ -427,10 +489,12 @@ export class InteractiveTui {
       if (this.#followUps.length === 0) return false;
       if (this.#followUps.selectedIndex < 0) {
         const text = this.#followUps.beginEdit();
+        this.#restoreComposerImages(this.#followUps.selected);
         this.#editor.setText(text ?? "");
       } else {
         this.#followUps.selectPrev();
         const text = this.#followUps.beginEdit(this.#followUps.selectedIndex);
+        this.#restoreComposerImages(this.#followUps.selected);
         this.#editor.setText(text ?? "");
       }
       this.#render();
@@ -441,6 +505,7 @@ export class InteractiveTui {
       if (this.#followUps.length === 0 || this.#followUps.selectedIndex < 0) return false;
       this.#followUps.selectNext();
       const text = this.#followUps.beginEdit(this.#followUps.selectedIndex);
+      this.#restoreComposerImages(this.#followUps.selected);
       this.#editor.setText(text ?? "");
       this.#render();
       return true;
@@ -459,11 +524,11 @@ export class InteractiveTui {
     const next = this.#followUps.dequeue();
     if (!next) return;
     this.#followUps.clearSelection();
-    this.#startUserRun(next.text);
+    this.#startUserRun(next.text, next.content);
   }
 
-  #startUserRun(input: string): void {
-    this.#startTurn(() => this.#runtime.run(input));
+  #startUserRun(input: string, content?: readonly RunInputPart[]): void {
+    this.#startTurn(() => this.#runtime.run(input, content));
   }
 
   #startPlanDraft(input: string): void {
@@ -1700,7 +1765,13 @@ export class InteractiveTui {
           const routing = provider === "compatible"
             ? (() => {
               const entry = findCompatibleEndpoint(loaded.config, alias);
-              return entry ? { model: entry.model, baseURL: entry.baseURL } : undefined;
+              return entry
+                ? {
+                    model: entry.model,
+                    baseURL: entry.baseURL,
+                    ...(entry.imageInput === undefined ? {} : { imageInput: entry.imageInput }),
+                  }
+                : undefined;
             })()
             : (loaded.config.provider === provider
               ? {

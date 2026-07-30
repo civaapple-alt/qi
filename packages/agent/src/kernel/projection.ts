@@ -10,6 +10,7 @@ import type {
   PlanItemId,
   QuestionId,
   ReceiptId,
+  RunInputPart,
   RunId,
   SessionEvent,
   SessionId,
@@ -292,6 +293,7 @@ export interface RunView {
   runId: RunId;
   trigger: "user" | "timer" | "event" | "resume";
   input?: string;
+  content?: RunInputPart[];
   mode: SessionMode;
   planBinding?: RunPlanBinding;
   status: RunStatus;
@@ -1274,6 +1276,9 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
         runId: event.data.runId,
         trigger: event.data.trigger,
         ...(event.data.input === undefined ? {} : { input: event.data.input }),
+        ...(event.data.content === undefined
+          ? {}
+          : { content: event.data.content.map((part) => ({ ...part })) }),
         mode,
         ...(event.data.planBinding === undefined
           ? {}

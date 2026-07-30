@@ -41,6 +41,8 @@ export interface OpenAIChatCompletionsModelPortOptions {
   contextTokens?: number;
   profile?: ProviderProfile;
   reasoningEffort?: string | null;
+  /** Explicit opt-in for custom OpenAI-compatible endpoints. Official profiles declare this themselves. */
+  imageInput?: boolean;
 }
 
 /**
@@ -53,6 +55,7 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
   readonly #contextTokens: number | undefined;
   readonly #profile: ProviderProfile | undefined;
   readonly #reasoningEffort: string | null | undefined;
+  readonly #imageInput: boolean | undefined;
 
   constructor(client: OpenAIChatCompletionsClient, options: OpenAIChatCompletionsModelPortOptions = {}) {
     this.#client = client;
@@ -60,6 +63,7 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
     this.#contextTokens = options.contextTokens;
     this.#profile = options.profile;
     this.#reasoningEffort = options.reasoningEffort;
+    this.#imageInput = options.imageInput;
     if (this.#providerNames.size === 0) throw new TypeError("At least one provider name is required");
     if (
       this.#contextTokens !== undefined &&
@@ -83,10 +87,11 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
       return modelCapabilitiesFromProfile(profile, {
         model: model.model,
         ...(this.#contextTokens === undefined ? {} : { contextTokens: this.#contextTokens }),
+        ...(this.#imageInput === undefined ? {} : { imageInput: this.#imageInput }),
       });
     }
     return {
-      input: new Set(["text"]),
+      input: new Set(this.#imageInput ? ["text", "image"] : ["text"]),
       output: new Set(["text", "action"]),
       contextTokens: this.#contextTokens ?? 128_000,
       parallelActions: true,
@@ -267,9 +272,13 @@ function kimiThinkingConfig(
     return effort === undefined ? undefined : { type: "enabled", effort };
   }
   if (modelProfile.thinking.mode === "toggle") return { type: "enabled" };
+  const supported = modelProfile.thinking.supportedEfforts;
+  const selected = effort !== undefined && supported?.includes(effort)
+    ? effort
+    : modelProfile.thinking.defaultEffort ?? supported?.[0] ?? "high";
   return {
     type: "enabled",
-    effort: effort ?? modelProfile.thinking.defaultEffort ?? "high",
+    effort: selected,
   };
 }
 
@@ -374,7 +383,7 @@ function toChatMessages(messages: readonly ModelMessage[]): ChatCompletionMessag
         result.push({ role: "system", content: textOnly(message, "system") });
         break;
       case "user":
-        result.push({ role: "user", content: textOnly(message, "user") });
+        result.push({ role: "user", content: toChatUserContent(message) });
         break;
       case "assistant": {
         const toolCalls = message.content.filter((part) => part.type === "tool-call");
@@ -408,16 +417,85 @@ function toChatMessages(messages: readonly ModelMessage[]): ChatCompletionMessag
           if (part.type !== "tool-result") {
             throw new TypeError("Tool messages may only contain tool-result parts");
           }
+          const { output, images } = splitToolResultOutput(part.output);
           result.push({
             role: "tool",
             tool_call_id: part.callId,
-            content: JSON.stringify({ ok: !part.isError, output: part.output }),
+            content: JSON.stringify({ ok: !part.isError, output }),
           });
+          if (images.length > 0) {
+            result.push({
+              role: "user",
+              content: [
+                { type: "text", text: `Attached media from tool result ${part.callId}:` },
+                ...images.map(toChatImagePart),
+              ],
+            });
+          }
         }
         break;
     }
   }
   return result;
+}
+
+function toChatUserContent(
+  message: ModelMessage,
+): string | Array<
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+> {
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [];
+  for (const part of message.content) {
+    if (part.type === "text") content.push({ type: "text", text: part.text });
+    else if (part.type === "image") content.push(toChatImagePart(part));
+    else if (part.type === "artifact") {
+      throw new TypeError(`Artifact ${part.ref} must be resolved before invoking the Chat Completions adapter`);
+    } else {
+      throw new TypeError(`user messages cannot contain ${part.type} parts`);
+    }
+  }
+  if (content.length === 1 && content[0]?.type === "text") return content[0].text;
+  return content;
+}
+
+function toChatImagePart(
+  part: Extract<ModelContentPart, { type: "image" }>,
+): { type: "image_url"; image_url: { url: string } } {
+  assertSupportedImageUri(part);
+  return { type: "image_url", image_url: { url: part.uri } };
+}
+
+function splitToolResultOutput(output: unknown): {
+  output: unknown;
+  images: Array<Extract<ModelContentPart, { type: "image" }>>;
+} {
+  if (!Array.isArray(output)) return { output, images: [] };
+  const images: Array<Extract<ModelContentPart, { type: "image" }>> = [];
+  const retained: unknown[] = [];
+  for (const item of output) {
+    if (isModelImagePart(item)) images.push(item);
+    else if (isArtifactPart(item)) {
+      throw new TypeError(`Artifact ${item.ref} must be resolved before invoking the Chat Completions adapter`);
+    } else retained.push(item);
+  }
+  return { output: retained, images };
+}
+
+function isModelImagePart(value: unknown): value is Extract<ModelContentPart, { type: "image" }> {
+  return typeof value === "object" && value !== null &&
+    (value as { type?: unknown }).type === "image" &&
+    typeof (value as { uri?: unknown }).uri === "string" &&
+    typeof (value as { mediaType?: unknown }).mediaType === "string";
+}
+
+function isArtifactPart(value: unknown): value is Extract<ModelContentPart, { type: "artifact" }> {
+  return typeof value === "object" && value !== null &&
+    (value as { type?: unknown }).type === "artifact" &&
+    typeof (value as { ref?: unknown }).ref === "string";
 }
 
 function textOnly(message: ModelMessage, role: string): string {
@@ -431,6 +509,13 @@ function textOnly(message: ModelMessage, role: string): string {
     }
   }
   return parts.join("");
+}
+
+function assertSupportedImageUri(part: Extract<ModelContentPart, { type: "image" }>): void {
+  if (/^(https?:|data:)/i.test(part.uri)) return;
+  throw new TypeError(
+    `Chat Completions image input requires an http(s) URL or data URL; received ${part.uri}`,
+  );
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

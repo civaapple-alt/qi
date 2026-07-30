@@ -7,7 +7,7 @@ import { BlockList, isIP, type LookupFunction } from "node:net";
 import { Type } from "@sinclair/typebox";
 import { ToolFailure, defineTool } from "@civaapple/qi-agent/tools";
 
-const hardResponseLimitBytes = 1024 * 1024;
+export const textResponseLimitBytes = 1024 * 1024;
 const defaultMaximumCharacters = 40_000;
 const requestTimeoutMs = 10_000;
 const maximumRedirects = 3;
@@ -21,7 +21,26 @@ export interface NetworkResponse {
 
 export interface NetworkFetchDependencies {
   readonly resolve: (hostname: string) => Promise<readonly LookupAddress[]>;
-  readonly request: (url: URL, address: LookupAddress, signal?: AbortSignal) => Promise<NetworkResponse>;
+  readonly request: (
+    url: URL,
+    address: LookupAddress,
+    signal?: AbortSignal,
+    options?: NetworkRequestOptions,
+  ) => Promise<NetworkResponse>;
+}
+
+export interface NetworkRequestOptions {
+  readonly maxBytes: number;
+  readonly accept: string;
+}
+
+export interface PublicNetworkResource {
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly status: number;
+  readonly mediaType: string;
+  readonly body: Uint8Array;
+  readonly redirects: number;
 }
 
 const defaultDependencies: NetworkFetchDependencies = {
@@ -47,7 +66,7 @@ export function createFetchTool(dependencies: NetworkFetchDependencies = default
         mediaType: Type.String(),
         title: Type.Optional(Type.String()),
         content: Type.String(),
-        rawBytes: Type.Integer({ minimum: 0, maximum: hardResponseLimitBytes }),
+        rawBytes: Type.Integer({ minimum: 0, maximum: textResponseLimitBytes }),
         sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
         truncated: Type.Boolean(),
         redirects: Type.Integer({ minimum: 0, maximum: maximumRedirects }),
@@ -58,69 +77,33 @@ export function createFetchTool(dependencies: NetworkFetchDependencies = default
     effect: () => "read",
     resources: (input) => [networkResource(input.url)],
     async execute(input, context) {
-      const requestedUrl = normalizeUrl(input.url);
       const maximumCharacters = input.maxChars ?? defaultMaximumCharacters;
-      const control = networkAbortControl(context.signal);
-      let currentUrl = requestedUrl;
-      let redirects = 0;
-
-      try {
-        while (true) {
-          const address = await resolvePublicAddress(currentUrl, dependencies.resolve, control.signal);
-          const response = await dependencies.request(currentUrl, address, control.signal);
-          if (response.body.byteLength > hardResponseLimitBytes) {
-            throw new ToolFailure(
-              "NETWORK_RESPONSE_TOO_LARGE",
-              `Response exceeds the ${hardResponseLimitBytes}-byte network limit`,
-            );
-          }
-
-          const location = response.headers.location;
-          if (redirectStatuses.has(response.status) && location !== undefined) {
-            if (redirects >= maximumRedirects) {
-              throw new ToolFailure("NETWORK_REDIRECT_LIMIT", `Response exceeded ${maximumRedirects} redirects`);
-            }
-            let nextUrl: URL;
-            try {
-              nextUrl = normalizeUrl(new URL(location, currentUrl).href);
-            } catch (error) {
-              throw new ToolFailure("NETWORK_REDIRECT_INVALID", `Invalid redirect target: ${message(error)}`);
-            }
-            if (currentUrl.protocol === "https:" && nextUrl.protocol !== "https:") {
-              throw new ToolFailure("NETWORK_REDIRECT_DOWNGRADE", "HTTPS responses cannot redirect to HTTP");
-            }
-            currentUrl = nextUrl;
-            redirects += 1;
-            continue;
-          }
-
-          const mediaType = parseMediaType(response.headers["content-type"]);
-          if (!isTextMediaType(mediaType)) {
-            throw new ToolFailure("NETWORK_CONTENT_TYPE_DENIED", `Unsupported network content type: ${mediaType}`);
-          }
-          const raw = Buffer.from(response.body);
-          const decoded = raw.toString("utf8");
-          const extracted = mediaType === "text/html" || mediaType === "application/xhtml+xml"
-            ? extractHtmlText(decoded)
-            : { content: normalizeText(decoded) };
-          const truncated = extracted.content.length > maximumCharacters;
-          return {
-            requestedUrl: requestedUrl.href,
-            finalUrl: currentUrl.href,
-            status: response.status,
-            mediaType,
-            ...(extracted.title === undefined ? {} : { title: extracted.title }),
-            content: truncated ? extracted.content.slice(0, maximumCharacters) : extracted.content,
-            rawBytes: raw.byteLength,
-            sha256: createHash("sha256").update(raw).digest("hex"),
-            truncated,
-            redirects,
-            untrusted: true as const,
-          };
-        }
-      } finally {
-        control.dispose();
+      const resource = await readPublicNetworkResource(input.url, {
+        maxBytes: textResponseLimitBytes,
+        accept: "text/html, text/plain, application/json, application/xml;q=0.9, */*;q=0.1",
+      }, dependencies, context.signal);
+      if (!isTextMediaType(resource.mediaType)) {
+        throw new ToolFailure("NETWORK_CONTENT_TYPE_DENIED", `Unsupported network content type: ${resource.mediaType}`);
       }
+      const raw = Buffer.from(resource.body);
+      const decoded = raw.toString("utf8");
+      const extracted = resource.mediaType === "text/html" || resource.mediaType === "application/xhtml+xml"
+        ? extractHtmlText(decoded)
+        : { content: normalizeText(decoded) };
+      const truncated = extracted.content.length > maximumCharacters;
+      return {
+        requestedUrl: resource.requestedUrl,
+        finalUrl: resource.finalUrl,
+        status: resource.status,
+        mediaType: resource.mediaType,
+        ...(extracted.title === undefined ? {} : { title: extracted.title }),
+        content: truncated ? extracted.content.slice(0, maximumCharacters) : extracted.content,
+        rawBytes: raw.byteLength,
+        sha256: createHash("sha256").update(raw).digest("hex"),
+        truncated,
+        redirects: resource.redirects,
+        untrusted: true as const,
+      };
     },
   });
 }
@@ -129,6 +112,61 @@ export const fetchTool = createFetchTool();
 
 export function networkResource(value: string): string {
   return `network:${normalizeUrl(value).href}`;
+}
+
+export async function readPublicNetworkResource(
+  value: string,
+  options: NetworkRequestOptions,
+  dependencies: NetworkFetchDependencies = defaultDependencies,
+  signal?: AbortSignal,
+): Promise<PublicNetworkResource> {
+  if (!Number.isInteger(options.maxBytes) || options.maxBytes <= 0) {
+    throw new RangeError("maxBytes must be a positive integer");
+  }
+  const requestedUrl = normalizeUrl(value);
+  const control = networkAbortControl(signal);
+  let currentUrl = requestedUrl;
+  let redirects = 0;
+  try {
+    while (true) {
+      const address = await resolvePublicAddress(currentUrl, dependencies.resolve, control.signal);
+      const response = await dependencies.request(currentUrl, address, control.signal, options);
+      if (response.body.byteLength > options.maxBytes) {
+        throw new ToolFailure(
+          "NETWORK_RESPONSE_TOO_LARGE",
+          `Response exceeds the ${options.maxBytes}-byte network limit`,
+        );
+      }
+      const location = response.headers.location;
+      if (redirectStatuses.has(response.status) && location !== undefined) {
+        if (redirects >= maximumRedirects) {
+          throw new ToolFailure("NETWORK_REDIRECT_LIMIT", `Response exceeded ${maximumRedirects} redirects`);
+        }
+        let nextUrl: URL;
+        try {
+          nextUrl = normalizeUrl(new URL(location, currentUrl).href);
+        } catch (error) {
+          throw new ToolFailure("NETWORK_REDIRECT_INVALID", `Invalid redirect target: ${message(error)}`);
+        }
+        if (currentUrl.protocol === "https:" && nextUrl.protocol !== "https:") {
+          throw new ToolFailure("NETWORK_REDIRECT_DOWNGRADE", "HTTPS responses cannot redirect to HTTP");
+        }
+        currentUrl = nextUrl;
+        redirects += 1;
+        continue;
+      }
+      return {
+        requestedUrl: requestedUrl.href,
+        finalUrl: currentUrl.href,
+        status: response.status,
+        mediaType: parseMediaType(response.headers["content-type"]),
+        body: response.body,
+        redirects,
+      };
+    }
+  } finally {
+    control.dispose();
+  }
 }
 
 function normalizeUrl(value: string): URL {
@@ -184,7 +222,15 @@ async function resolvePublicAddress(
   return addresses[0]!;
 }
 
-function requestPinned(url: URL, address: LookupAddress, signal?: AbortSignal): Promise<NetworkResponse> {
+function requestPinned(
+  url: URL,
+  address: LookupAddress,
+  signal?: AbortSignal,
+  options: NetworkRequestOptions = {
+    maxBytes: textResponseLimitBytes,
+    accept: "text/html, text/plain, application/json, application/xml;q=0.9, */*;q=0.1",
+  },
+): Promise<NetworkResponse> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (error?: unknown, response?: NetworkResponse): void => {
@@ -202,7 +248,7 @@ function requestPinned(url: URL, address: LookupAddress, signal?: AbortSignal): 
       {
         method: "GET",
         headers: {
-          accept: "text/html, text/plain, application/json, application/xml;q=0.9, */*;q=0.1",
+          accept: options.accept,
           "accept-encoding": "identity",
           "user-agent": "Qi/0.1 controlled-fetch",
         },
@@ -219,8 +265,8 @@ function requestPinned(url: URL, address: LookupAddress, signal?: AbortSignal): 
           return;
         }
         const declaredLength = Number(header(incoming.headers, "content-length"));
-        if (Number.isFinite(declaredLength) && declaredLength > hardResponseLimitBytes) {
-          finish(new ToolFailure("NETWORK_RESPONSE_TOO_LARGE", `Response exceeds the ${hardResponseLimitBytes}-byte network limit`));
+        if (Number.isFinite(declaredLength) && declaredLength > options.maxBytes) {
+          finish(new ToolFailure("NETWORK_RESPONSE_TOO_LARGE", `Response exceeds the ${options.maxBytes}-byte network limit`));
           incoming.destroy();
           return;
         }
@@ -229,20 +275,14 @@ function requestPinned(url: URL, address: LookupAddress, signal?: AbortSignal): 
           incoming.destroy();
           return;
         }
-        const mediaType = parseMediaType(flattenedHeaders["content-type"]);
-        if (!isTextMediaType(mediaType)) {
-          finish(new ToolFailure("NETWORK_CONTENT_TYPE_DENIED", `Unsupported network content type: ${mediaType}`));
-          incoming.destroy();
-          return;
-        }
         const chunks: Buffer[] = [];
         let size = 0;
         incoming.on("data", (chunk: Buffer | string) => {
           const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           size += buffer.byteLength;
-          if (size > hardResponseLimitBytes) {
+          if (size > options.maxBytes) {
             incoming.destroy();
-            finish(new ToolFailure("NETWORK_RESPONSE_TOO_LARGE", `Response exceeds the ${hardResponseLimitBytes}-byte network limit`));
+            finish(new ToolFailure("NETWORK_RESPONSE_TOO_LARGE", `Response exceeds the ${options.maxBytes}-byte network limit`));
             return;
           }
           chunks.push(buffer);

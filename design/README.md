@@ -53,6 +53,10 @@ the six coordinated public packages.
 3. `packages/ai/docs/context/compiler.md`
 4. `packages/agent/docs/memory/README.md`
 
+For image input, continue with
+[ADR-0028](decisions.md#adr-0028-persist-ordered-media-references-and-materialize-provider-payloads-late),
+then `packages/node/README.md` (`./media`) and the provider adapter tests.
+
 ### Goals and completion
 
 1. [system-design §6](system-design.md#6-goals-evidence-and-completion)

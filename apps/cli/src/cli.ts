@@ -3,6 +3,7 @@ import { providerModelContextTokens } from "@civaapple/qi-ai";
 import { SessionIdSchema, assertSchema, type SessionId } from "@civaapple/qi-protocol";
 import {
   defaultUserConfigPath,
+  findCompatibleEndpoint,
   loadUserConfig,
   resolveLanguage,
   resolveTheme,
@@ -44,6 +45,7 @@ export interface TuiCliOptions {
   allowDelegate: boolean;
   memoryEnabled: boolean;
   memoryAutoAcceptProject: boolean;
+  image: import("./config.js").QiImageConfig;
   /** CLI `--allow-*` / `--safe` only; re-applied when refreshing project/user policy mid-process. */
   capabilityOverrides: CapabilityOverrides;
   /** True when launched with `--no-config` (skip user/project TOML on refresh). */
@@ -192,6 +194,14 @@ export async function parseTuiCliArguments(
         : { reasoningEffort: loaded.config.reasoningEffort }),
       ...(loaded.config.baseURL === undefined ? {} : { baseURL: loaded.config.baseURL }),
       ...(loaded.config.accountAlias === undefined ? {} : { accountAlias: loaded.config.accountAlias }),
+      ...(loaded.config.provider !== "compatible"
+        ? {}
+        : {
+            imageInput: findCompatibleEndpoint(
+              loaded.config,
+              loaded.config.accountAlias ?? "default",
+            )?.imageInput ?? false,
+          }),
     },
     allowMissingCredential: true,
     environment,
@@ -221,6 +231,7 @@ export async function parseTuiCliArguments(
       ...capabilities,
       memoryEnabled: loaded.config.memory?.enabled ?? true,
       memoryAutoAcceptProject: loaded.config.memory?.autoAcceptProject ?? true,
+      image: loaded.config.image ?? {},
       capabilityOverrides: overrides,
       noConfig: flags.has("--no-config"),
       ...(shell === undefined ? {} : { shell }),

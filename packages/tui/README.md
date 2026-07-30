@@ -25,6 +25,9 @@ Reusable Qi-specific terminal presentation and control components built on
 - Keep bounded file Diff previews for completed mutations in the current Run, and
   expose bounded process failure evidence instead of hiding it inside the ToolFailure envelope.
 - Provide reusable composer, follow-up queue, selection/form/scroll panels, themes, and layout helpers.
+- Carry structured image metadata in follow-ups and render committed image source, dimensions, and preprocessing
+  state from `run.triggered.content`; clipboard, Network, configuration, and Artifact reads remain application
+  responsibilities.
 - Keep Qi-specific control vocabulary separate from CLI startup, credentials, persistence, and process ownership.
 
 ## Non-goals

@@ -13,7 +13,13 @@ import {
 } from "@civaapple/qi-agent/kernel";
 import type { ModelPort, ModelRef } from "@civaapple/qi-ai";
 import { TurnLoop, type RuntimeActivity, type TurnResult } from "@civaapple/qi-agent/loop";
-import { createId, type RunId, type SessionEvent, type SessionId } from "@civaapple/qi-protocol";
+import {
+  createId,
+  type RunId,
+  type RunInputPart,
+  type SessionEvent,
+  type SessionId,
+} from "@civaapple/qi-protocol";
 import {
   ToolRegistry,
   type ArtifactStore,
@@ -203,7 +209,23 @@ export class QiAgent {
     this.#loop.steer(this.sessionId, message, actorId);
   }
 
-  async prompt(input: string, options: QiPromptOptions = {}): Promise<TurnResult> {
+  async prompt(input: string, options?: QiPromptOptions): Promise<TurnResult>;
+  async prompt(content: readonly RunInputPart[], options?: QiPromptOptions): Promise<TurnResult>;
+  async prompt(
+    inputOrContent: string | readonly RunInputPart[],
+    options: QiPromptOptions = {},
+  ): Promise<TurnResult> {
+    const content = typeof inputOrContent === "string"
+      ? undefined
+      : structuredClone([...inputOrContent]);
+    let imageNumber = 0;
+    const input = typeof inputOrContent === "string"
+      ? inputOrContent
+      : inputOrContent.map((part) =>
+          part.type === "text"
+            ? part.text
+            : `[image #${++imageNumber} (${part.width}×${part.height})]`
+        ).join("");
     if (!input.trim() && options.existingRunId === undefined) {
       throw new TypeError("prompt input must not be empty");
     }
@@ -225,6 +247,7 @@ export class QiAgent {
       ...(title === undefined ? {} : { title }),
       subject: this.#subject,
       input,
+      ...(content === undefined ? {} : { content }),
       model: structuredClone(options.model ?? this.#model),
       contextBlocks: [...this.#contextBlocks, ...(options.contextBlocks ?? [])],
       contextBudgetTokens,

@@ -26,6 +26,10 @@
       "types": "./dist/tools/index.d.ts",
       "default": "./dist/tools/index.js"
     },
+    "./media": {
+      "types": "./dist/media/index.d.ts",
+      "default": "./dist/media/index.js"
+    },
     "./skills": {
       "types": "./dist/skills/index.d.ts",
       "default": "./dist/skills/index.js"
@@ -64,6 +68,7 @@
     "@civaapple/qi-protocol": "0.7.1",
     "@sinclair/typebox": "0.34.52",
     "diff": "9.0.0",
+    "sharp": "^0.34.4",
     "tar": "^7.5.22",
     "yaml": "2.9.0"
   },

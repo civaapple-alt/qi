@@ -111,6 +111,50 @@ export const MemoryScopeSchema = Type.Union([
 export type MemoryScope = Static<typeof MemoryScopeSchema>;
 export type MemoryActivation = "relevant" | "always";
 
+const ImageMediaTypeSchema = Type.Union([
+  Type.Literal("image/png"),
+  Type.Literal("image/jpeg"),
+  Type.Literal("image/gif"),
+  Type.Literal("image/webp"),
+]);
+
+const ImageArtifactRefSchema = Type.String({ pattern: "^artifact://[a-f0-9]{64}$" });
+
+export const RunImagePartSchema = Type.Object(
+  {
+    type: Type.Literal("image"),
+    source: Type.Union([Type.Literal("clipboard"), Type.Literal("url")]),
+    originalArtifactRef: ImageArtifactRefSchema,
+    preparedArtifactRef: ImageArtifactRefSchema,
+    originalMediaType: ImageMediaTypeSchema,
+    mediaType: ImageMediaTypeSchema,
+    originalByteLength: Type.Integer({ minimum: 1, maximum: 67_108_864 }),
+    byteLength: Type.Integer({ minimum: 1, maximum: 67_108_864 }),
+    originalWidth: Type.Integer({ minimum: 1, maximum: 100_000 }),
+    originalHeight: Type.Integer({ minimum: 1, maximum: 100_000 }),
+    width: Type.Integer({ minimum: 1, maximum: 100_000 }),
+    height: Type.Integer({ minimum: 1, maximum: 100_000 }),
+    downsampled: Type.Boolean(),
+    formatChanged: Type.Boolean(),
+    orientationApplied: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export const RunInputPartSchema = Type.Union([
+  Type.Object(
+    {
+      type: Type.Literal("text"),
+      text: Type.String({ minLength: 1, maxLength: 100_000 }),
+    },
+    { additionalProperties: false },
+  ),
+  RunImagePartSchema,
+]);
+
+export type RunImagePart = Static<typeof RunImagePartSchema>;
+export type RunInputPart = Static<typeof RunInputPartSchema>;
+
 const MemoryProvenanceSchema = Type.Object(
   {
     projectId: Type.Optional(Type.String({
@@ -415,6 +459,7 @@ export const SessionEventSchema = Type.Union([
           Type.Literal("resume"),
         ]),
         input: Type.Optional(Type.String({ maxLength: 100_000 })),
+        content: Type.Optional(Type.Array(RunInputPartSchema, { minItems: 1, maxItems: 64 })),
         mode: Type.Optional(SessionModeSchema),
         planBinding: Type.Optional(PlanBindingSchema),
       },

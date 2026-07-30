@@ -221,7 +221,7 @@ test("Kimi thinking uses explicit disable for none and boolean enable for K2.7 C
 
   assert.deepEqual(bodies[0].thinking, { type: "disabled" });
   assert.deepEqual(bodies[1].thinking, { type: "enabled" });
-  assert.deepEqual(bodies[2].thinking, { type: "enabled", effort: "high" });
+  assert.deepEqual(bodies[2].thinking, { type: "enabled", effort: "max" });
   assert.deepEqual(bodies[3].thinking, { type: "enabled", effort: "low" });
   assert.equal(normalizeKimiReasoningEffort(undefined), undefined);
   assert.equal(normalizeKimiReasoningEffort(null), undefined);
@@ -236,6 +236,70 @@ test("Kimi thinking uses explicit disable for none and boolean enable for K2.7 C
   }
   assert.equal(normalizeKimiReasoningEffort("none"), "none");
   assert.throws(() => normalizeKimiReasoningEffort("extreme"), /Unsupported Kimi reasoning effort/);
+});
+
+test("Chat Completions maps ordered image input and tool-result media", async () => {
+  let captured;
+  const client = {
+    chat: {
+      completions: {
+        create(body) {
+          captured = body;
+          return asyncEvents([{
+            id: "chatcmpl_image",
+            choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }],
+          }]);
+        },
+      },
+    },
+  };
+  const port = new OpenAIChatCompletionsModelPort(client, {
+    providerNames: ["kimi"],
+  });
+  const image = { type: "image", uri: "data:image/png;base64,iVBORw0KGgo=", mediaType: "image/png" };
+  for await (const _event of port.stream(request({
+    model: { provider: "kimi", model: "k3" },
+    tools: [],
+    messages: [
+      { role: "user", content: [{ type: "text", text: "before" }, image, { type: "text", text: "after" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", callId: "call_image", name: "read_image", input: {} }],
+      },
+      {
+        role: "tool",
+        content: [{
+          type: "tool-result",
+          callId: "call_image",
+          output: [{ type: "text", text: "crop" }, image],
+          isError: false,
+        }],
+      },
+    ],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(captured.messages[0].content, [
+    { type: "text", text: "before" },
+    { type: "image_url", image_url: { url: image.uri } },
+    { type: "text", text: "after" },
+  ]);
+  assert.equal(captured.messages[2].role, "tool");
+  assert.deepEqual(JSON.parse(captured.messages[2].content).output, [{ type: "text", text: "crop" }]);
+  assert.equal(captured.messages[3].role, "user");
+  assert.equal(captured.messages[3].content[1].type, "image_url");
+  assert.equal((await port.capabilities({ provider: "kimi", model: "k3" })).input.has("image"), true);
+});
+
+test("compatible Chat Completions image input is deny-by-default with explicit opt-in", async () => {
+  const client = { chat: { completions: { create() { throw new Error("not called"); } } } };
+  const denied = new OpenAIChatCompletionsModelPort(client, { providerNames: ["compatible"] });
+  const enabled = new OpenAIChatCompletionsModelPort(client, {
+    providerNames: ["compatible"],
+    imageInput: true,
+  });
+  assert.equal((await denied.capabilities({ provider: "compatible", model: "custom" })).input.has("image"), false);
+  assert.equal((await enabled.capabilities({ provider: "compatible", model: "custom" })).input.has("image"), true);
 });
 
 test("normalizeFunctionParameters forces type object for TypeBox unions", async () => {

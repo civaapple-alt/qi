@@ -18,13 +18,22 @@ export const ModelContentPartSchema = Type.Union([
   Type.Object(
     {
       type: Type.Literal("image"),
-      uri: Type.String({ minLength: 1, maxLength: 10_000 }),
+      uri: Type.String({ minLength: 1, maxLength: 6_000_000 }),
       mediaType: Type.String({ minLength: 1, maxLength: 200 }),
+      width: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+      height: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
     },
     { additionalProperties: false },
   ),
   Type.Object(
-    { type: Type.Literal("artifact"), ref: Type.String({ minLength: 1, maxLength: 500 }) },
+    {
+      type: Type.Literal("artifact"),
+      ref: Type.String({ minLength: 1, maxLength: 500 }),
+      mediaType: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+      width: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+      height: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+      fallbackText: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
+    },
     { additionalProperties: false },
   ),
   Type.Object(

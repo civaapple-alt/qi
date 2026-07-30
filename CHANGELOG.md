@@ -9,9 +9,17 @@ steps and investigation history belong in pull requests, not release notes.
 
 - `/context` now shows per-ContextBlock-kind included token share, included/omitted counts, omitted estimated
   tokens, and a separate conversation/Tool-schema subtotal from replayable aggregate Session facts.
+- Added end-to-end image input for Kimi K3 and other image-capable models: rich-TTY clipboard paste, safe image
+  URL ingestion, bounded preprocessing, content-addressed original/prepared Artifacts, ordered Session replay,
+  and an authorized `read_image` crop/detail Tool.
 
 ### Changed
 
+- Kimi K3 now advertises its 1,048,576-token window, image input, `max`-only thinking effort, and `max` default.
+  Legacy K3 low/high effort settings fall back to `max`; custom OpenAI-compatible endpoints remain text-only
+  unless their `[[compatible]]` entry sets `image_input = true`.
+- Chat Completions and Responses adapters now map ordered user media and tool-result images without persisting
+  provider data URLs. Image context cost uses dimensions rather than base64 length.
 ### Deprecated
 
 ### Removed
@@ -20,8 +28,13 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Security
 
+- Image URLs use the existing DNS-pinned public-network boundary with independent byte limits, MIME plus
+  magic-byte verification, HTTPS downgrade prevention, and Network capability enforcement. Image bytes and data
+  URLs never enter Session events or SQLite.
 ### Documentation
 
+- Added ADR-0028 and synchronized protocol, Agent, AI, Node, TUI, and CLI contracts for image ingestion,
+  Artifact materialization, replay recovery, model capability gating, and the deferred video boundary.
 ## [0.7.1] - 2026-07-29
 
 ### Added

@@ -1317,7 +1317,21 @@ export class TuiPresenter {
       ];
     }
     const input = run.input?.trim() ?? "";
-    if (!input) return [`${USER_MESSAGE_PREFIX}(no input recorded)`];
+    const imageLines = (run.content ?? [])
+      .filter((part) => part.type === "image")
+      .map((image, index) => {
+        const preparation = [
+          image.downsampled ? `${image.originalWidth}×${image.originalHeight} → ${image.width}×${image.height}` : undefined,
+          image.formatChanged ? `${image.originalMediaType} → ${image.mediaType}` : image.mediaType,
+          image.orientationApplied ? "oriented" : undefined,
+        ].filter((value): value is string => value !== undefined).join(" · ");
+        return `${USER_MESSAGE_PREFIX}  image #${index + 1} · ${image.source} · ${preparation}`;
+      });
+    if (!input) {
+      return imageLines.length > 0
+        ? [`${USER_MESSAGE_PREFIX}(image input)`, ...imageLines]
+        : [`${USER_MESSAGE_PREFIX}(no input recorded)`];
+    }
     const key = `paste:${run.runId}`;
     const rawLines = input.split(/\r?\n/);
     const isLongPaste = rawLines.length > 4 || input.length > 400;
@@ -1326,10 +1340,11 @@ export class TuiPresenter {
         `${USER_MESSAGE_PREFIX}[Pasted text · ${rawLines.length} lines · ${input.length} chars]`,
         `${USER_MESSAGE_PREFIX}${oneLine(rawLines[0] ?? "", 120)}`,
         ...(rawLines.length > 1 ? [`${USER_MESSAGE_PREFIX}…`, `${USER_MESSAGE_PREFIX}${oneLine(rawLines.at(-1) ?? "", 120)}`] : []),
+        ...imageLines,
         `${USER_MESSAGE_PREFIX}Ctrl+O to expand`,
       ];
     }
-    return rawLines.map((line) => `${USER_MESSAGE_PREFIX}${line}`);
+    return [...rawLines.map((line) => `${USER_MESSAGE_PREFIX}${line}`), ...imageLines];
   }
 
   private formalPlanRevision(run: RunView): PlanRevisionView | undefined {

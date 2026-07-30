@@ -15,7 +15,7 @@ import {
 import { probeContainerRuntime } from "@civaapple/qi-node/codeact";
 import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-agent/extensions";
 import type { EventStore, SessionSummary, SessionView } from "@civaapple/qi-agent/kernel";
-import type { ModelPort, ModelRef } from "@civaapple/qi-ai";
+import type { ModelCapabilities, ModelPort, ModelRef } from "@civaapple/qi-ai";
 import {
   HumanControlService,
   EventWriter,
@@ -27,7 +27,20 @@ import {
   type TurnRequest,
   type TurnResult,
 } from "@civaapple/qi-agent/loop";
-import { createId, type QuestionId, type RunId, type SessionEvent, type SessionId } from "@civaapple/qi-protocol";
+import {
+  createId,
+  type QuestionId,
+  type RunId,
+  type RunImagePart,
+  type RunInputPart,
+  type SessionEvent,
+  type SessionId,
+} from "@civaapple/qi-protocol";
+import {
+  ImageIngestService,
+  createReadImageTool,
+  detectImageUrlCandidates,
+} from "@civaapple/qi-node/media";
 import { SqliteEventStore, SqliteMemoryIndex } from "@civaapple/qi-node/storage";
 import { qiStatePaths, workspaceProjectId } from "@civaapple/qi-node/paths";
 import { SkillCatalog, type CatalogSkill, type SkillScope } from "@civaapple/qi-node/skills";
@@ -58,7 +71,7 @@ import {
 import { SqliteEffectJournal } from "@civaapple/qi-node/workspace";
 import { createCodeActTool } from "./codeact-tool.js";
 import { createAskQuestionTool, RunQuestionCoordinator } from "./ask-question-tool.js";
-import type { QiCapabilityConfig, QiShellConfig } from "./config.js";
+import type { QiCapabilityConfig, QiImageConfig, QiShellConfig } from "./config.js";
 import { createDelegateTool } from "./delegate-tool.js";
 import { defaultProjectConfigPath } from "./paths.js";
 import {
@@ -99,6 +112,7 @@ export interface TuiRuntimeOptions {
   projectId?: string;
   memoryEnabled?: boolean;
   memoryAutoAcceptProject?: boolean;
+  image?: QiImageConfig;
   modelPort: ModelPort;
   model: ModelRef;
   /**
@@ -163,6 +177,8 @@ export class TuiRuntime {
   readonly #eventStore: EventStore;
   readonly #ownedStore: SqliteEventStore | undefined;
   readonly #artifactStore: FileArtifactStore;
+  readonly #imageIngest: ImageIngestService;
+  readonly #readImageByteBudget: number | undefined;
   readonly #effectJournal: SqliteEffectJournal;
   readonly #broker: InMemoryCapabilityBroker;
   readonly #registry: ToolRegistry;
@@ -250,6 +266,11 @@ export class TuiRuntime {
     this.#eventStore = eventStore;
     this.#ownedStore = ownedStore;
     this.#artifactStore = artifactStore;
+    this.#imageIngest = new ImageIngestService({
+      artifactStore,
+      ...(options.image?.maxEdgePx === undefined ? {} : { maxEdgePx: options.image.maxEdgePx }),
+    });
+    this.#readImageByteBudget = options.image?.readByteBudget;
     this.#effectJournal = effectJournal;
     this.#verificationProfiles = [];
     this.#broker = broker;
@@ -867,8 +888,24 @@ export class TuiRuntime {
     }
   }
 
-  async run(input: string): Promise<TurnResult> {
-    return this.#executeTurn({ input });
+  async run(input: string, content?: readonly RunInputPart[]): Promise<TurnResult> {
+    return this.#executeTurn({
+      input,
+      ...(content === undefined ? {} : { content }),
+    });
+  }
+
+  async ingestClipboardImage(bytes: Uint8Array): Promise<RunImagePart> {
+    const model = this.#resolveModel();
+    const capabilities = await this.#modelPort.capabilities(model);
+    if (!capabilities.input.has("image")) {
+      throw new TypeError(`Model ${model.provider}/${model.model} does not support image input`);
+    }
+    return this.#imageIngest.ingestBytes({
+      bytes,
+      source: "clipboard",
+      declaredMediaType: "image/png",
+    });
   }
 
   async runPlanDraft(input: string): Promise<TurnResult> {
@@ -903,6 +940,7 @@ export class TuiRuntime {
 
   async #executeTurn(options: {
     input: string;
+    content?: readonly RunInputPart[];
     existingRunId?: RunId;
     historyBudgetTokens?: number;
     requiredCompletionTool?: TurnRequest["requiredCompletionTool"];
@@ -916,10 +954,12 @@ export class TuiRuntime {
       this.syncMountEvents();
       const mode = this.mode();
       const model = this.#resolveModel();
+      const capabilities = await this.#modelPort.capabilities(model);
       if (!this.#contextWindowTokensOverride) {
-        const capabilities = await this.#modelPort.capabilities(model);
         this.syncModelContextWindow(capabilities.contextTokens);
       }
+      this.#syncImageTool(capabilities);
+      const content = await this.#prepareInputContent(options.input, options.content, capabilities);
       const skills = await this.refreshSkills();
       const contextBlocks = await buildTuiContextBlocks(
         this.#workspaceRoot,
@@ -937,6 +977,7 @@ export class TuiRuntime {
         title: "Qi TUI",
         subject: this.#subject,
         input: options.input,
+        ...(content === undefined ? {} : { content }),
         model,
         contextBlocks,
         contextBudgetTokens: this.#contextBudgetTokens,
@@ -980,6 +1021,52 @@ export class TuiRuntime {
     this.#userMemoryStore.close();
     this.#ownedStore?.close();
     this.#effectJournal.close();
+  }
+
+  async #prepareInputContent(
+    input: string,
+    supplied: readonly RunInputPart[] | undefined,
+    capabilities: ModelCapabilities,
+  ): Promise<readonly RunInputPart[] | undefined> {
+    if (supplied !== undefined) {
+      if (supplied.some((part) => part.type === "image") && !capabilities.input.has("image")) {
+        throw new TypeError("The selected model does not support image input");
+      }
+      return supplied.map((part) => ({ ...part }));
+    }
+    const candidates = detectImageUrlCandidates(input);
+    if (candidates.length === 0) return undefined;
+    if (!capabilities.input.has("image")) {
+      throw new TypeError(
+        "The input contains an image URL, but the selected model does not support image input",
+      );
+    }
+    const content: RunInputPart[] = [];
+    let cursor = 0;
+    for (const candidate of candidates) {
+      if (candidate.start < cursor) continue;
+      const text = input.slice(cursor, candidate.end);
+      if (text) content.push({ type: "text", text });
+      content.push(await this.#imageIngest.ingestUrl(candidate.url, {
+        networkAuthorized: this.#allowNetwork,
+        ...(this.#activeController === undefined ? {} : { signal: this.#activeController.signal }),
+      }));
+      cursor = candidate.end;
+    }
+    const tail = input.slice(cursor);
+    if (tail) content.push({ type: "text", text: tail });
+    return content;
+  }
+
+  #syncImageTool(capabilities: ModelCapabilities): void {
+    if (!capabilities.input.has("image")) {
+      this.#closeOptionalTool("read_image");
+      return;
+    }
+    this.#setOptionalTool("read_image", createReadImageTool({
+      getAllowedOriginalRefs: (sessionId) => collectOriginalImageRefs(this.#eventStore.load(sessionId as SessionId)),
+      ...(this.#readImageByteBudget === undefined ? {} : { byteBudget: this.#readImageByteBudget }),
+    }));
   }
 
   listMemories(options: MemoryListOptions = {}): IndexedMemoryClaim[] {
@@ -1289,13 +1376,24 @@ function leaseExpiry(): string {
   return new Date(Date.now() + 8 * 60 * 60 * 1_000).toISOString();
 }
 
+function collectOriginalImageRefs(view: SessionView | undefined): ReadonlySet<string> {
+  const refs = new Set<string>();
+  if (!view) return refs;
+  for (const runId of view.runOrder) {
+    for (const part of view.runs[runId]?.content ?? []) {
+      if (part.type === "image") refs.add(part.originalArtifactRef);
+    }
+  }
+  return refs;
+}
+
 function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: string): void {
   const expiresAt = leaseExpiry();
   for (const lease of [
     {
       leaseId: "lea_tui_read",
       subject,
-      tools: ["read", "list", "search", "find", "tree", "git", "skill", "qi_introspect", "qi_session_inspect", "memory"],
+      tools: ["read", "list", "search", "find", "tree", "git", "skill", "qi_introspect", "qi_session_inspect", "memory", "read_image"],
       effects: ["read"],
       resources: [
         "file:**",
@@ -1307,6 +1405,7 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
         "qi:session-catalog",
         "qi:session:**",
         "memory:propose:**",
+        "artifact:**",
       ],
       expiresAt,
     },

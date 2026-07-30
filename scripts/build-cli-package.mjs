@@ -27,6 +27,7 @@ const publicDependencies = {
   "@sinclair/typebox": "0.34.52",
   diff: "9.0.0",
   openai: "^6.48.0",
+  sharp: "^0.34.4",
   "smol-toml": "1.7.0",
   tar: "^7.5.22",
   yaml: "2.9.0",
@@ -91,6 +92,9 @@ await writeFile(
       ...publicDependencies,
       ...bundledRuntimeDependencies,
     },
+    ...(cliManifest.optionalDependencies === undefined
+      ? {}
+      : { optionalDependencies: cliManifest.optionalDependencies }),
     // Present in staging node_modules and listed here so npm pack embeds them instead of
     // resolving @civaapple/qi-* packages from the public registry during preview installs.
     bundledDependencies: Object.keys(bundledRuntimeDependencies),

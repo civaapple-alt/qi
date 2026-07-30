@@ -15,6 +15,7 @@ export interface CreateModelPortOptions {
   baseURL?: string;
   contextTokens?: number;
   reasoningEffort?: string | null;
+  imageInput?: boolean;
   profile?: ProviderProfile;
 }
 
@@ -41,6 +42,7 @@ export function createModelPortForProfile(
     profile,
     ...(options.contextTokens === undefined ? {} : { contextTokens: options.contextTokens }),
     ...(options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort }),
+    ...(options.imageInput === undefined ? {} : { imageInput: options.imageInput }),
   };
   return OpenAIChatCompletionsModelPort.fromClientOptions(clientOptions, portOptions);
 }

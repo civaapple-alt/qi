@@ -54,3 +54,27 @@ test("FollowUpQueue commitEdit with empty text removes the item", () => {
   queue.commitEdit("   ");
   assert.deepEqual(queue.items.map((item) => item.text), ["keep"]);
 });
+
+test("FollowUpQueue retains structured image payloads until dequeue", () => {
+  const queue = new FollowUpQueue();
+  const image = {
+    type: "image",
+    source: "clipboard",
+    originalArtifactRef: `artifact://${"a".repeat(64)}`,
+    preparedArtifactRef: `artifact://${"b".repeat(64)}`,
+    originalMediaType: "image/png",
+    mediaType: "image/png",
+    originalByteLength: 20,
+    byteLength: 20,
+    originalWidth: 10,
+    originalHeight: 10,
+    width: 10,
+    height: 10,
+    downsampled: false,
+    formatChanged: false,
+    orientationApplied: false,
+  };
+  queue.enqueue("look [image #1 (10×10)]", [{ type: "text", text: "look " }, image]);
+  const item = queue.dequeue();
+  assert.equal(item.content[1].preparedArtifactRef, image.preparedArtifactRef);
+});

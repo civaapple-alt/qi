@@ -18,6 +18,7 @@ import {
   resolveLanguage,
   resolveTheme,
   resolveTimelineDensity,
+  saveUserConfig,
 } from "../apps/cli/dist/index.js";
 
 test("user config loads strict provider defaults and persistent capabilities", async () => {
@@ -141,12 +142,12 @@ reasoning_effort = "xhigh"
       contextWindowTokens: 300_000,
     }, path);
     assert.equal(persisted.config.model, "k3-256k");
-    assert.equal(persisted.config.reasoningEffort, "low");
+    assert.equal(persisted.config.reasoningEffort, "max");
     assert.equal(persisted.config.contextWindowTokens, 300_000);
 
     const savedBody = await readFile(path, "utf8");
     assert.match(savedBody, /model = "k3-256k"/);
-    assert.match(savedBody, /reasoning_effort = "low"/);
+    assert.match(savedBody, /reasoning_effort = "max"/);
     assert.match(savedBody, /context_window_tokens = 300000/);
 
     await writeFile(path, `
@@ -169,7 +170,7 @@ reasoning_effort = "max"
       { environment: { QI_HOME: join(root, "state") } },
     );
     assert.equal(k3Compact.kind, "run");
-    assert.equal(k3Compact.options.provider.reasoningEffort, "high");
+    assert.equal(k3Compact.options.provider.reasoningEffort, "max");
     assert.equal(k3Compact.options.contextWindowTokens, 262_144);
 
     await writeFile(path, `
@@ -344,6 +345,39 @@ timeline_density = "compact"
     const invalid = join(root, "invalid-density.toml");
     await writeFile(invalid, "[ui]\ntimeline_density = \"dense\"\n");
     await assert.rejects(loadUserConfig(invalid), /timeline_density must be one of/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("image preprocessing and compatible image opt-in round-trip through user config", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-config-image-"));
+  const path = join(root, "config.toml");
+  try {
+    await writeFile(path, `
+version = 1
+provider = "compatible"
+model = "vision-custom"
+account_alias = "vision"
+base_url = "https://vision.example/v1"
+
+[image]
+max_edge_px = 1800
+read_byte_budget = 300000
+
+[[compatible]]
+name = "vision"
+base_url = "https://vision.example/v1"
+model = "vision-custom"
+image_input = true
+`);
+    const loaded = await loadUserConfig(path);
+    assert.deepEqual(loaded.config.image, { maxEdgePx: 1800, readByteBudget: 300000 });
+    assert.equal(loaded.config.compatible[0].imageInput, true);
+    await saveUserConfig(path, loaded.config);
+    const saved = await loadUserConfig(path);
+    assert.equal(saved.config.compatible[0].imageInput, true);
+    assert.match(await readFile(path, "utf8"), /image_input = true/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -91,6 +91,7 @@ async function main(): Promise<void> {
         projectId: paths.projectId,
         memoryEnabled: options.memoryEnabled,
         memoryAutoAcceptProject: options.memoryAutoAcceptProject,
+        image: options.image,
         modelPort: new AuthBackedModelPort(auth),
         model: { provider: auth.config.provider, model: auth.config.model },
         resolveModel: () => ({
@@ -168,6 +169,7 @@ async function main(): Promise<void> {
     projectId: paths.projectId,
     memoryEnabled: options.memoryEnabled,
     memoryAutoAcceptProject: options.memoryAutoAcceptProject,
+    image: options.image,
     modelPort: new AuthBackedModelPort(auth),
     model: { provider: options.provider.provider, model: options.provider.model },
     resolveModel: () => ({
@@ -685,7 +687,13 @@ async function handleLoginCommand(
     const routing = provider === "compatible"
       ? (() => {
         const entry = findCompatibleEndpoint(loaded.config, alias);
-        return entry ? { model: entry.model, baseURL: entry.baseURL } : undefined;
+        return entry
+          ? {
+              model: entry.model,
+              baseURL: entry.baseURL,
+              ...(entry.imageInput === undefined ? {} : { imageInput: entry.imageInput }),
+            }
+          : undefined;
       })()
       : (loaded.config.provider === provider
         ? {

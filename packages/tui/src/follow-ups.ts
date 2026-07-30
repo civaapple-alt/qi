@@ -1,8 +1,10 @@
 /** UI-only follow-up queue (Cursor-style). Not Session truth until drained into a Run. */
+import type { RunInputPart } from "@civaapple/qi-protocol";
 
 export interface FollowUpItem {
   readonly id: string;
   readonly text: string;
+  readonly content?: readonly RunInputPart[];
 }
 
 export class FollowUpQueue {
@@ -38,10 +40,14 @@ export class FollowUpQueue {
     return this.#items[this.#selectedIndex];
   }
 
-  enqueue(text: string): FollowUpItem {
+  enqueue(text: string, content?: readonly RunInputPart[]): FollowUpItem {
     const trimmed = text.trim();
     if (!trimmed) throw new TypeError("follow-up text is required");
-    const item: FollowUpItem = { id: `fu-${this.#nextId++}`, text: trimmed };
+    const item: FollowUpItem = {
+      id: `fu-${this.#nextId++}`,
+      text: trimmed,
+      ...(content === undefined ? {} : { content: structuredClone([...content]) }),
+    };
     this.#items = [...this.#items, item];
     return item;
   }
@@ -127,7 +133,7 @@ export class FollowUpQueue {
     return item.text;
   }
 
-  commitEdit(text: string): FollowUpItem | undefined {
+  commitEdit(text: string, content?: readonly RunInputPart[]): FollowUpItem | undefined {
     if (!this.#editingId) return undefined;
     const trimmed = text.trim();
     if (!trimmed) {
@@ -145,7 +151,11 @@ export class FollowUpQueue {
       this.#clearEdit();
       return undefined;
     }
-    const updated: FollowUpItem = { id: this.#editingId, text: trimmed };
+    const updated: FollowUpItem = {
+      id: this.#editingId,
+      text: trimmed,
+      ...(content === undefined ? {} : { content: structuredClone([...content]) }),
+    };
     this.#items = this.#items.map((item, i) => (i === index ? updated : item));
     this.#clearEdit();
     this.#selectedIndex = index;

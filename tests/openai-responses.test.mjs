@@ -204,6 +204,48 @@ test("Responses adapter can omit request metadata for compatible providers that 
   assert.equal("metadata" in captured, false);
 });
 
+test("Responses adapter preserves image order and emits tool-result media as a user message", async () => {
+  let captured;
+  const client = {
+    responses: {
+      create(body) {
+        captured = body;
+        return asyncEvents([
+          { type: "response.completed", sequence_number: 1, response: completedResponse() },
+        ]);
+      },
+    },
+  };
+  const image = { type: "image", uri: "data:image/png;base64,iVBORw0KGgo=", mediaType: "image/png" };
+  const port = new OpenAIResponsesModelPort(client);
+  for await (const _event of port.stream(request({
+    tools: [],
+    messages: [
+      { role: "user", content: [{ type: "text", text: "before" }, image, { type: "text", text: "after" }] },
+      {
+        role: "tool",
+        content: [{
+          type: "tool-result",
+          callId: "call_image",
+          output: [{ type: "text", text: "crop" }, image],
+          isError: false,
+        }],
+      },
+    ],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(captured.input[0].content.map((part) => part.type), [
+    "input_text",
+    "input_image",
+    "input_text",
+  ]);
+  assert.equal(captured.input[1].type, "function_call_output");
+  assert.deepEqual(JSON.parse(captured.input[1].output).output, [{ type: "text", text: "crop" }]);
+  assert.equal(captured.input[2].type, "message");
+  assert.equal(captured.input[2].content[1].type, "input_image");
+});
+
 test("OpenAI adapter rejects unsupported portable inputs before network execution", async () => {
   let called = false;
   const client = {

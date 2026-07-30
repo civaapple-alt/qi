@@ -218,17 +218,60 @@ function toResponseInput(messages: readonly ModelMessage[]): ResponseInputItem[]
           if (message.role !== "tool") {
             throw new TypeError("tool-result parts must belong to a tool message");
           }
+          const { output, images } = splitToolResultOutput(part.output);
           input.push({
             type: "function_call_output",
             call_id: part.callId,
-            output: encodeJson({ ok: !part.isError, output: part.output }),
+            output: encodeJson({ ok: !part.isError, output }),
           });
+          if (images.length > 0) {
+            input.push({
+              type: "message",
+              role: "user",
+              content: [
+                { type: "input_text", text: `Attached media from tool result ${part.callId}:` },
+                ...images.map((image) => {
+                  assertSupportedImageUri(image);
+                  return { type: "input_image" as const, image_url: image.uri, detail: "auto" as const };
+                }),
+              ],
+            });
+          }
           break;
       }
     }
     flush();
   }
   return input;
+}
+
+function splitToolResultOutput(output: unknown): {
+  output: unknown;
+  images: Array<Extract<ModelContentPart, { type: "image" }>>;
+} {
+  if (!Array.isArray(output)) return { output, images: [] };
+  const images: Array<Extract<ModelContentPart, { type: "image" }>> = [];
+  const retained: unknown[] = [];
+  for (const item of output) {
+    if (isModelImagePart(item)) images.push(item);
+    else if (isArtifactPart(item)) {
+      throw new TypeError(`Artifact ${item.ref} must be resolved before invoking the OpenAI adapter`);
+    } else retained.push(item);
+  }
+  return { output: retained, images };
+}
+
+function isModelImagePart(value: unknown): value is Extract<ModelContentPart, { type: "image" }> {
+  return typeof value === "object" && value !== null &&
+    (value as { type?: unknown }).type === "image" &&
+    typeof (value as { uri?: unknown }).uri === "string" &&
+    typeof (value as { mediaType?: unknown }).mediaType === "string";
+}
+
+function isArtifactPart(value: unknown): value is Extract<ModelContentPart, { type: "artifact" }> {
+  return typeof value === "object" && value !== null &&
+    (value as { type?: unknown }).type === "artifact" &&
+    typeof (value as { ref?: unknown }).ref === "string";
 }
 
 function completedEvents(response: Response): ModelEvent[] {
