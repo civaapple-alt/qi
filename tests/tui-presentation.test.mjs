@@ -3145,6 +3145,17 @@ test("write/edit cards show Cursor-style Edited header, gutter, and context", ()
   assert.match(contextCard, /▎ \+real added/);
   assert.match(contextCard, /▎ \+second added/);
   assert.doesNotMatch(contextCard, /@@/);
+
+  const deepPathCard = renderToolCard({
+    actionId: "act_w4",
+    toolName: "edit",
+    status: "failed",
+    errorCode: "EDIT_TARGET_NOT_FOUND",
+    elapsed: "81ms",
+    input: { path: "apps/desktop/src/components/Sidebar.tsx" },
+  }).join("\n");
+  assert.match(deepPathCard, /edit\s+apps\/desktop\/src\/components\/Sidebar\.tsx/);
+  assert.doesNotMatch(deepPathCard, /edit\s+components\/Sidebar\.tsx/);
 });
 
 test("read cards stay header-only and never dump file contents", () => {

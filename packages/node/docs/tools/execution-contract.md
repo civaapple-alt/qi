@@ -53,16 +53,22 @@ the command output.
 
 ## Precise editing
 
-Use `edit` after `read` when changing an existing file. The read hash is a mandatory freshness precondition, and
-the old fragment must occur exactly once unless `replaceAll` is explicitly requested. Missing, stale, ambiguous,
-and no-op edits fail before filesystem mutation. The replacement is staged through a temporary file and renamed,
-then returns old/new hashes and a bounded contextual unified diff. The matcher reconciles LF, CRLF, or CR in model
-arguments to the existing file's line-ending convention and retains an existing UTF-8 BOM; it does not normalize
-indentation, trailing whitespace, Unicode lookalikes, or approximate blocks. Replacement text is literal:
+Use `edit` after `read` when changing an existing file. The read hash is a mandatory freshness precondition.
+Pass one or more disjoint replacements in `edits[]`; every `oldText` is matched against the **original** file
+snapshot (not incrementally after earlier hunks). Prefer a single multi-hunk call for several locations in one
+file. Merge nearby or overlapping changes into one hunk rather than emitting nested targets. Each `oldText` must
+be unique unless the call has exactly one hunk and `replaceAll` is true. Missing, stale, ambiguous, overlapping
+(`EDIT_TARGETS_OVERLAP`), and no-op edits fail before filesystem mutation. The replacement is staged through a
+temporary file and renamed, then returns old/new hashes and a bounded contextual unified diff.
+
+Matching first uses exact LF-normalized substrings, then a limited fuzzy ladder (line trailing whitespace, NFKC,
+smart quotes/dashes, exotic spaces). Fuzzy hits rewrite only touched line blocks; untouched bytes and an existing
+UTF-8 BOM are preserved. Indentation and approximate blocks are not normalized. Replacement text is literal:
 JavaScript replacement tokens such as `$$` and `$&` have no special meaning. Atomic replacement preserves the
-permission bits of an existing file so editing a script does not silently remove executability. Use `write` only
-for creation or deliberate full replacement. Existing mutation targets must be regular, non-symlink files;
-directory replacement and mutation through a symbolic-link alias fail before content changes.
+permission bits of an existing file so editing a script does not silently remove executability. Legacy top-level
+`oldText`/`newText` inputs normalize to a one-element `edits[]` before inspect. Use `write` only for creation or
+deliberate full replacement. Existing mutation targets must be regular, non-symlink files; directory replacement
+and mutation through a symbolic-link alias fail before content changes.
 
 Sensitive Workspace paths (for example `.env`, `*.pem`) may appear in `list` / `tree` / `find` metadata, but
 content-exposing tools (`read`, content `search`, `edit`, `write`) fail closed with
@@ -70,15 +76,17 @@ content-exposing tools (`read`, content `search`, `edit`, `write`) fail closed w
 durable and Session-audited; authorized bodies round-trip as raw text for precise `edit`. See
 [ADR 0001](../../../design/decisions.md#adr-0001-gate-sensitive-paths-before-content-reaches-the-model).
 
-After `EDIT_TARGET_NOT_FOUND`, reread the file and retry `edit` with a current unique fragment. A generally
-authorized shell process can still change Workspace files, but it is not the preferred fallback for editing:
-doing so gives up the dedicated tool's per-file freshness and unique-target assertions. Git-backed shell evidence
-keeps such an explicit host effect inspectable; it does not make it equivalent to a precise edit.
+After `EDIT_TARGET_NOT_FOUND` or `EDIT_TARGETS_OVERLAP`, reread the file and retry `edit` with current unique
+fragments (merge overlapping intent into one hunk). A generally authorized shell process can still change
+Workspace files, but it is not the preferred fallback for editing: doing so gives up the dedicated tool's
+per-file freshness and unique-target assertions. Git-backed shell evidence keeps such an explicit host effect
+inspectable; it does not make it equivalent to a precise edit.
 
-Within one Step, the Loop may chain only consecutive same-resource `edit` calls whose proposed digest is the
-chain's original or latest successfully settled digest. It re-inspects the effective digest before authority,
-records `action.freshness.rebased` when the digest changes, and still rejects missing or ambiguous targets.
-`write`, `move`, `remove`, mixed mutation sequences, and unrelated digests keep the
+Within one Step, the Loop may still chain consecutive same-resource `edit` calls whose proposed digest is the
+chain's original or latest successfully settled digest (fallback when the model emits multiple edit Actions).
+It re-inspects the effective digest before authority, records `action.freshness.rebased` when the digest
+changes, and still rejects missing, ambiguous, or overlapping targets without rewriting `oldText`. Prefer one
+multi-hunk call instead. `write`, `move`, `remove`, mixed mutation sequences, and unrelated digests keep the
 `BATCH_WRITE_CONFLICT` path.
 
 Cross-file patch application remains deferred. A patch may reserve several resources and partially commit before

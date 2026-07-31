@@ -237,10 +237,8 @@ function mutationHeader(
 }
 
 function mutationDisplayPath(path: string): string {
-  const normalized = path.replaceAll("\\", "/");
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 2) return normalized;
-  return parts.slice(-2).join("/");
+  // Keep the full Workspace-relative path so edit/write cards match read discovery paths.
+  return path.replaceAll("\\", "/");
 }
 
 /** Cursor-style `+17 -3` / `+1` (omit zero sides). */

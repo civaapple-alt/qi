@@ -26,13 +26,15 @@ argument-vector `shell` (`shell-profile:direct`), explicit `script` profiles (`p
 content-addressed artifact storage. `tree`, `find`, `list`, `read`, `search`, `git`, and `fetch` remain separate so
 local discovery, repository inspection, external evidence, and execution authority are explicit.
 
-Existing files have a dedicated `edit` operation: the caller supplies the hash returned by `read`, one exact old
-fragment, and its replacement. LF/CRLF differences in model arguments are reconciled to the file's convention;
-other whitespace remains exact, and an existing UTF-8 BOM is retained. A non-unique fragment is rejected unless
-`replaceAll` is explicit. `write` remains the operation for new files or intentional full replacement. Both
-return bounded contextual unified diffs rather than representing every unchanged line as replaced. `move` and
-`remove` also require the current content hash; moves refuse destination overwrite, while removals store the
-complete previous bytes as an Artifact first.
+Existing files have a dedicated `edit` operation: the caller supplies the hash returned by `read` and one or more
+`edits[]` hunks matched against the original file snapshot in a single atomic write. Prefer one multi-hunk call
+for several locations; overlapping hunks fail closed (`EDIT_TARGETS_OVERLAP`). Matching reconciles LF/CRLF and a
+limited fuzzy ladder (trailing whitespace, smart quotes/dashes); other whitespace stays exact, and an existing
+UTF-8 BOM is retained. A non-unique fragment is rejected unless the call has exactly one hunk and `replaceAll`
+is explicit. `write` remains the operation for new files or intentional full replacement. Both return bounded
+contextual unified diffs rather than representing every unchanged line as replaced. `move` and `remove` also
+require the current content hash; moves refuse destination overwrite, while removals store the complete previous
+bytes as an Artifact first.
 
 `prepareVerificationProfiles()` creates or migrates the private `.qi/qi.verify.json` manifest;
 `loadVerificationProfiles()` validates it and freezes normalized definitions. `createVerifyTool()` exposes only
@@ -64,8 +66,9 @@ automatic inference path, so a hand-picked manifest is exactly as trustworthy as
   Trusted-executable PATH resolution is cached per command/Workspace root/PATH triple for the process lifetime,
   and `prewarmTrustedExecutables()` primes common candidates for the detected language stack at startup so the
   first `search`/`find`/`shell`/`script`/`verify` call does not pay PATH-walk latency.
-- Edit requires a fresh file hash, treats replacement text literally, reconciles only line-ending representation,
-  and rejects missing, ambiguous, stale, or no-op replacements before mutation.
+- Edit requires a fresh file hash and `edits[]` matched against the original snapshot, treats replacement text
+  literally, reconciles line endings plus a limited fuzzy ladder, and rejects missing, ambiguous, overlapping,
+  stale, or no-op replacements before mutation.
 - Atomic replacement of an existing file preserves its Unix permission bits, including executability.
 - Write and edit reject existing directories and symbolic links rather than following an alias to another target.
 - Agent-facing paths cannot enter `.qi`, `.git`, or `.artifacts`, including through an in-Workspace symlink.

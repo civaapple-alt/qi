@@ -44,12 +44,19 @@ Previously persisted Session databases are not silently rewritten when this poli
 - `read`, `edit`, `write`, `move`, and `remove` remain separate operations.
 - `read` may return a bounded 1-based line range, but its size and freshness hash always describe the complete
   file so a partial observation cannot weaken mutation freshness.
-- `edit` requires a previously observed content hash and one unique target.
-- Newline normalization may bridge CRLF/LF transport differences; untouched bytes and UTF-8 BOMs are preserved.
-- Missing, ambiguous, stale, and no-op edits fail before mutation.
-- Consecutive `edit` calls to the same resource in one Step may rebase only from the chain's original digest to
-  the latest successfully settled digest. The Loop re-inspects before authority and records
-  `action.freshness.rebased`; mixed mutations and unproven digest ancestry still fail closed.
+- `edit` requires a previously observed whole-file content hash and one or more targeted replacements in a single
+  call (`edits[]`). Every `oldText` is matched against the same original snapshot, then applied atomically;
+  overlapping or nested hunks fail closed with `EDIT_TARGETS_OVERLAP`. Prefer one multi-hunk call over several
+  same-file `edit` Actions in one Step.
+- Matching tries exact LF-normalized substring first, then a limited fuzzy ladder (line trailing whitespace,
+  NFKC, smart quotes/dashes, and exotic spaces). Fuzzy hits rewrite only touched line blocks so untouched
+  original bytes and an existing UTF-8 BOM stay preserved. Indentation, approximate blocks, and other whitespace
+  remain exact. `replaceAll` is allowed only for a single-hunk call.
+- Missing, ambiguous, overlapping, stale, and no-op edits fail before mutation.
+- Consecutive `edit` calls to the same resource in one Step remain a fallback: the Loop may rebase only from the
+  chain's original digest to the latest successfully settled digest, re-inspects before authority, and records
+  `action.freshness.rebased`. It still does not rewrite `oldText`. Mixed mutations and unproven digest ancestry
+  fail closed.
 - Generic shell execution is not the preferred file-edit transport.
 
 A future cross-file patch operation must define per-resource authority, partial settlement, recovery, and replay

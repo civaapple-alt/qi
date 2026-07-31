@@ -34,13 +34,14 @@ tool-result feedback in the model's original request order, independent of which
 inside a concurrent batch is cancelled or becomes indeterminate, the whole batch is left to finish (it already
 started), and only candidates strictly after that batch are denied and the Run stops with the matching status.
 
-After a successful edit, a later same-Step edit of the same single resource may be re-inspected against the
-latest digest when its proposed digest belongs to that edit chain. The Loop appends
-`action.freshness.rebased` before requesting authority, and the Effect Journal sees the re-inspected input.
-There is no fuzzy merge: target and freshness errors stay determinate failures, while mixed or unrelated
-same-resource `file:*` / `artifact-store:*` writes remain `BATCH_WRITE_CONFLICT`. Host execute resources
-(`host-process:*`, `host-workspace:*`, `shell-profile:*`) do not enter that conflict table, so sequential
-shells may share a workdir in one Step.
+Models should prefer one multi-hunk `edit` (several `edits[]` against the original snapshot) over several
+same-file edit Actions. As a fallback, after a successful edit a later same-Step edit of the same single
+resource may be re-inspected against the latest digest when its proposed digest belongs to that edit chain.
+The Loop appends `action.freshness.rebased` before requesting authority, and the Effect Journal sees the
+re-inspected input. There is no oldText rewrite or overlapping-target merge: target and freshness errors stay
+determinate failures, while mixed or unrelated same-resource `file:*` / `artifact-store:*` writes remain
+`BATCH_WRITE_CONFLICT`. Host execute resources (`host-process:*`, `host-workspace:*`, `shell-profile:*`) do not
+enter that conflict table, so sequential shells may share a workdir in one Step.
 
 If an advertised tool's input fails schema validation, or Ask/Plan mode forbids the tool/effect after inspect,
 the Loop records `model.action.rejected`, returns a structured `TOOL_INPUT` result in assistant source order, and

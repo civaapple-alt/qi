@@ -27,6 +27,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- `edit` accepts multi-hunk `edits[]` matched against the original file snapshot in one atomic write (with
+  freshness `expectedSha256`), limited fuzzy matching for trailing whitespace / smart quotes / dashes, and
+  `EDIT_TARGETS_OVERLAP` for nested hunks. Legacy top-level `oldText`/`newText` still normalize to one hunk.
+  Same-Step edit→edit hash rebase remains a fallback; prefer one multi-hunk call. See ADR-0003.
 - Goal `attempts` default to the Session `maxSteps` at create time; TurnLoop charges an attempt only for
   Goal-bound Steps that propose a non-`read` Action (research/read Steps no longer burn the envelope). TUI
   handoff distinguishes Goal attempts exhaustion (`/goal` Continue) from Session Step budget parks.
@@ -73,6 +77,8 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Fixed
 
+- Edit/write TUI cards show the full Workspace-relative path instead of only the last two segments, so they
+  match `read` discovery paths when diagnosing `EDIT_TARGET_NOT_FOUND`.
 - Absolute paths under the Workspace (and authorized read mounts) are rewritten onto the authorized root for
   shell/script `workdir` and ordinary file Tools, so model-supplied `D:\\…` / `/…` workdirs no longer fail with
   `PATH_OUTSIDE_WORKSPACE` before spawn; paths outside those roots still deny.

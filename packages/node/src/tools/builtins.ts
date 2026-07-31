@@ -17,6 +17,11 @@ import {
   sensitivePathPolicyFromContext,
 } from "./sensitive-paths.js";
 import {
+  applyEditsToFileContent,
+  prepareEditInput,
+  type EditHunk,
+} from "./edit-apply.js";
+import {
   formatAccessiblePath,
   isRegularFile,
   mountsFromContext,
@@ -286,14 +291,29 @@ export const writeTool = defineTool({
 });
 
 export const editTool = defineTool({
-  description: "Replace one exact text fragment in an existing UTF-8 file after verifying its freshness hash. LF/CRLF transport differences are reconciled to the file's existing convention; other whitespace remains exact. The fragment must be unique unless replaceAll is explicitly true. Reread and retry edit after a mismatch; use write only for new files or intentional full replacement, and do not use shell as a file-edit fallback.",
+  description:
+    "Edit one existing UTF-8 file with one or more exact text replacements after verifying its freshness hash. " +
+    "Pass disjoint edits[] hunks matched against the original file snapshot in a single call; merge nearby or " +
+    "overlapping changes into one hunk instead of chaining same-file edit Actions. Prefer one multi-hunk call " +
+    "over several edits to the same path in one Step. Each oldText must be unique unless the call has exactly " +
+    "one hunk and replaceAll is true. LF/CRLF differences and a limited fuzzy ladder (trailing whitespace, " +
+    "smart quotes/dashes) are reconciled; other whitespace stays exact. Reread and retry after a mismatch; " +
+    "use write only for new files or intentional full replacement, and do not use shell as a file-edit fallback.",
   input: Type.Object(
     {
       path: Type.String({ minLength: 1 }),
-      oldText: Type.String({ minLength: 1, maxLength: 1_000_000 }),
-      newText: Type.String({ maxLength: 1_000_000 }),
       expectedSha256: Type.String({ pattern: sha256Pattern }),
-      replaceAll: Type.Optional(Type.Boolean()),
+      edits: Type.Array(
+        Type.Object(
+          {
+            oldText: Type.String({ minLength: 1, maxLength: 1_000_000 }),
+            newText: Type.String({ maxLength: 1_000_000 }),
+            replaceAll: Type.Optional(Type.Boolean()),
+          },
+          { additionalProperties: false },
+        ),
+        { minItems: 1, maxItems: 32 },
+      ),
     },
     { additionalProperties: false },
   ),
@@ -312,15 +332,14 @@ export const editTool = defineTool({
     },
     { additionalProperties: false },
   ),
+  prepareInput: prepareEditInput,
   effect: () => "write",
   resources: (input) => [`file:${input.path}`],
   async execute(input, context) {
     const requested = input as {
       path: string;
-      oldText: string;
-      newText: string;
       expectedSha256: string;
-      replaceAll?: boolean;
+      edits: EditHunk[];
     };
     assertSensitiveContentAllowed(requested.path, context);
     const path = await resolveWorkspaceEntry(context.workspaceRoot, requested.path);
@@ -331,35 +350,15 @@ export const editTool = defineTool({
     if (previousSha256 !== requested.expectedSha256) {
       throw new ToolFailure("STALE_READ", `Expected ${requested.expectedSha256}, found ${previousSha256}`);
     }
-    const prepared = prepareExactEdit(previousContent, requested.oldText, requested.newText);
-    if (prepared.oldText === prepared.newText) {
-      throw new ToolFailure("NO_CHANGE", "oldText and newText are identical after line-ending reconciliation");
-    }
-    const occurrences = countOccurrences(previousContent, prepared.oldText);
-    if (occurrences === 0) {
-      throw new ToolFailure(
-        "EDIT_TARGET_NOT_FOUND",
-        "oldText does not occur in the current file; reread the file and retry edit with a current unique fragment",
-      );
-    }
-    if (occurrences > 1 && !requested.replaceAll) {
-      throw new ToolFailure(
-        "EDIT_TARGET_AMBIGUOUS",
-        `oldText occurs ${occurrences} times; provide a larger unique fragment or set replaceAll`,
-      );
-    }
-    const replacements = requested.replaceAll ? occurrences : 1;
-    const content = requested.replaceAll
-      ? previousContent.split(prepared.oldText).join(prepared.newText)
-      : previousContent.replace(prepared.oldText, () => prepared.newText);
-    await atomicWriteText(path, content, previousMode);
-    const renderedDiff = replacementDiff(requested.path, previousContent, content, true);
+    const applied = applyEditsToFileContent(previousContent, requested.edits);
+    await atomicWriteText(path, applied.content, previousMode);
+    const renderedDiff = replacementDiff(requested.path, previousContent, applied.content, true);
     return {
       path: requested.path,
-      size: Buffer.byteLength(content),
-      sha256: hash(content),
+      size: Buffer.byteLength(applied.content),
+      sha256: hash(applied.content),
       previousSha256,
-      replacements,
+      replacements: applied.replacements,
       diff: renderedDiff.text,
       diffTruncated: renderedDiff.truncated,
       ...(context.freshnessRebase === undefined ? {} : {
@@ -1168,17 +1167,6 @@ async function atomicWriteText(path: string, content: string, mode?: number): Pr
   }
 }
 
-function countOccurrences(content: string, fragment: string): number {
-  let count = 0;
-  let offset = 0;
-  while (true) {
-    const index = content.indexOf(fragment, offset);
-    if (index < 0) return count;
-    count += 1;
-    offset = index + fragment.length;
-  }
-}
-
 function textLineSpans(content: string): Array<{ start: number; end: number }> {
   if (!content) return [];
   const spans: Array<{ start: number; end: number }> = [];
@@ -1191,30 +1179,6 @@ function textLineSpans(content: string): Array<{ start: number; end: number }> {
   }
   if (start < content.length) spans.push({ start, end: content.length });
   return spans;
-}
-
-function prepareExactEdit(
-  content: string,
-  oldText: string,
-  newText: string,
-): { oldText: string; newText: string } {
-  const ending = detectLineEnding(content);
-  const reconciledNewText = convertLineEndings(newText, ending);
-  if (countOccurrences(content, oldText) > 0) return { oldText, newText: reconciledNewText };
-  return {
-    oldText: convertLineEndings(oldText, ending),
-    newText: reconciledNewText,
-  };
-}
-
-function detectLineEnding(content: string): "\r\n" | "\n" | "\r" {
-  const match = /\r\n|\n|\r/.exec(content);
-  return (match?.[0] as "\r\n" | "\n" | "\r" | undefined) ?? "\n";
-}
-
-function convertLineEndings(text: string, ending: "\r\n" | "\n" | "\r"): string {
-  const normalized = text.replace(/\r\n|\r/g, "\n");
-  return ending === "\n" ? normalized : normalized.replaceAll("\n", ending);
 }
 
 async function pathExists(path: string): Promise<boolean> {

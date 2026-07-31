@@ -105,7 +105,7 @@ Non-read effects use the Effect Journal with stable idempotency keys. A complete
 result. An indeterminate effect is not automatically retried because doing so could duplicate an external
 action.
 
-File edits require fresh observations and precise targets. Host process execution is advertised honestly as
+File edits require fresh observations and precise multi-hunk targets matched against the original snapshot. Host process execution is advertised honestly as
 host execution, not a sandbox. Long-lived servers use bounded ProcessTasks with ownership, expiry, logs, stop,
 and recovery semantics.
 

@@ -1312,9 +1312,8 @@ test("TurnLoop rebases consecutive same-Step edits against the latest successful
         "edit",
         {
           path: "same-file.txt",
-          oldText: "omega",
-          newText: "sigma",
           expectedSha256: afterFirst,
+          edits: [{ oldText: "omega", newText: "sigma" }],
         },
         ["file:same-file.txt"],
       ),

@@ -2263,12 +2263,24 @@ function latestPlan(events: readonly SessionEvent[], runId: string): PlanDocumen
     if (!path || !/\.md$/i.test(path)) continue;
     if (event.data.toolName === "write" && typeof input?.content === "string") {
       documents.set(path, { path, content: input.content, sequence: event.sequence });
-    } else if (event.data.toolName === "edit" && typeof input?.oldText === "string" && typeof input?.newText === "string") {
+    } else if (event.data.toolName === "edit") {
       const previous = documents.get(path);
-      const content = previous?.content.includes(input.oldText)
-        ? previous.content.replace(input.oldText, input.newText)
-        : input.newText;
-      documents.set(path, { path, content, sequence: event.sequence });
+      let content = previous?.content;
+      const hunks = Array.isArray(input?.edits)
+        ? input.edits
+        : typeof input?.oldText === "string" && typeof input?.newText === "string"
+          ? [{ oldText: input.oldText, newText: input.newText }]
+          : [];
+      for (const hunk of hunks) {
+        const row = record(hunk);
+        if (!row || typeof row.oldText !== "string" || typeof row.newText !== "string") continue;
+        content = content?.includes(row.oldText)
+          ? content.replace(row.oldText, row.newText)
+          : row.newText;
+      }
+      if (typeof content === "string") {
+        documents.set(path, { path, content, sequence: event.sequence });
+      }
     }
   }
   return [...documents.values()]
@@ -2310,7 +2322,17 @@ function summarizeInput(tool: string, value: unknown): string {
     return `${command}${args ? ` ${args}` : ""}${workdir}${timeout}`;
   }
   if (tool === "write") return `${String(input.path ?? "file")} · ${typeof input.content === "string" ? `${input.content.split(/\r?\n/).length} lines` : "replace"}`;
-  if (tool === "edit") return `${String(input.path ?? "file")} · ${typeof input.oldText === "string" ? `replace ${oneLine(input.oldText, 48)}` : "patch"}`;
+  if (tool === "edit") {
+    const hunks = Array.isArray(input.edits) ? input.edits : [];
+    if (hunks.length > 1) return `${String(input.path ?? "file")} · ${hunks.length} hunks`;
+    const first = record(hunks[0]);
+    const oldText = typeof first?.oldText === "string"
+      ? first.oldText
+      : typeof input.oldText === "string"
+        ? input.oldText
+        : undefined;
+    return `${String(input.path ?? "file")} · ${oldText ? `replace ${oneLine(oldText, 48)}` : "patch"}`;
+  }
   if (tool === "verify") return `profile ${String(input.profile ?? "?")}`;
   if (typeof input.path === "string") return input.path;
   if (typeof input.query === "string") return oneLine(input.query, 100);

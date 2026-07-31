@@ -71,6 +71,11 @@ export interface ToolDefinition<Input extends TSchema, Output extends TSchema> {
   description: string;
   input: Input;
   output: Output;
+  /**
+   * Optional pre-validation rewrite (for example legacy edit shapes → canonical `edits[]`).
+   * Runs before schema check so the advertised schema stays the canonical contract.
+   */
+  prepareInput?(rawInput: unknown): unknown;
   effect(input: Static<Input>): Effect;
   resources(input: Static<Input>, context: ToolExecutionContext): readonly string[];
   execute(input: Static<Input>, context: ToolExecutionContext): Promise<Static<Output>>;
@@ -212,10 +217,13 @@ export class ToolRegistry {
       throw new StaleToolError(name, advertisedIdentity, current?.identity);
     }
 
-    if (!Value.Check(current.definition.input, rawInput)) {
-      throw new ToolInputError(formatErrors(current.definition.input, rawInput));
+    const preparedInput = current.definition.prepareInput === undefined
+      ? rawInput
+      : current.definition.prepareInput(rawInput);
+    if (!Value.Check(current.definition.input, preparedInput)) {
+      throw new ToolInputError(formatErrors(current.definition.input, preparedInput));
     }
-    const input = structuredClone(rawInput);
+    const input = structuredClone(preparedInput);
     const effect = current.definition.effect(input);
     const resources = current.definition.resources(input, context);
     let authorization: Promise<AuthorizedToolCall> | undefined;
