@@ -766,6 +766,63 @@ test("git inspection exposes fixed read-only status and diff operations", async 
   });
 });
 
+test("git inspection covers log, rev-parse, show, branch, remote and rejects unsafe refs", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    await execFileAsync("git", ["init", "--quiet"], { cwd: root });
+    await execFileAsync("git", ["config", "user.email", "qi@example.invalid"], { cwd: root });
+    await execFileAsync("git", ["config", "user.name", "Qi Test"], { cwd: root });
+    await writeFile(join(root, "note.txt"), "one\n");
+    await execFileAsync("git", ["add", "note.txt"], { cwd: root });
+    await execFileAsync("git", ["commit", "-m", "first commit"], { cwd: root });
+    await writeFile(join(root, "note.txt"), "two\n");
+    await execFileAsync("git", ["add", "note.txt"], { cwd: root });
+    await execFileAsync("git", ["commit", "-m", "second commit"], { cwd: root });
+
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker, { tools: ["git"], effects: ["read"], resources: ["vcs:."] });
+    const registry = new ToolRegistry(broker);
+    registry.register("git", gitTool);
+    const advertised = identity(registry, "git");
+    const run = (operation, extra = {}, actionId = `act_git_${operation}`) =>
+      registry.execute("git", advertised, { operation, ...extra }, context(root, artifactStore, actionId));
+
+    const log = await run("log", { maxCount: 2 });
+    assert.match(log.output.stdout, /second commit/);
+    assert.match(log.output.stdout, /first commit/);
+    assert.equal(log.output.stdout.trim().split(/\r?\n/).length, 2);
+
+    const head = await run("rev-parse");
+    assert.match(head.output.stdout.trim(), /^[0-9a-f]{40}$/);
+
+    const show = await run("show", { ref: "HEAD" });
+    assert.match(show.output.stdout, /second commit/);
+    assert.match(show.output.stdout, /note\.txt/);
+
+    const branch = await run("branch");
+    assert.match(branch.output.stdout, /\*/);
+
+    const remote = await run("remote");
+    assert.equal(remote.output.stdout.trim(), "");
+
+    await assert.rejects(
+      () => run("rev-parse", { ref: "main..other" }, "act_git_bad_range"),
+      (error) => error instanceof ToolFailure && error.code === "INVALID_GIT_REF",
+    );
+    await assert.rejects(
+      () => run("show", { ref: "--all" }, "act_git_bad_option"),
+      (error) => error instanceof ToolFailure && error.code === "INVALID_GIT_REF",
+    );
+    await assert.rejects(
+      () => run("status", { ref: "HEAD" }, "act_git_status_ref"),
+      (error) => error instanceof ToolFailure && error.code === "INVALID_GIT_ARGUMENT",
+    );
+    await assert.rejects(
+      () => run("branch", { maxCount: 3 }, "act_git_branch_count"),
+      (error) => error instanceof ToolFailure && error.code === "INVALID_GIT_ARGUMENT",
+    );
+  });
+});
+
 test("shell executes an argument vector without shell interpolation", async () => {
   await withWorkspace(async ({ root, artifactStore }) => {
     const previousForceColor = process.env.FORCE_COLOR;

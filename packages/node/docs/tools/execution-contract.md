@@ -90,10 +90,12 @@ File lifecycle changes use the same freshness discipline. `move` accepts only a 
 fails if the destination already exists. `remove` accepts only a regular, non-symlink file and persists its full
 previous bytes as an Artifact before unlinking it; the returned Artifact reference is the recovery handle.
 
-Use `git` for repository status, unstaged diff, or staged diff while holding only read authority. Its operation
-schema does not accept arbitrary arguments, Git optional locks and external diff drivers are disabled, and the
-executable must resolve outside the Workspace. General Git commands remain behind the explicit `shell` execute
-capability.
+Use `git` for fixed read-only repository inspection while holding only read authority: `status`, unstaged
+`diff`, staged `diff-staged`, oneline `log` (`maxCount` 1–50, default 10), `rev-parse` / `show` (optional single
+`ref`, default `HEAD`; ranges and option-like tokens are rejected), `branch`, and `remote`. Its operation schema
+does not accept arbitrary arguments, Git optional locks and external diff drivers are disabled, and the
+executable must resolve outside the Workspace. Mutating Git commands (`add`, `commit`, …) remain behind the
+explicit `shell` execute capability.
 
 General host execution receives a program name and argument vector rather than a command-line string. It does
 not expand shell globs, variables, pipes, or redirection; use discovery Tools for paths and a declared script
@@ -118,11 +120,18 @@ effect; only failures after effect entry whose settlement cannot be established 
 Authorized script profiles (`pwsh`, `cmd`, `bash`) are a separate `script` tool. They require matching
 `shell-profile:<name>` resources, are probed at runtime startup, and never replace `shell` based on command text.
 `pwsh` runs with `-NoLogo -NoProfile -NonInteractive` and receives the script on stdin; `bash` uses
-`--noprofile --norc -s`; `cmd` runs a temporary script through the trusted system processor. Profile scripts inherit
+`--noprofile --norc -s`; `cmd` writes a temporary `.cmd` and runs it through the trusted system processor.
+ASCII cmd scripts are written as UTF-8; non-ASCII scripts are re-encoded to the process ANSI code page
+(cmd.exe does not honor UTF-8 BOM for batch source decoding, so a UTF-8 temp file would mojibake text such as
+Chinese `git commit -m` messages). Characters outside that ANSI code page remain unsupported in cmd scripts.
+Profile scripts inherit
 a credential-scrubbed environment and terminate process trees on timeout or cancel. Prefer one `script` Action when you need builtins, pipes, or multi-statement logic. Multiple `shell` or
 `script` Actions may share a `workdir` in one Step: host resources (`host-workspace:*`, `host-process:*`,
 `shell-profile:*`) do not participate in same-Step `BATCH_WRITE_CONFLICT`. That conflict remains reserved for
 overlapping `file:*` / `artifact-store:*` mutations (and edit freshness rebasing).
+For Git commits with non-ASCII messages, prefer the argv `shell` tool (`git` + `commit` + `-m` / `-F`) or
+`write` a UTF-8 message file then `git commit -F`; avoid chaining follow-up commands into the same quoted `-m`
+string.
 Allowed profiles are configured only in `$QI_HOME/config.toml` (first-run auto-detect writes installed candidates;
 `/shell` hot-applies without restart). Project `policy.toml` `[shell]` is ignored.
 Host-process environments

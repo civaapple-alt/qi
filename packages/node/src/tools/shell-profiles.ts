@@ -318,6 +318,71 @@ export function formatCmdVersionLabel(text: string): string | undefined {
   return match ? `Windows ${match[1]}` : undefined;
 }
 
+/** Normalize a cmd profile script to CRLF line endings. */
+export function formatCmdScriptContents(script: string): string {
+  return script.replace(/\r?\n/g, "\r\n");
+}
+
+/** True when the script contains bytes cmd.exe would misread from a UTF-8 temp file. */
+export function cmdScriptHasNonAscii(script: string): boolean {
+  for (let index = 0; index < script.length; index += 1) {
+    if (script.charCodeAt(index) > 0x7f) return true;
+  }
+  return false;
+}
+
+/**
+ * Write a temporary `.cmd` file the way cmd.exe will read it.
+ * ASCII stays UTF-8. Non-ASCII is re-encoded to the process ANSI code page
+ * (e.g. GBK on Chinese Windows): cmd.exe does not honor UTF-8 BOM for batch
+ * source decoding, so a UTF-8 temp file mojibakes `git commit -m` messages.
+ */
+export async function writeCmdScriptFile(scriptPath: string, script: string): Promise<void> {
+  const body = formatCmdScriptContents(script);
+  if (!cmdScriptHasNonAscii(body)) {
+    await writeFile(scriptPath, body, "utf8");
+    return;
+  }
+  await writeWindowsAnsiTextFile(scriptPath, body);
+}
+
+async function writeWindowsAnsiTextFile(path: string, content: string): Promise<void> {
+  const pathB64 = Buffer.from(path, "utf8").toString("base64");
+  const textB64 = Buffer.from(content, "utf16le").toString("base64");
+  // Encoding.Default is UTF-8 under PowerShell 7 / .NET Core; ANSICodePage matches cmd.exe.
+  const command = [
+    `$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${pathB64}'))`,
+    `$text = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${textB64}'))`,
+    `$ansi = [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)`,
+    `[IO.File]::WriteAllText($path, $text, $ansi)`,
+  ].join("; ");
+  const shells = [
+    join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    "powershell.exe",
+    "pwsh.exe",
+  ];
+  let lastError: string | undefined;
+  for (const shell of shells) {
+    try {
+      const result = await runHostProcess(shell, ["-NoProfile", "-NonInteractive", "-Command", command], {
+        cwd: tmpdir(),
+        timeoutMs: 15_000,
+        outputLimitBytes: 16 * 1024,
+        detachedProcessGroup: false,
+        env: scrubCredentialEnvironment(process.env),
+      });
+      if (result.exitCode === 0) return;
+      lastError = `${result.stderr}\n${result.stdout}`.trim();
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  throw new ToolFailure(
+    "INVALID_SCRIPT",
+    `Failed to encode non-ASCII cmd script for the Windows ANSI code page${lastError ? `: ${lastError.slice(0, 300)}` : ""}`,
+  );
+}
+
 function sanitizeProfileVersion(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const cleaned = value.replace(/\uFFFD/g, "").trim();
@@ -351,7 +416,7 @@ async function buildScriptInvocation(
   }
   const directory = await mkdtemp(join(tmpdir(), "qi-cmd-"));
   const scriptPath = join(directory, "script.cmd");
-  await writeFile(scriptPath, script.replace(/\r?\n/g, "\r\n"), "utf8");
+  await writeCmdScriptFile(scriptPath, script);
   const invocation = await windowsCommandInvocation(
     profile.executable,
     ["/d", "/s", "/c", scriptPath],

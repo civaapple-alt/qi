@@ -20,8 +20,8 @@ produces an `AuthorizedToolCall`; execution returns a `ToolSettlement`. Registra
 tool implementation from impersonating a previously advertised identity.
 
 Built-ins provide bounded directory listing and tree rendering, fd-accelerated file discovery, rg-accelerated
-content search, whole-file or bounded line-range reads, file write/edit, fixed read-only Git inspection,
-controlled public HTTP(S) text retrieval,
+content search, whole-file or bounded line-range reads, file write/edit, fixed read-only Git inspection
+(`status` / diffs / `log` / `rev-parse` / `show` / `branch` / `remote`), controlled public HTTP(S) text retrieval,
 argument-vector `shell` (`shell-profile:direct`), explicit `script` profiles (`pwsh`/`cmd`/`bash`), and
 content-addressed artifact storage. `tree`, `find`, `list`, `read`, `search`, `git`, and `fetch` remain separate so
 local discovery, repository inspection, external evidence, and execution authority are explicit.
@@ -70,7 +70,8 @@ automatic inference path, so a hand-picked manifest is exactly as trustworthy as
 - Write and edit reject existing directories and symbolic links rather than following an alias to another target.
 - Agent-facing paths cannot enter `.qi`, `.git`, or `.artifacts`, including through an in-Workspace symlink.
 - Move and remove require a fresh regular-file hash; move never overwrites, and remove returns a recovery Artifact.
-- Git inspection accepts only status, unstaged diff, or staged diff and resolves Git outside the Workspace.
+- Git inspection accepts only fixed read-only operations (status, unstaged/staged diff, log, rev-parse, show,
+  branch, remote) and resolves Git outside the Workspace.
 - Verification accepts only frozen profile names, resolves executables outside the Workspace, and strips ambient
   provider credentials from the child environment.
 - Network fetch is absent by default, uses credential-free GET only, pins validated public DNS results through

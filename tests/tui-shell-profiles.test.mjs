@@ -44,6 +44,8 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
     assert.match(shellDescription, /one authorized script Action/);
     if (process.platform === "win32") {
       assert.match(directPrompt, /Do not attempt POSIX-only bash, lsof, xargs/);
+      assert.match(directPrompt, /non-ASCII text/);
+      assert.match(directPrompt, /git commit -F/);
     }
     await directRuntime.close();
     directRuntime = undefined;

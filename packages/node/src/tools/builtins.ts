@@ -980,25 +980,101 @@ export function verificationResource(profile: VerificationProfile): string {
   return `verification:${profile.name}:${profile.definitionSha256}`;
 }
 
+const gitReadOperations = [
+  "status",
+  "diff",
+  "diff-staged",
+  "log",
+  "rev-parse",
+  "show",
+  "branch",
+  "remote",
+] as const;
+type GitReadOperation = (typeof gitReadOperations)[number];
+
+const gitRefOperations = new Set<GitReadOperation>(["rev-parse", "show"]);
+const gitMaxCountOperations = new Set<GitReadOperation>(["log"]);
+
+/** Reject option-like tokens, ranges, and odd ref syntax before argv construction. */
+function assertSafeGitRef(ref: string): string {
+  const trimmed = ref.trim();
+  if (trimmed.length === 0 || trimmed.length > 256) {
+    throw new ToolFailure("INVALID_GIT_REF", "Git ref must be 1-256 characters");
+  }
+  if (trimmed !== ref) {
+    throw new ToolFailure("INVALID_GIT_REF", "Git ref may not include leading or trailing whitespace");
+  }
+  if (trimmed.startsWith("-") || trimmed.includes("\0") || /\s/.test(trimmed) || trimmed.includes("..")) {
+    throw new ToolFailure(
+      "INVALID_GIT_REF",
+      "Git ref must be a single revision (no options, whitespace, or ranges)",
+    );
+  }
+  if (
+    !/^(?:HEAD(?:[~^][0-9]*)*|refs\/[A-Za-z0-9._\-\/]+|[0-9a-f]{4,40}|[A-Za-z0-9][A-Za-z0-9._\-\/]*)$/.test(
+      trimmed,
+    )
+  ) {
+    throw new ToolFailure("INVALID_GIT_REF", `Unsupported Git ref syntax: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+function gitInspectionArgs(
+  operation: GitReadOperation,
+  options: { ref?: string; maxCount?: number },
+): readonly string[] {
+  if (options.ref !== undefined && !gitRefOperations.has(operation)) {
+    throw new ToolFailure("INVALID_GIT_ARGUMENT", `ref is only valid for rev-parse and show`);
+  }
+  if (options.maxCount !== undefined && !gitMaxCountOperations.has(operation)) {
+    throw new ToolFailure("INVALID_GIT_ARGUMENT", `maxCount is only valid for log`);
+  }
+  switch (operation) {
+    case "status":
+      return ["status", "--short", "--branch", "--untracked-files=all"];
+    case "diff":
+      return ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--"];
+    case "diff-staged":
+      return ["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--"];
+    case "log":
+      return ["log", "--oneline", "--no-color", "-n", String(options.maxCount ?? 10), "--"];
+    case "rev-parse":
+      return ["rev-parse", "--verify", `${assertSafeGitRef(options.ref ?? "HEAD")}^{commit}`];
+    case "show":
+      return [
+        "show",
+        "-s",
+        "--format=medium",
+        "--stat",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        assertSafeGitRef(options.ref ?? "HEAD"),
+      ];
+    case "branch":
+      return ["branch", "-vv", "--no-color"];
+    case "remote":
+      return ["remote", "-v"];
+  }
+}
+
 export const gitTool = defineTool({
-  description: "Inspect the Workspace Git repository without changing it. Operations are fixed to concise status, unstaged diff, or staged diff; arbitrary Git arguments and commands are not accepted.",
+  description:
+    "Inspect the Workspace Git repository without changing it. Operations are fixed to status, unstaged/staged diff, " +
+    "oneline log, rev-parse, show (commit metadata + stat), branch, or remote; arbitrary Git arguments and mutating " +
+    "commands are not accepted. Prefer this tool over shell for repository inspection.",
   input: Type.Object(
     {
-      operation: Type.Union([
-        Type.Literal("status"),
-        Type.Literal("diff"),
-        Type.Literal("diff-staged"),
-      ]),
+      operation: Type.Union(gitReadOperations.map((operation) => Type.Literal(operation))),
+      ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+      maxCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
     },
     { additionalProperties: false },
   ),
   output: Type.Object(
     {
-      operation: Type.Union([
-        Type.Literal("status"),
-        Type.Literal("diff"),
-        Type.Literal("diff-staged"),
-      ]),
+      operation: Type.Union(gitReadOperations.map((operation) => Type.Literal(operation))),
       stdout: Type.String(),
       stderr: Type.String(),
       truncated: Type.Boolean(),
@@ -1008,16 +1084,15 @@ export const gitTool = defineTool({
   effect: () => "read",
   resources: () => ["vcs:."],
   async execute(input, context) {
-    const request = input as { operation: "status" | "diff" | "diff-staged" };
+    const request = input as { operation: GitReadOperation; ref?: string; maxCount?: number };
     const git = await resolveTrustedExecutable("git", context.workspaceRoot);
-    const operationArgs: Record<typeof request.operation, readonly string[]> = {
-      status: ["status", "--short", "--branch", "--untracked-files=all"],
-      diff: ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--"],
-      "diff-staged": ["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--"],
-    };
+    const operationArgs = gitInspectionArgs(request.operation, {
+      ...(request.ref === undefined ? {} : { ref: request.ref }),
+      ...(request.maxCount === undefined ? {} : { maxCount: request.maxCount }),
+    });
     const result = await runProcess(
       git,
-      ["-c", "core.fsmonitor=false", "--no-pager", ...operationArgs[request.operation]],
+      ["-c", "core.fsmonitor=false", "--no-pager", ...operationArgs],
       context.workspaceRoot,
       30_000,
       context.signal,

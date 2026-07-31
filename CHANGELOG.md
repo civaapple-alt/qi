@@ -8,6 +8,8 @@ steps and investigation history belong in pull requests, not release notes.
 ### Added
 
 - Step budget via `/settings` and `/max-steps` alias; persists to user config; hot-applies next Run.
+- Read-only `git` tool operations: `log` (bounded oneline), `rev-parse`, `show` (metadata + stat), `branch`, and
+  `remote`, still under read authority so Ask/Plan can inspect history without execute.
 
 ### Changed
 
@@ -32,6 +34,9 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- Windows `cmd` script-profile temp `.cmd` files re-encode non-ASCII script text to the process ANSI code page
+  before cmd.exe runs them, so Chinese `git commit -m` messages are no longer mojibaked; `host:environment` on
+  Windows also steers agents to prefer argv `shell` or `git commit -F` for non-ASCII commit messages.
 - Plan-mode Formal Plan guidance and `host:environment` now keep the argv-only `shell` tool separate from
   probed `script` profiles, so executor-background prose must not claim pwsh/cmd/bash are unavailable when
   those profiles are listed as available.

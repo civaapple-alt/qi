@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import {
@@ -16,6 +18,8 @@ import {
   shellProfileResource,
   shellTool,
 } from "@civaapple/qi-node/tools";
+
+const execFileAsync = promisify(execFile);
 
 async function withWorkspace(run) {
   const root = await mkdtemp(join(tmpdir(), "qi-shell-profile-"));
@@ -89,6 +93,13 @@ test("formatCmdVersionLabel extracts Windows build from localized or mojibake ve
   );
   assert.equal(formatCmdVersionLabel("Microsoft Windows [Version 10.0.19045.3803]"), "Windows 10.0.19045.3803");
   assert.equal(formatCmdVersionLabel("no version here"), undefined);
+});
+
+test("formatCmdScriptContents normalizes CRLF and detects non-ASCII", async () => {
+  const { formatCmdScriptContents, cmdScriptHasNonAscii } = await import("@civaapple/qi-node/tools");
+  assert.equal(formatCmdScriptContents("git status\n@echo done\n"), "git status\r\n@echo done\r\n");
+  assert.equal(cmdScriptHasNonAscii('git commit -m "ascii"'), false);
+  assert.equal(cmdScriptHasNonAscii('git commit -m "docs: 新增进度"'), true);
 });
 
 test("probeShellProfiles marks disallowed profiles and keeps direct separate", async () => {
@@ -191,5 +202,62 @@ test("script tool runs an available profile and refuses unauthorized profiles", 
         assert.match(storedText, /A{200000}/);
       }
     }
+  });
+});
+
+test("cmd script profile preserves Chinese git commit -m via ANSI re-encoding", async (t) => {
+  if (process.platform !== "win32") {
+    t.skip("cmd profile encoding is Windows-specific");
+    return;
+  }
+  await withWorkspace(async ({ root, artifactStore }) => {
+    const snapshot = await probeShellProfiles(root, {
+      default: "direct",
+      allowed: ["direct", "cmd"],
+    });
+    const cmd = snapshot.available.find((profile) => profile.id === "cmd");
+    if (!cmd) {
+      t.skip("cmd profile unavailable");
+      return;
+    }
+    await execFileAsync("git", ["init"], { cwd: root });
+    await execFileAsync("git", ["config", "user.email", "qi@example.invalid"], { cwd: root });
+    await execFileAsync("git", ["config", "user.name", "Qi Test"], { cwd: root });
+    await writeFile(join(root, "note.txt"), "fixture\n");
+    await execFileAsync("git", ["add", "note.txt"], { cwd: root });
+
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_cmd_commit",
+      subject: "agent_main",
+      tools: ["script"],
+      effects: ["execute"],
+      resources: ["host-workspace:**", shellProfileResource("cmd")],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("script", createScriptTool(snapshot.available));
+    const identity = registry.catalog().find((entry) => entry.name === "script")?.identity;
+    assert.ok(identity);
+
+    const message = "docs: 新增进度文档";
+    const settlement = await registry.execute(
+      "script",
+      identity,
+      {
+        profile: "cmd",
+        script: `git commit -m "${message}"`,
+        workdir: ".",
+        timeoutMs: 20_000,
+      },
+      context(root, artifactStore, "act_cmd_commit_utf8"),
+    );
+    assert.equal(settlement.output.exitCode, 0, settlement.output.stderr || settlement.output.stdout);
+
+    const { stdout } = await execFileAsync("git", ["log", "-1", "--format=%B"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(stdout.trim(), message);
   });
 });
