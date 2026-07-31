@@ -282,6 +282,64 @@ test("Session inspection returns bounded Run/Step projections and the model Tool
   }
 });
 
+test("Session inspection projects imageAttachments for Runs with pasted media", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = createId("ses");
+  const runId = createId("run");
+  const control = new HumanControlService({ eventStore: store });
+  control.ensureSession(sessionId, "Inspect images");
+  const writer = new EventWriter(store, sessionId);
+  const actor = { kind: "user", id: "tester" };
+  const originalArtifactRef = `artifact://${"a".repeat(64)}`;
+  const preparedArtifactRef = `artifact://${"b".repeat(64)}`;
+  writer.append("run.triggered", {
+    runId,
+    trigger: "user",
+    input: "[image #1 (1200×800)] 查看界面",
+    content: [
+      { type: "text", text: "[image #1 (1200×800)] 查看界面" },
+      {
+        type: "image",
+        source: "clipboard",
+        originalArtifactRef,
+        preparedArtifactRef,
+        originalMediaType: "image/png",
+        mediaType: "image/png",
+        originalByteLength: 1200,
+        byteLength: 800,
+        originalWidth: 1200,
+        originalHeight: 800,
+        width: 1200,
+        height: 800,
+        downsampled: false,
+        formatChanged: false,
+        orientationApplied: false,
+      },
+    ],
+  }, actor);
+  writer.append("run.cancelled", { runId, reason: "transmission interrupted" }, { kind: "runtime", id: "test" });
+
+  const runs = inspectQiSession(store, {
+    operation: "runs",
+    sessionId,
+    detail: "summary",
+  });
+  const run = runs.items.find((item) => item.runId === runId);
+  assert.equal(run.imageCount, 1);
+  assert.deepEqual(run.imageAttachments, [{
+    source: "clipboard",
+    originalMediaType: "image/png",
+    mediaType: "image/png",
+    originalWidth: 1200,
+    originalHeight: 800,
+    width: 1200,
+    height: 800,
+    originalArtifactRef,
+    preparedArtifactRef,
+    downsampled: false,
+  }]);
+});
+
 test("Session inspection projects Formal Plan titles, reasoning, actionFacts, and tool summaries", () => {
   const store = new InMemoryEventStore();
   const sessionId = createId("ses");

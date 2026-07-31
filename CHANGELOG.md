@@ -94,6 +94,16 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- Parallel `read_image` (and other tool-result image) batches no longer insert synthetic user media
+  between `role=tool` responses on Chat Completions / Responses, which previously caused provider 400s
+  (`tool_calls` without a matching `tool_call_id`, e.g. `read_image:1`).
+- Follow-ups after an interrupted image Run (for example “继续”) restore the prior clipboard/path/URL
+  attachments in conversation history, and `qi_session_inspect` now surfaces `imageAttachments` /
+  `originalArtifactRef` so recovery uses `read_image` instead of searching mounts for the same screenshot.
+- Image-capable models now ingest local Workspace/mount image paths (and absolute paths under those roots)
+  as ordered `path` image parts instead of leaving a bare path for the model to mis-route through `fetch`.
+- Rich TTY image paste uses `Alt+V` on Windows (kimi-code parity) because terminals often own `Ctrl+V`, and
+  also accepts a clipboard file-path / `file://` URI that points at a PNG/JPEG/GIF/WebP file.
 - Composer `@` mention validation no longer blocks submit when the token is an absent npm-style
   `@scope/package` (for example `@memo/shared-types`); real missing Workspace paths still fail closed.
 - Indeterminate-effect parking now carries tool name and Action evidence in `run.parked.detail`, and the TUI

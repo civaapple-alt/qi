@@ -229,7 +229,12 @@ export class InteractiveTui {
         this.#cycleMode();
         return { consume: true };
       }
-      if (matchesKey(data, "ctrl+v")) {
+      // Windows terminals often own Ctrl+V (e.g. Windows Terminal paste), so Alt+V
+      // is the reliable image-paste chord there — same as kimi-code.
+      if (
+        matchesKey(data, "ctrl+v") ||
+        (process.platform === "win32" && matchesKey(data, "alt+v"))
+      ) {
         this.#startClipboardPaste();
         return { consume: true };
       }

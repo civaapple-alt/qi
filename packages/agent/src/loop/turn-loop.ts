@@ -1579,11 +1579,13 @@ function toModelInputParts(
     result.push({
       type: "text",
       text: [
-        `[Image attachment: ${part.originalWidth}×${part.originalHeight} ${part.originalMediaType}`,
+        `[Image attachment (${part.source}): ${part.originalWidth}×${part.originalHeight} ${part.originalMediaType}`,
         `prepared as ${part.width}×${part.height} ${part.mediaType}`,
         changes.length === 0 ? "without visual preprocessing" : changes.join(", "),
-        `original ${part.originalArtifactRef}]`,
-      ].join("; "),
+        `original ${part.originalArtifactRef}.`,
+        "This image is already attached as visual input in this message;",
+        "inspect it directly before searching mounts or the Workspace for the same screenshot.]",
+      ].join(" "),
     });
     result.push({
       type: "artifact",
@@ -1802,7 +1804,14 @@ function compileConversationHistory(
     const isBudgetHandoff = run.status === "parked"
       && run.terminal?.reason === "budget"
       && run.steps[run.stepOrder.at(-1) ?? ""]?.finishReason === "handoff";
-    if (!isCompleted && !isBudgetHandoff) continue;
+    const hasImages = run.content?.some((part) => part.type === "image") === true;
+    // Interrupted Runs normally stay out of history, but image attachments must remain
+    // visually continuous for follow-ups like "继续" — otherwise the model only sees text
+    // placeholders and hunts mounts/filesystems for the screenshot.
+    const isInterruptedWithImages = hasImages
+      && (run.status === "failed" || run.status === "cancelled" || run.status === "parked")
+      && !isBudgetHandoff;
+    if (!isCompleted && !isBudgetHandoff && !isInterruptedWithImages) continue;
     const finalText = stripReservedRunFacts([...run.stepOrder]
       .reverse()
       .map((stepId) => run.steps[stepId]?.model?.text.trim())
@@ -1814,7 +1823,18 @@ function compileConversationHistory(
           finalText || deterministicBudgetHandoff(view, runId),
           "</qi-budget-handoff>",
         ].join("\n")
-      : finalText;
+      : isInterruptedWithImages
+        ? [
+            "<qi-interrupted-media-run>",
+            `The previous Run ended as ${run.status}`
+              + (run.terminal?.reason ? ` (${run.terminal.reason})` : "")
+              + "; it was not completed.",
+            "The user's image attachment(s) from that Run are restored as visual context.",
+            "Inspect those attached images directly; do not search mounts or the Workspace for the same screenshot unless the user asked for file discovery.",
+            finalText || "No assistant reply was settled before interruption.",
+            "</qi-interrupted-media-run>",
+          ].join("\n")
+        : finalText;
     if (!narrative) continue;
     turns.push({
       runId,

@@ -31,7 +31,7 @@ export interface ImageIngestOptions {
 
 export interface IngestImageBytesInput {
   readonly bytes: Uint8Array;
-  readonly source: "clipboard" | "url";
+  readonly source: "clipboard" | "url" | "path";
   readonly declaredMediaType?: string;
 }
 

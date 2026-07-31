@@ -377,15 +377,29 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function toChatMessages(messages: readonly ModelMessage[]): ChatCompletionMessageParam[] {
   const result: ChatCompletionMessageParam[] = [];
+  // Chat Completions requires every tool_call_id to be answered by a contiguous run of
+  // role=tool messages. Tool-result images become synthetic user messages, so defer them
+  // until after that run — otherwise a second parallel read_image (e.g. read_image:1)
+  // looks unanswered and the provider returns 400.
+  const pendingToolMedia: ChatCompletionMessageParam[] = [];
+  const flushToolMedia = (): void => {
+    if (pendingToolMedia.length === 0) return;
+    result.push(...pendingToolMedia);
+    pendingToolMedia.length = 0;
+  };
+
   for (const message of messages) {
     switch (message.role) {
       case "system":
+        flushToolMedia();
         result.push({ role: "system", content: textOnly(message, "system") });
         break;
       case "user":
+        flushToolMedia();
         result.push({ role: "user", content: toChatUserContent(message) });
         break;
       case "assistant": {
+        flushToolMedia();
         const toolCalls = message.content.filter((part) => part.type === "tool-call");
         const text = message.content
           .filter((part): part is Extract<ModelContentPart, { type: "text" }> => part.type === "text")
@@ -424,7 +438,7 @@ function toChatMessages(messages: readonly ModelMessage[]): ChatCompletionMessag
             content: JSON.stringify({ ok: !part.isError, output }),
           });
           if (images.length > 0) {
-            result.push({
+            pendingToolMedia.push({
               role: "user",
               content: [
                 { type: "text", text: `Attached media from tool result ${part.callId}:` },
@@ -436,6 +450,7 @@ function toChatMessages(messages: readonly ModelMessage[]): ChatCompletionMessag
         break;
     }
   }
+  flushToolMedia();
   return result;
 }
 

@@ -417,9 +417,11 @@ event stream and can leak binary content into logs, redaction, and context accou
 - `run.triggered` may carry an ordered sequence of text and image parts in addition to the legacy human-readable
   `input` string. Image parts contain only bounded provenance, dimensions, media types, byte counts, and
   content-addressed original/prepared Artifact references. Session events never contain image bytes or data URLs.
-- Node owns image acquisition and preprocessing. Clipboard bytes and Network-authorized public URL downloads pass
-  the same MIME, magic-byte, decode-size, pixel-count, dimension, count, and aggregate-byte checks before a Run is
-  committed. Provider-side URL fetching is not an ingestion path.
+- Node owns image acquisition and preprocessing. Clipboard bytes, Network-authorized public URL downloads, and
+  Workspace/mount file paths (including absolute paths rewritten onto an authorized root) pass the same MIME,
+  magic-byte, decode-size, pixel-count, dimension, count, and aggregate-byte checks before a Run is committed.
+  Provider-side URL fetching is not an ingestion path. Path ingestion never widens authority beyond the primary
+  Workspace and currently authorized read-only mounts.
 - Original and prepared images are retained as project-private Artifacts. The prepared image is the default model
   view; an explicitly authorized read-only image Action may derive a bounded crop from an original attachment.
   Skills, prompts, and provider capabilities do not grant that Action authority.

@@ -1,6 +1,6 @@
-import { lstat, mkdir, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import {
   InMemoryCapabilityBroker,
   redactSensitiveValue,
@@ -44,7 +44,7 @@ import {
 import {
   ImageIngestService,
   createReadImageTool,
-  detectImageUrlCandidates,
+  detectImageInputCandidates,
 } from "@civaapple/qi-node/media";
 import {
   SessionRepository,
@@ -77,7 +77,9 @@ import {
   shellProfileResource,
   verificationResource,
   writeVerificationManifest,
+  isRegularFile,
   normalizeWorkspaceRelativePath,
+  resolveAccessiblePath,
   type PreparedVerificationProfiles,
   type RegistrationHandle,
   type SensitivePathPolicy,
@@ -1270,11 +1272,11 @@ export class TuiRuntime {
       }
       return supplied.map((part) => ({ ...part }));
     }
-    const candidates = detectImageUrlCandidates(input);
+    const candidates = detectImageInputCandidates(input);
     if (candidates.length === 0) return undefined;
     if (!capabilities.input.has("image")) {
       throw new TypeError(
-        "The input contains an image URL, but the selected model does not support image input",
+        "The input contains an image path or URL, but the selected model does not support image input",
       );
     }
     const content: RunInputPart[] = [];
@@ -1283,15 +1285,33 @@ export class TuiRuntime {
       if (candidate.start < cursor) continue;
       const text = input.slice(cursor, candidate.end);
       if (text) content.push({ type: "text", text });
-      content.push(await this.#imageIngest.ingestUrl(candidate.url, {
-        networkAuthorized: this.#allowNetwork,
-        ...(this.#activeController === undefined ? {} : { signal: this.#activeController.signal }),
-      }));
+      if (candidate.kind === "url") {
+        content.push(await this.#imageIngest.ingestUrl(candidate.url, {
+          networkAuthorized: this.#allowNetwork,
+          ...(this.#activeController === undefined ? {} : { signal: this.#activeController.signal }),
+        }));
+      } else {
+        content.push(await this.#ingestImagePath(candidate.path));
+      }
       cursor = candidate.end;
     }
     const tail = input.slice(cursor);
     if (tail) content.push({ type: "text", text: tail });
     return content;
+  }
+
+  async #ingestImagePath(requested: string): Promise<RunImagePart> {
+    const logical = await rewriteImagePathOntoAuthorizedRoot(
+      requested,
+      this.#workspaceRoot,
+      this.getMounts(),
+    );
+    const resolved = await resolveAccessiblePath(this.#workspaceRoot, logical, this.getMounts());
+    if (!(await isRegularFile(resolved.absolute))) {
+      throw new TypeError(`Image path is not a regular file: ${requested}`);
+    }
+    const bytes = new Uint8Array(await readFile(resolved.absolute));
+    return this.#imageIngest.ingestBytes({ bytes, source: "path" });
   }
 
   #syncImageTool(capabilities: ModelCapabilities): void {
@@ -2016,4 +2036,43 @@ function boundedDescription(value: string): string {
 
 function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+/**
+ * User-typed absolute paths under the Workspace or an authorized mount are rewritten to the
+ * logical forms `resolveAccessiblePath` accepts (relative or `mount:<id>/…`).
+ */
+async function rewriteImagePathOntoAuthorizedRoot(
+  requested: string,
+  workspaceRoot: string,
+  mounts: readonly WorkspaceMount[],
+): Promise<string> {
+  if (!isAbsolute(requested) || requested.startsWith("mount:")) return requested;
+  const absolute = resolve(requested);
+  try {
+    const workspaceReal = await realpath(workspaceRoot);
+    const targetReal = await realpath(absolute).catch(async () => absolute);
+    const underWorkspace = relative(workspaceReal, targetReal);
+    if (underWorkspace === "" || (!underWorkspace.startsWith("..") && !isAbsolute(underWorkspace))) {
+      return underWorkspace.replaceAll("\\", "/") || ".";
+    }
+  } catch {
+    // Fall through to mounts / original path.
+  }
+  for (const mount of mounts) {
+    try {
+      const mountReal = await realpath(mount.path);
+      const targetReal = await realpath(absolute).catch(async () => absolute);
+      const underMount = relative(mountReal, targetReal);
+      if (underMount === "" || (!underMount.startsWith("..") && !isAbsolute(underMount))) {
+        const suffix = underMount.replaceAll("\\", "/");
+        return suffix === "" || suffix === "."
+          ? `mount:${mount.id}/`
+          : `mount:${mount.id}/${suffix}`;
+      }
+    } catch {
+      // Try the next mount.
+    }
+  }
+  return requested;
 }

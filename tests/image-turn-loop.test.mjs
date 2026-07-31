@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import { InMemoryEventStore, applySessionEvent } from "@civaapple/qi-agent/kernel";
-import { TurnLoop } from "@civaapple/qi-agent/loop";
+import { EventWriter, TurnLoop } from "@civaapple/qi-agent/loop";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
 import { parseSessionEvent } from "@civaapple/qi-protocol";
 import { FileArtifactStore, ToolRegistry } from "@civaapple/qi-node/tools";
@@ -138,6 +138,97 @@ test("TurnLoop materializes image Artifacts only at provider boundary and degrad
     assert.equal(model.requests[1].messages.some((message) =>
       message.content.some((part) => part.type === "artifact")
     ), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("interrupted image Runs restore visual attachments for a follow-up continue message", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-image-interrupt-"));
+  const artifactRoot = join(root, "artifacts");
+  await mkdir(artifactRoot, { recursive: true });
+  try {
+    const artifactStore = new FileArtifactStore(artifactRoot);
+    const artifact = await artifactStore.put(png, "image/png");
+    const eventStore = new InMemoryEventStore();
+    const sessionId = "ses_image_interrupt";
+    const runId = "run_image_interrupted";
+    const writer = new EventWriter(eventStore, sessionId);
+    writer.append("session.created", { title: "Interrupted image" }, { kind: "runtime", id: "test" });
+    writer.append("run.triggered", {
+      runId,
+      trigger: "user",
+      input: "[image #1 (1×1)] 查看界面",
+      content: [
+        { type: "text", text: "[image #1 (1×1)] 查看界面" },
+        {
+          type: "image",
+          source: "clipboard",
+          originalArtifactRef: artifact.ref,
+          preparedArtifactRef: artifact.ref,
+          originalMediaType: "image/png",
+          mediaType: "image/png",
+          originalByteLength: png.byteLength,
+          byteLength: png.byteLength,
+          originalWidth: 1,
+          originalHeight: 1,
+          width: 1,
+          height: 1,
+          downsampled: false,
+          formatChanged: false,
+          orientationApplied: false,
+        },
+      ],
+    }, { kind: "user", id: "tester" });
+    writer.append("run.started", { runId }, { kind: "runtime", id: "test" });
+    writer.append("run.cancelled", {
+      runId,
+      reason: "transmission interrupted",
+    }, { kind: "runtime", id: "test" });
+
+    const model = new ScriptedModelPort([
+      [{ type: "text.delta", delta: "resumed with image" }, { type: "completed", finishReason: "stop" }],
+    ], {
+      input: new Set(["text", "image"]),
+      output: new Set(["text"]),
+      contextTokens: 32_000,
+      parallelActions: false,
+      promptCache: false,
+    });
+    const loop = new TurnLoop({
+      eventStore,
+      modelPort: model,
+      toolRegistry: new ToolRegistry(new InMemoryCapabilityBroker()),
+    });
+    await loop.run({
+      sessionId,
+      subject: "agent",
+      input: "继续",
+      model: { provider: "test", model: "vision" },
+      contextBlocks: [],
+      contextBudgetTokens: 8_000,
+      historyBudgetTokens: 4_000,
+      maxSteps: 1,
+      workspaceRoot: root,
+      artifactStore,
+    });
+    const continueRequest = model.requests[0];
+    assert.ok(continueRequest);
+    assert.equal(
+      continueRequest.messages.some((message) =>
+        message.role === "user"
+        && message.content.some((part) =>
+          part.type === "image" && part.uri.startsWith("data:image/png;base64,"))),
+      true,
+      "follow-up must restore the interrupted Run's clipboard image as visual input",
+    );
+    assert.equal(
+      continueRequest.messages.some((message) =>
+        message.role === "assistant"
+        && message.content.some((part) =>
+          part.type === "text" && part.text.includes("qi-interrupted-media-run"))),
+      true,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -10,6 +10,8 @@ import { ToolRegistry } from "@civaapple/qi-node/tools";
 import {
   ImageIngestService,
   createReadImageTool,
+  detectImageInputCandidates,
+  detectImagePathCandidates,
   detectImageUrlCandidates,
   prepareImageBytes,
 } from "@civaapple/qi-node/media";
@@ -155,5 +157,28 @@ test("URL detection preserves order for Markdown, standalone, and extension cand
       "https://example.com/reference",
       "https://static.example/mock.webp?x=1",
     ],
+  );
+});
+
+test("path detection finds Windows absolute, mount, Markdown local, and standalone relative images", () => {
+  const input = [
+    String.raw`C:\Users\alwar\Pictures\qi-notebook\ScreenShot_2026-07-31_133242_600.jpg 检查本地启动的页面`,
+    "![shot](mount:qi-notebook/ui.png)",
+    "docs/assets/hero.webp",
+    "ignore relative/not-standalone.png in prose",
+  ].join("\n");
+  assert.deepEqual(
+    detectImagePathCandidates(input).map((candidate) => candidate.path),
+    [
+      String.raw`C:\Users\alwar\Pictures\qi-notebook\ScreenShot_2026-07-31_133242_600.jpg`,
+      "mount:qi-notebook/ui.png",
+      "docs/assets/hero.webp",
+    ],
+  );
+  assert.deepEqual(
+    detectImageInputCandidates(
+      "https://cdn.example/a.png and C:\\shots\\b.jpg",
+    ).map((candidate) => ("url" in candidate ? candidate.url : candidate.path)),
+    ["https://cdn.example/a.png", String.raw`C:\shots\b.jpg`],
   );
 });

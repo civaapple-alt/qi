@@ -172,6 +172,7 @@ export function commandHelp(commandName?: string, locale: Locale = defaultLocale
     `  Shift+Tab             ${t(locale, "help.shortcut.tab")}`,
     `  Ctrl+O                ${t(locale, "help.shortcut.ctrlo")}`,
     `  Shift+Enter / Ctrl+J  ${t(locale, "help.shortcut.newline")}`,
+    `  Ctrl+V / Alt+V        ${t(locale, "help.shortcut.pasteimage")}`,
     `  Ctrl+C                ${t(locale, "help.shortcut.ctrlc")}`,
     `  Esc                   ${t(locale, "help.shortcut.esc")}`,
     `  ↑ / ↓                 ${t(locale, "help.shortcut.arrows")}`,

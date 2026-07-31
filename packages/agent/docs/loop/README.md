@@ -45,6 +45,7 @@ runtime lifecycles such as ProcessTasks can interleave facts without stale seque
   indeterminate settlement inside a concurrent read batch still denies only candidates strictly after that batch.
 - Steering applies only after the current safe Step boundary.
 - Completed user turns are reconstructed from durable Session events under a separate bounded history budget.
+  Interrupted Runs that carried image attachments are restored for visual continuity on follow-ups.
 - Settled tool exchanges remain complete for their first consumer, then compact deterministically under pressure
   into a causal summary and Artifact-backed `context.compacted` checkpoint.
 - Consecutive same-resource `edit` calls in one Step may use a durable, pre-authority freshness rebase after the

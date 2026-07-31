@@ -246,6 +246,66 @@ test("Responses adapter preserves image order and emits tool-result media as a u
   assert.equal(captured.input[2].content[1].type, "input_image");
 });
 
+test("Responses adapter keeps parallel function_call_output contiguous before tool media", async () => {
+  let captured;
+  const client = {
+    responses: {
+      create(body) {
+        captured = body;
+        return asyncEvents([
+          { type: "response.completed", sequence_number: 1, response: completedResponse() },
+        ]);
+      },
+    },
+  };
+  const imageA = { type: "image", uri: "data:image/png;base64,aaa=", mediaType: "image/png" };
+  const imageB = { type: "image", uri: "data:image/jpeg;base64,bbb=", mediaType: "image/jpeg" };
+  const port = new OpenAIResponsesModelPort(client);
+  for await (const _event of port.stream(request({
+    tools: [],
+    messages: [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", callId: "read_image:0", name: "read_image", input: {} },
+          { type: "tool-call", callId: "read_image:1", name: "read_image", input: {} },
+        ],
+      },
+      {
+        role: "tool",
+        content: [{
+          type: "tool-result",
+          callId: "read_image:0",
+          output: [{ type: "text", text: "a" }, imageA],
+          isError: false,
+        }],
+      },
+      {
+        role: "tool",
+        content: [{
+          type: "tool-result",
+          callId: "read_image:1",
+          output: [{ type: "text", text: "b" }, imageB],
+          isError: false,
+        }],
+      },
+    ],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(
+    captured.input.map((item) => item.type === "message" ? `message:${item.role}` : `${item.type}:${item.call_id ?? ""}`),
+    [
+      "function_call:read_image:0",
+      "function_call:read_image:1",
+      "function_call_output:read_image:0",
+      "function_call_output:read_image:1",
+      "message:user",
+      "message:user",
+    ],
+  );
+});
+
 test("OpenAI adapter rejects unsupported portable inputs before network execution", async () => {
   let called = false;
   const client = {

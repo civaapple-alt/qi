@@ -93,10 +93,12 @@ settled writes without teaching the model to echo or fabricate internal markup. 
 `<qi-run-facts … />` tags are removed from restored narrative and committed model responses. A budget-parked Run is
 restored only when a Step explicitly completed with `finishReason: handoff`; the injected wrapper states that the
 prior Run was paused, not completed. If the model produced no usable handoff, the Loop derives a deterministic
-summary from durable Step/Action/Plan facts. Tool transcripts, failed partial responses, and active Runs otherwise
-remain durable evidence but do not masquerade as conversation. The newest complete
-turns are retained under `historyBudgetTokens`; when the budget is exhausted, older turns are omitted as whole
-pairs so role ordering and causal meaning remain intact. Every omitted Run is exposed in the next
+summary from durable Step/Action/Plan facts. Failed, cancelled, or otherwise parked Runs that carried image
+attachments are an exception: their user media (and a short interruption wrapper) are restored so a follow-up
+such as “继续” still has visual continuity instead of hunting mounts for the same screenshot. Tool transcripts,
+other failed partial responses, and active Runs otherwise remain durable evidence but do not masquerade as
+conversation. The newest complete turns are retained under `historyBudgetTokens`; when the budget is exhausted,
+older turns are omitted as whole pairs so role ordering and causal meaning remain intact. Every omitted Run is exposed in the next
 `context.compiled.omittedBlockIds` as `history:omitted:<runId>` so control surfaces can show when compaction
 actually occurred instead of inferring it from token use.
 

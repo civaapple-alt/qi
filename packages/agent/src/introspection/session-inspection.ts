@@ -242,7 +242,7 @@ export function createQiSessionInspectionTool(
 ) {
   return defineTool({
     description:
-      "Read a bounded projection of Sessions in the current Qi project. Start with runs (displayTitle, Formal Plan binding, write/read Action facts), then inspect problems, the last Step (including modelReasoning), or one explicit Step/Action. Formal Plan, Work Plan, and reasoning fields are diagnostic only — not Evidence. This tool cannot accept a database path or read another project.",
+      "Read a bounded projection of Sessions in the current Qi project. Start with runs (displayTitle, imageAttachments, Formal Plan binding, write/read Action facts), then inspect problems, the last Step (including modelReasoning), or one explicit Step/Action. imageAttachments list source/dimensions/originalArtifactRef for pasted or path/URL images — use read_image with that originalArtifactRef for a closer crop; do not search mounts for a clipboard screenshot. Formal Plan, Work Plan, and reasoning fields are diagnostic only — not Evidence. This tool cannot accept a database path or read another project.",
     input: SessionInspectionInputSchema,
     output: Type.Unknown(),
     effect: () => "read",
@@ -327,6 +327,7 @@ function projectRun(
     ["failed", "denied", "cancelled", "indeterminate"].includes(action.status)
   ).length + run.stepOrder.filter((stepId) => run.steps[stepId]?.finishReason === "error").length;
   const formalPlan = projectFormalPlanMeta(view, run.planBinding);
+  const imageAttachments = projectImageAttachments(run.content);
   const base: Record<string, unknown> = {
     kind: "run",
     runId,
@@ -345,6 +346,10 @@ function projectRun(
     terminalReason: run.terminal?.reason,
     terminalDetail: boundedText(run.terminal?.detail, detailTextLimit, omissions, "textCharacters"),
   };
+  if (imageAttachments.length > 0) {
+    base.imageCount = imageAttachments.length;
+    base.imageAttachments = imageAttachments;
+  }
   if (run.planBinding) base.planBinding = { ...run.planBinding };
   if (detail === "detail") {
     const stepIds = run.stepOrder.slice(-listLimit);
@@ -353,6 +358,27 @@ function projectRun(
     if (formalPlan) base.formalPlan = formalPlan;
   }
   return base;
+}
+
+function projectImageAttachments(
+  content: SessionView["runs"][string]["content"],
+): Array<Record<string, unknown>> {
+  if (!content) return [];
+  return content
+    .filter((part): part is Extract<NonNullable<typeof content>[number], { type: "image" }> =>
+      part.type === "image")
+    .map((image) => ({
+      source: image.source,
+      originalMediaType: image.originalMediaType,
+      mediaType: image.mediaType,
+      originalWidth: image.originalWidth,
+      originalHeight: image.originalHeight,
+      width: image.width,
+      height: image.height,
+      originalArtifactRef: image.originalArtifactRef,
+      preparedArtifactRef: image.preparedArtifactRef,
+      downsampled: image.downsampled,
+    }));
 }
 
 function projectFormalPlanMeta(

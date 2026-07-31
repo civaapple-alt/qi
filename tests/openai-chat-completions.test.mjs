@@ -291,6 +291,70 @@ test("Chat Completions maps ordered image input and tool-result media", async ()
   assert.equal((await port.capabilities({ provider: "kimi", model: "k3" })).input.has("image"), true);
 });
 
+test("Chat Completions keeps parallel tool results contiguous before tool-result media", async () => {
+  let captured;
+  const client = {
+    chat: {
+      completions: {
+        create(body) {
+          captured = body;
+          return asyncEvents([{
+            id: "chatcmpl_parallel_image",
+            choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }],
+          }]);
+        },
+      },
+    },
+  };
+  const port = new OpenAIChatCompletionsModelPort(client, {
+    providerNames: ["kimi"],
+  });
+  const imageA = { type: "image", uri: "data:image/png;base64,aaa=", mediaType: "image/png" };
+  const imageB = { type: "image", uri: "data:image/jpeg;base64,bbb=", mediaType: "image/jpeg" };
+  for await (const _event of port.stream(request({
+    model: { provider: "kimi", model: "k3" },
+    tools: [],
+    messages: [
+      { role: "user", content: [{ type: "text", text: "inspect regions" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", callId: "read_image:0", name: "read_image", input: { region: { x: 0, y: 0, width: 10, height: 10 } } },
+          { type: "tool-call", callId: "read_image:1", name: "read_image", input: { region: { x: 10, y: 10, width: 10, height: 10 } } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [{
+          type: "tool-result",
+          callId: "read_image:0",
+          output: [{ type: "text", text: "crop a" }, imageA],
+          isError: false,
+        }],
+      },
+      {
+        role: "tool",
+        content: [{
+          type: "tool-result",
+          callId: "read_image:1",
+          output: [{ type: "text", text: "crop b" }, imageB],
+          isError: false,
+        }],
+      },
+    ],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(
+    captured.messages.map((message) => message.role),
+    ["user", "assistant", "tool", "tool", "user", "user"],
+  );
+  assert.equal(captured.messages[2].tool_call_id, "read_image:0");
+  assert.equal(captured.messages[3].tool_call_id, "read_image:1");
+  assert.match(captured.messages[4].content[0].text, /read_image:0/);
+  assert.match(captured.messages[5].content[0].text, /read_image:1/);
+});
+
 test("compatible Chat Completions image input is deny-by-default with explicit opt-in", async () => {
   const client = { chat: { completions: { create() { throw new Error("not called"); } } } };
   const denied = new OpenAIChatCompletionsModelPort(client, { providerNames: ["compatible"] });

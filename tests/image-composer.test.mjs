@@ -41,6 +41,30 @@ test("clipboard paste prefers image bytes and falls back to text", async () => {
   assert.deepEqual(fallback, { type: "text", text: "pasted text" });
 });
 
+test("clipboard paste reads an absolute image file path when no bitmap is present", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "qi-clipboard-path-"));
+  const path = join(root, "shot.png");
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  try {
+    await writeFile(path, png);
+    const fromPath = await readClipboardPaste({
+      hasImage: () => false,
+      getImageBinary: async () => [],
+      getText: async () => path,
+    });
+    assert.equal(fromPath.type, "image");
+    assert.deepEqual([...fromPath.bytes], [...png]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("composer preserves multi-image order and detaches deleted or damaged placeholders", () => {
   const first = imagePlaceholder(1, image);
   const secondImage = { ...image, preparedArtifactRef: `artifact://${"c".repeat(64)}` };

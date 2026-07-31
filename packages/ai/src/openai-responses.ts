@@ -173,6 +173,15 @@ export class OpenAIResponsesModelPort implements ModelPort {
 
 function toResponseInput(messages: readonly ModelMessage[]): ResponseInputItem[] {
   const input: ResponseInputItem[] = [];
+  // Keep function_call_output items contiguous for a parallel tool batch; defer synthetic
+  // user media messages until that batch ends (same contract as Chat Completions).
+  const pendingToolMedia: ResponseInputItem[] = [];
+  const flushToolMedia = (): void => {
+    if (pendingToolMedia.length === 0) return;
+    input.push(...pendingToolMedia);
+    pendingToolMedia.length = 0;
+  };
+
   for (const message of messages) {
     let pending: ResponseInputContent[] = [];
     const flush = (): void => {
@@ -180,6 +189,7 @@ function toResponseInput(messages: readonly ModelMessage[]): ResponseInputItem[]
       if (message.role === "tool") {
         throw new TypeError("Tool messages may only contain tool-result parts");
       }
+      flushToolMedia();
       input.push({
         type: "message",
         role: message.role,
@@ -225,7 +235,7 @@ function toResponseInput(messages: readonly ModelMessage[]): ResponseInputItem[]
             output: encodeJson({ ok: !part.isError, output }),
           });
           if (images.length > 0) {
-            input.push({
+            pendingToolMedia.push({
               type: "message",
               role: "user",
               content: [
@@ -242,6 +252,7 @@ function toResponseInput(messages: readonly ModelMessage[]): ResponseInputItem[]
     }
     flush();
   }
+  flushToolMedia();
   return input;
 }
 

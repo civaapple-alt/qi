@@ -82,12 +82,14 @@ content digest (`artifact-store:local:<sha256>`), so distinct content-addressed 
 the capability lease remains bounded by `artifact-store:local:**`. An Artifact reference is not a Workspace file
 mutation or evidence that an implementation task was completed.
 
-Image ingestion supports PNG, JPEG, GIF, and WebP with a 64 MiB source limit and 100 MP decode guard. The default
-prepared view is bounded to a 2000 px longest edge and 3.75 MiB; transparent images stay PNG, JPEG encoding uses
-quality/size ladders, and animated GIF/WebP passes only when already within limits. Both original and prepared
-bytes are content-addressed under the owning Session's `artifacts/`. Public URL reads reuse DNS pinning, private/local denial,
-default ports, redirect/HTTPS policy, cancellation, and timeout rules while retaining a separate image byte
-budget from the 1 MiB text `fetch` Tool.
+Image ingestion supports PNG, JPEG, GIF, and WebP with a 64 MiB source limit and 100 MP decode guard. Sources are
+clipboard bytes, Network-authorized public HTTP(S) URLs, and Workspace/mount file paths (absolute paths under an
+authorized root are rewritten to relative or `mount:<id>/…` before resolution). The default prepared view is
+bounded to a 2000 px longest edge and 3.75 MiB; transparent images stay PNG, JPEG encoding uses quality/size
+ladders, and animated GIF/WebP passes only when already within limits. Both original and prepared bytes are
+content-addressed under the owning Session's `artifacts/`. Public URL reads reuse DNS pinning, private/local
+denial, default ports, redirect/HTTPS policy, cancellation, and timeout rules while retaining a separate image
+byte budget from the 1 MiB text `fetch` Tool.
 
 `SqliteEventStore` keeps a non-persistent, version-checked projection cache for the running process. Normal
 append validates only the new batch and advances that cache inside the existing transaction; restart, version

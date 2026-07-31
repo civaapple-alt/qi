@@ -123,7 +123,11 @@ const ImageArtifactRefSchema = Type.String({ pattern: "^artifact://[a-f0-9]{64}$
 export const RunImagePartSchema = Type.Object(
   {
     type: Type.Literal("image"),
-    source: Type.Union([Type.Literal("clipboard"), Type.Literal("url")]),
+    source: Type.Union([
+      Type.Literal("clipboard"),
+      Type.Literal("url"),
+      Type.Literal("path"),
+    ]),
     originalArtifactRef: ImageArtifactRefSchema,
     preparedArtifactRef: ImageArtifactRefSchema,
     originalMediaType: ImageMediaTypeSchema,

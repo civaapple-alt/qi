@@ -182,12 +182,15 @@ not separate card spacing for every logical line. A compact pixel mark appears b
 Session timeline. Each Run injects at most the Workspace-root `AGENTS.md` (≤64 KiB, non-symlink) as bounded
 workspace instructions; nested `AGENTS.md` files are not auto-loaded.
 
-In a rich TTY, `Ctrl+V` first checks the system clipboard for an image and otherwise inserts clipboard text.
+In a rich TTY, `Ctrl+V` (and `Alt+V` on Windows, where terminals often own `Ctrl+V`) first checks the system
+clipboard for an image — including a copied image file path — and otherwise inserts clipboard text.
 Successful image paste inserts `[image #N (W×H)]`; deleting or changing that exact placeholder detaches the
 image. Multiple text/image parts and queued follow-ups retain their order. Line mode has no clipboard entry but
-recognizes Markdown image URLs, standalone URLs, and embedded URLs with a known image extension. URL ingestion
-requires Network permission and verifies the HTTP media type and magic bytes before preprocessing; a failed
-explicit candidate leaves the editor text intact and blocks submission.
+recognizes Markdown image URLs, standalone URLs, embedded URLs with a known image extension, and local image
+paths (`mount:<id>/…`, Workspace-relative, or absolute paths under the Workspace / authorized mounts). URL
+ingestion requires Network permission; path ingestion requires the file to resolve inside an authorized root.
+Both verify magic bytes before preprocessing; a failed explicit candidate leaves the editor text intact and
+blocks submission.
 
 Image preprocessing defaults can be set globally:
 
