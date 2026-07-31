@@ -40,14 +40,15 @@ capability, host, Workspace, Memory, and Skill blocks. See
 | Mode | Behavior |
 | --- | --- |
 | `Ask` | Read-only Q&A and exploration; no Workspace writes, shell/script/verify, background tasks, or Subagents |
-| `Plan` | Dedicated Planner: read exploration, optional read-only delegation, rich-TTY `ask_question`, and managed `plan_document`; no implementation |
-| `Agent` | Granted implementation tools plus optional `update_plan` Work Todo (never `plan_document` or `ask_question`) |
+| `Plan` | Dedicated Planner: read exploration, optional read-only delegation, rich-TTY `ask_question`, optional `update_plan` Work Todo, and managed `plan_document`; no implementation |
+| `Agent` | Granted implementation tools plus optional `update_plan` Work Todo and rich-TTY `ask_question` (never `plan_document`) |
 
 New Sessions default to `Agent`. A new Formal Plan is self-contained Markdown, not Todo. Accepting its review
 atomically enters Agent and starts one whole-plan implementation Run whose conversation history contains only
 the accepted document; Workspace instructions, permissions, and tools are still compiled normally. Complex
-implementation may use Agent-only `update_plan`; its snapshots appear in the timeline and do not prove
-completion. The TUI displays up to 200 rendered lines of the accepted Formal Plan before the Executor timeline,
+multi-step work in Plan or Agent may use `update_plan` Work Todos (revise/add/drop items, or create a fresh
+plan for a new slice); snapshots appear in the timeline and do not prove completion or Goal evidence. Ask
+never advertises `update_plan`. The TUI displays up to 200 rendered lines of the accepted Formal Plan before the Executor timeline,
 without showing the machine `<accepted-plan>` envelope. Longer plans show a Collapsed notice and their immutable
 local file path instead of an expand control; shorter previews show the same path for direct opening. The
 same bounded preview and path appear before the Plan Review choices, so acceptance never precedes document
@@ -58,13 +59,13 @@ A Plan drafting or revision Run must complete a `write`-effect `plan_document cr
 finish and offer review. `plan_document read` returns the latest Markdown and SHA for editing but cannot publish
 a revision or reopen review.
 
-In a rich TTY, Plan mode advertises `ask_question`. Its blocking panel supports single choice (Enter), multiple
-choice (Space then Enter), custom/free text, Esc to persist a skipped question, and Ctrl+C to cancel the Run.
-Choice questions include `Other…` by default unless the Planner explicitly marks custom input invalid. After
-confirmation, the timeline retains a committed card showing every question and option plus the selected,
-custom-text, or skipped result.
-Non-TTY Plan mode does not advertise the tool, so the Planner prints all missing-information questions for the
-next user turn.
+In a rich TTY, Plan and Agent modes advertise `ask_question`. Its blocking panel supports single choice (Enter),
+multiple choice (Space then Enter), custom/free text, Esc to persist a skipped question, and Ctrl+C to cancel
+the Run. Choice questions include `Other…` by default unless the caller explicitly marks custom input invalid.
+After confirmation, the timeline retains a committed card showing every question and option plus the selected,
+custom-text, or skipped result. When the tool is not advertised (non-TTY), or when freeform is enough, the
+model may print missing-information questions in the assistant reply and stop for the next user turn.
+Ask mode never advertises `ask_question`.
 
 Frequently used commands (default `/help` and autocomplete; aliases remain callable):
 
@@ -163,9 +164,9 @@ when Actions exist; settlement glyphs stay distinct (`✓` / `!` / `⊘` / `?` /
 Consecutive same-Step read-only `read` / `list` / `tree` / `find` / `search` / `git` Actions settle as
 `Explored N actions`; diagnostic, selected, and exceptional groups show every durable child. Write/edit cards use Cursor-style
 `Edited path +N -M`, a `▎` gutter, nearby context, and no `---`/`+++`/`@@` chrome (`… truncated · Ctrl+O`).
-The first Agent `update_plan` call does not require IDs: Qi discards model-supplied provisional Work item IDs,
-assigns stable IDs, and returns them for later snapshots. Failed Todo cards show the rejection code and message
-instead of only an empty progress ratio.
+The first Plan or Agent `update_plan` call does not require IDs: Qi discards model-supplied provisional Work
+item IDs, assigns stable IDs, and returns them for later snapshots. Failed Todo cards show the rejection code
+and message instead of only an empty progress ratio.
 Composer keystrokes and provisional activity refresh only the chrome strip; settled Runs reuse a chat fingerprint
 cache and committed facts apply incrementally. The main timeline retains the current Run plus a density-specific
 recent settled window (`compact` 20, `standard` 12, `diagnostic` 6), capped at 1200 rendered lines; older Runs

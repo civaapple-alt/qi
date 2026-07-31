@@ -47,10 +47,12 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
 - Context omissions are labeled by projected category (for example an omitted history Run) instead of showing
   only an unexplained count.
 - `update_plan`, `ask_question`, process tools (`shell`/`script`/`verify`), and file mutations (`edit`/`write`/
-  `move`/`remove`) use specialized narrative cards; generic JSON Tool result remains available under a details fold.
+  `move`/`remove`) use specialized narrative cards keyed by tool name (not Session mode), so Plan-mode Work Todos
+  and Agent-mode clarification Questions render the same cards; generic JSON Tool result remains under a details
+  fold. Web remains read-only and does not answer in-Run Questions.
 - Contract effect labels distinguish machine-private Artifact writes from Workspace writes. A completed Work Plan
   item without a completed Workspace mutation or verification Action is shown with a warning; Todo state alone is
-  navigation, not mutation evidence.
+  navigation, not mutation or Goal evidence. Contract binds `currentWorkPlanId` (successive Work Plans switch it).
 - Action results, file diffs, and Git workspace-change diffs are diagnostics. They are not called Evidence Ledger
   records unless `evidence.recorded` exists.
 - ProcessTasks are rendered from the Session's durable task projection independently of Run narrative folding;

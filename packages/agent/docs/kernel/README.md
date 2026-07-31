@@ -62,6 +62,8 @@ The stable surface is `applySessionEvent()`, `replaySession()`, projection view 
 `InMemoryEventStore`, domain errors, and the `KERNEL_ASK_MODE_TOOLS` /
 `KERNEL_PLAN_MODE_EXTRA_TOOLS` hard-gate allowlists. The allowlists are exported so cross-package verification can
 prove that Kernel replay and capability policy accept the same Ask/Plan tool names; they do not grant authority.
+`KERNEL_PLAN_MODE_EXTRA_TOOLS` includes Plan-advertised extras (`plan_document`, `ask_question`, `update_plan`,
+`delegate`); Kernel still denies `ask_question` / `update_plan` in Ask and keeps `plan_document` Plan-only.
 
 ## Change guide
 

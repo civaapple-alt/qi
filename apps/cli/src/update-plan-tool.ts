@@ -35,12 +35,15 @@ type WorkPlanInput = Static<typeof WorkPlanInputSchema>;
 export function createUpdatePlanTool(humanControl: HumanControlService) {
   return defineTool({
     description:
-      "Create or update the implementation Work Plan/Todo for a complex Agent task. Use it for cross-package, " +
-      "three-or-more-step, phased migration, or multi-round verification work; skip it for simple tasks. " +
-      "On the first call omit workPlanId and every workItemId; Qi assigns and returns stable IDs. On later calls " +
-      "use only IDs from the last successful output or the Runtime Work Plan navigation context. Omitting " +
-      "workPlanId while supplying known workItemId values continues the Session's current Work Plan. Keep at " +
-      "most one item in_progress. This is navigation, not completion evidence.",
+      "Create or update a Work Plan/Todo to focus multi-step work in Plan or Agent (research, drafting, " +
+      "implementation, or Goal slices). Skip it for simple one-shot tasks. Each call replaces the item list: " +
+      "change status, rewrite step text, add items (omit workItemId), or drop items as reality changes. " +
+      "On the first call omit workPlanId and every workItemId; Qi assigns and returns stable IDs. On later " +
+      "calls use only IDs from the last successful output or the Runtime Work Plan navigation context. " +
+      "Omitting workPlanId while supplying known workItemId values continues the Session's current Work Plan. " +
+      "Omitting workPlanId and every workItemId creates a fresh Work Plan for a new complex slice (common " +
+      "after finishing a prior Todo under a long Goal). Keep at most one item in_progress. This is " +
+      "navigation, not completion or Goal evidence.",
     input: WorkPlanInputSchema,
     output: Type.Object({
       workPlanId: Type.String(),

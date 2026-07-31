@@ -535,18 +535,28 @@ export const KERNEL_ASK_MODE_TOOLS = [
   "memory",
 ] as const;
 
-/** Plan-only tools beyond {@link KERNEL_ASK_MODE_TOOLS}. */
-export const KERNEL_PLAN_MODE_EXTRA_TOOLS = ["plan_document", "ask_question", "delegate"] as const;
+/** Plan-mode extras beyond {@link KERNEL_ASK_MODE_TOOLS} (mirrors capability `PLAN_MODE_EXTRA_TOOLS`). */
+export const KERNEL_PLAN_MODE_EXTRA_TOOLS = [
+  "plan_document",
+  "ask_question",
+  "update_plan",
+  "delegate",
+] as const;
 
 const askTools = new Set<string>(KERNEL_ASK_MODE_TOOLS);
-const planOnlyTools = new Set<string>(KERNEL_PLAN_MODE_EXTRA_TOOLS);
+const planOnlyTools = new Set<string>(["plan_document", "delegate"]);
 
 function assertActionAllowedForMode(run: RunView, toolName: string, effect: ActionView["effect"]): void {
-  if ((toolName === "plan_document" || toolName === "ask_question") && run.mode !== "plan") {
-    fail("MODE_TOOL_DENIED", `${toolName} is only available in Plan mode`);
+  if (toolName === "plan_document" && run.mode !== "plan") {
+    fail("MODE_TOOL_DENIED", "plan_document is only available in Plan mode");
   }
-  if (toolName === "update_plan" && run.mode !== "agent") {
-    fail("MODE_TOOL_DENIED", "update_plan is only available in Agent mode");
+  if (toolName === "ask_question" || toolName === "update_plan") {
+    if (run.mode === "ask") {
+      fail("MODE_TOOL_DENIED", `${toolName} is only available in Plan or Agent mode`);
+    }
+    if (effect !== "read") {
+      fail("MODE_EFFECT_DENIED", `${toolName} must declare read effect`);
+    }
   }
   if (run.mode === "agent") return;
   if (run.mode === "ask") {
@@ -555,12 +565,10 @@ function assertActionAllowedForMode(run: RunView, toolName: string, effect: Acti
     return;
   }
   // plan
+  if (toolName === "ask_question" || toolName === "update_plan") return;
   if (planOnlyTools.has(toolName)) {
     if (toolName === "plan_document" && effect !== "read" && effect !== "write") {
       fail("MODE_EFFECT_DENIED", "plan_document must declare read or write effect");
-    }
-    if (toolName === "ask_question" && effect !== "read") {
-      fail("MODE_EFFECT_DENIED", "ask_question must declare read effect");
     }
     if (toolName === "delegate" && effect !== "read") {
       fail("MODE_EFFECT_DENIED", "delegate must declare read effect");

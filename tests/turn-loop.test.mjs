@@ -1768,6 +1768,122 @@ test("TurnLoop injects unfinished Work Plan navigation and continues current pla
   });
 });
 
+test("TurnLoop injects unfinished Work Plan navigation in Plan mode", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const sessionId = "ses_work_plan_nav_plan";
+    const control = new HumanControlService({ eventStore: store });
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_work_plan_nav_plan",
+      subject: "agent_main",
+      tools: ["update_plan"],
+      effects: ["read"],
+      resources: ["work-plan:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("update_plan", defineTool({
+      description: "test work plan",
+      input: Type.Object({
+        workPlanId: Type.Optional(Type.String()),
+        plan: Type.Array(Type.Object({
+          workItemId: Type.Optional(Type.String()),
+          step: Type.String(),
+          status: Type.Union([
+            Type.Literal("pending"),
+            Type.Literal("in_progress"),
+            Type.Literal("completed"),
+          ]),
+        }, { additionalProperties: false }), { minItems: 1 }),
+      }, { additionalProperties: false }),
+      output: Type.Object({
+        workPlanId: Type.String(),
+        revision: Type.Integer(),
+        plan: Type.Array(Type.Object({
+          workItemId: Type.String(),
+          step: Type.String(),
+          status: Type.String(),
+        }, { additionalProperties: false })),
+      }, { additionalProperties: false }),
+      effect: () => "read",
+      resources: (input) => [`work-plan:${input.workPlanId ?? "new"}`],
+      execute: async (input, context) => {
+        const view = control.recordWorkPlanUpdate(
+          context.sessionId,
+          {
+            runId: context.runId,
+            stepId: context.stepId,
+            actionId: context.actionId,
+          },
+          {
+            ...(input.workPlanId === undefined ? {} : { workPlanId: input.workPlanId }),
+            plan: input.plan.map((item) => ({
+              ...(item.workItemId === undefined ? {} : { workItemId: item.workItemId }),
+              step: item.step,
+              status: item.status,
+            })),
+          },
+        );
+        const workPlanId = input.workPlanId ?? view.currentWorkPlanId;
+        const workPlan = workPlanId ? view.workPlans[workPlanId] : undefined;
+        const revision = workPlan?.latestRevision;
+        const snapshot = revision === undefined ? undefined : workPlan?.revisions[revision];
+        if (!workPlanId || !revision || !snapshot) throw new Error("missing work plan");
+        return { workPlanId, revision, plan: snapshot.items };
+      },
+    }));
+
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call_create_plan_for_plan_mode",
+          name: "update_plan",
+          input: {
+            plan: [
+              { step: "Survey codebase", status: "in_progress" },
+              { step: "Draft Formal Plan", status: "pending" },
+            ],
+          },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [{ type: "text.delta", delta: "Seeded Work Plan." }, { type: "completed", finishReason: "stop" }],
+      (request) => {
+        const nav = request.messages
+          .filter((message) => message.role === "system")
+          .flatMap((message) => message.content)
+          .find((part) => part.type === "text" && part.text.includes("Work Plan navigation"))
+          ?.text;
+        assert.ok(nav);
+        assert.match(nav, /Survey codebase/);
+        return [{ type: "text.delta", delta: "Still researching in Plan." }, { type: "completed", finishReason: "stop" }];
+      },
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+    const first = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      input: "Start research Todo",
+      maxSteps: 4,
+    }));
+    assert.equal(first.status, "completed");
+    assert.ok(first.view.currentWorkPlanId);
+    control.changeMode(sessionId, "plan", "switch for Plan research");
+
+    const second = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      input: "Continue Plan research",
+      mode: "plan",
+      maxSteps: 2,
+    }));
+    assert.equal(second.status, "completed");
+    assert.equal(second.view.runs[second.runId].mode, "plan");
+    const step = second.view.runs[second.runId].steps[second.view.runs[second.runId].stepOrder[0]];
+    assert.equal(step.context.includedBlockIds.includes("work-plan:current"), true);
+  });
+});
+
 test("HumanControlService continues current Work Plan when workPlanId is omitted with known workItemIds", () => {
   const store = new InMemoryEventStore();
   const sessionId = createId("ses");

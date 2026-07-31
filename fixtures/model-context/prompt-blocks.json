@@ -10,7 +10,7 @@
   ],
   "plan": [
     { "id": "constitution:core", "role": "system", "required": true, "priority": 100, "contentSha256": "76ec95f11af34b37640610b2cb86793f85b373e9d69316d92bb835e220824e81" },
-    { "id": "mode:plan", "role": "system", "required": true, "priority": 100, "contentSha256": "55ffdc7bb424cd2a3052a8219e1dccb92abb02806fcf70badca0f92401b1220e" },
+    { "id": "mode:plan", "role": "system", "required": true, "priority": 100, "contentSha256": "7fa7cb5b4607baa3627d20e6c799e1e94364cff3bac155259aa459e23bee3ff7" },
     { "id": "capabilities", "role": "system", "required": true, "priority": 99, "contentSha256": "5acc8b03590f710a1f39d1ced535db52c41ce2244d34e68ca973d0511f6f27dd" },
     { "id": "host:environment", "role": "system", "required": true, "priority": 98, "contentSha256": "42198fac6662ce53bbd230a907b528a2160464f39c6808e5c90e87e1920b06ea" },
     { "id": "workspace:AGENTS.md", "role": "user", "required": true, "priority": 90, "contentSha256": "a0dc0cf6e9f4c1d85fd4c76d9467b3b0066c46eb36250c939301f930ec35f5a2" },
@@ -19,7 +19,7 @@
   ],
   "agent": [
     { "id": "constitution:core", "role": "system", "required": true, "priority": 100, "contentSha256": "76ec95f11af34b37640610b2cb86793f85b373e9d69316d92bb835e220824e81" },
-    { "id": "mode:agent", "role": "system", "required": true, "priority": 100, "contentSha256": "c324053f67309ec8cd4975a2e7fb91ad58b363f09de7a1f831ea7672a42a2263" },
+    { "id": "mode:agent", "role": "system", "required": true, "priority": 100, "contentSha256": "14d942a6d99d0844d32e7e2e32c7403a8a79213e6abd74b5ee4bc83fbaba2649" },
     { "id": "capabilities", "role": "system", "required": true, "priority": 99, "contentSha256": "fa98407138ca344a6c31911ffc3e995871cc89a3cff56d4e2aa5dfd4c86258ae" },
     { "id": "host:environment", "role": "system", "required": true, "priority": 98, "contentSha256": "42198fac6662ce53bbd230a907b528a2160464f39c6808e5c90e87e1920b06ea" },
     { "id": "workspace:AGENTS.md", "role": "user", "required": true, "priority": 90, "contentSha256": "a0dc0cf6e9f4c1d85fd4c76d9467b3b0066c46eb36250c939301f930ec35f5a2" },

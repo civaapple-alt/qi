@@ -76,7 +76,8 @@ never fall back to full output.
   persistence and Work Plan updates are private/runtime state, not project-file evidence. These detailed counts
   are available through explicit inspection; automatic Runtime-owned restored-history context exposes only a
   coarse write settlement class and no durable IDs or counts.
-- Session / Run `workPlan` — Agent `update_plan` snapshot; Action detail may include `workPlanItems`.
+- Session / Run `workPlan` — Plan or Agent `update_plan` snapshot (`currentWorkPlanId`); Action detail may
+  include `workPlanItems`. Ask mode never authors Work Plans.
 - Step `modelReasoning` — Thinking text; intent only, never proof of execution.
 - Action `gitWorkspaceChange` / `diffKind` / `process` — distinguish file-tool diffs from Git fingerprint changes
   and process exit summaries.

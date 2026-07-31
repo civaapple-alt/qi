@@ -2141,7 +2141,7 @@ function createWorkPlanNavigationBlock(
   view: SessionView | undefined,
   mode: SessionMode,
 ): ContextBlock | undefined {
-  if (mode !== "agent" || !view?.currentWorkPlanId) return undefined;
+  if ((mode !== "agent" && mode !== "plan") || !view?.currentWorkPlanId) return undefined;
   const workPlanId = view.currentWorkPlanId;
   const plan = view.workPlans[workPlanId];
   const revision = plan?.revisions[plan.latestRevision];

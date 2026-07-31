@@ -144,8 +144,12 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 - Mode narrows authority; it never creates authority.
 - A Formal Plan is a self-contained, immutable-revision Markdown design for a fresh Executor. It is not a Todo
   list and carries no mutable implementation status.
-- Plan-mode clarification Questions, approval outcomes, Plan review, and legacy next-Run choices are durable
-  facts. An active-Run Question is linked to its Run/Step/Action and must settle before that Action or Run.
+- Clarification Questions via in-Run `ask_question` are available in Plan and Agent (not Ask). Asking narrows
+  nothing about write/execute authority; mode still only narrows leases. Freeform assistant prose that ends the
+  Turn and waits for the next user input remains an equally valid clarification channel when the tool is not
+  advertised. Approval outcomes, Plan review, and legacy next-Run choices stay durable Session-control facts.
+  An active-Run Question is linked to its Run/Step/Action and must settle before that Action or Run.
+  `plan_document` and Formal Plan drafting remain Plan-only.
 - Choice Questions allow a custom-text `Other` answer by default unless the caller explicitly disables it.
   Committed Question input and output preserve every prompt, option, selected option ID, custom answer, and skip
   result so replay can render the confirmed interaction without relying on transient panel state.
@@ -160,8 +164,12 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
   complete a `write`-effect `plan_document create/edit` Action that records a new immutable revision in that Run.
   `plan_document read` supplies current Markdown and SHA for a later edit, but never satisfies the drafting
   completion gate or creates a new review.
-- Complex Agent work may create a separate Work Plan through `update_plan`. Work Plan status is navigation only,
-  never completion evidence, and does not schedule Runs.
+- Complex multi-step work in Plan or Agent (not Ask) may use `update_plan` Work Plans for focus. Work Plan
+  status is navigation only, never completion evidence, and does not schedule Runs. A revision is a full item
+  snapshot: status, rewritten step text, added items, or dropped items as the work evolves. After a slice
+  finishes (or the problem changes), omitting `workPlanId` and every `workItemId` creates a fresh Work Plan;
+  long Goals commonly need successive plans. Formal Plan (`plan_document`) remains a separate Plan-only design
+  artifact and is never a Todo list.
 - Qi assigns Work Plan and Work item IDs on first creation. Omitting `workPlanId` with no `workItemId` values
   creates a new plan. Omitting `workPlanId` while supplying only `workItemId` values that belong to
   `currentWorkPlanId` continues that plan. Later updates may use only IDs returned by a successful prior
@@ -592,10 +600,10 @@ replaying tool transcripts or Runtime telemetry would violate ADR-0024/0026.
 - When the history budget drops whole earlier turns, a Runtime ContextBlock may state only
   `olderTurnsOmitted=<N>` and point to explicit `qi_session_inspect` (`recovery` preferred). It must not list
   omitted Run IDs in model text; compile metadata may still record `history:omitted:<runId>` for operators.
-- Agent Runs may receive a Runtime Work Plan navigation ContextBlock when `currentWorkPlanId` has unfinished
-  items: allowlisted `workPlanId`, `revision`, and per-item `workItemId` / `step` / `status`, with an explicit
-  navigation-not-evidence disclaimer. Work Plan IDs are model-authored handles required to continue `update_plan`,
-  not Runtime lifecycle telemetry.
+- Plan and Agent Runs may receive a Runtime Work Plan navigation ContextBlock when `currentWorkPlanId` has
+  unfinished items: allowlisted `workPlanId`, `revision`, and per-item `workItemId` / `step` / `status`, with an
+  explicit navigation-not-evidence disclaimer. Ask Runs never receive it. Work Plan IDs are model-authored
+  handles required to continue `update_plan`, not Runtime lifecycle telemetry.
 - Formal Plan acceptance still starts an Executor with `historyBudgetTokens: 0` and the accepted Markdown
   envelope only. Planning conversation remains isolated (ADR-0011).
 - Host environment, mode, skills, AGENTS.md, and memory ContextBlocks continue to regenerate each Run; prior

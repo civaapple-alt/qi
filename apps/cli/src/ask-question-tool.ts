@@ -99,7 +99,7 @@ export function createAskQuestionTool(
 ): import("@civaapple/qi-node/tools").AnyToolDefinition {
   return defineTool({
     description:
-      "Ask the user 1–3 blocking clarification questions during this Plan Run. Supports single choice, " +
+      "Ask the user 1–3 blocking clarification questions during this Plan or Agent Run. Supports single choice, " +
       "multiple choice, free text, custom text, and explicit skipping. Choice questions allow an Other input " +
       "by default; set allowText=false only when custom input would be invalid. Execution resumes in this Run.",
     input: AskQuestionInputSchema,

@@ -138,18 +138,23 @@ revision and reopens review. A drafting Run cannot finish on `plan_document read
 `write`-effect create/edit Action in that Run, otherwise the Loop asks for the missing mutation or parks for
 review without claiming a new revision.
 
-Rich TTY Plan Runs may block on `ask_question`. Its panel supports single/multiple/text/custom answers, Esc skip
-per question, and Ctrl+C Run cancellation; choice questions expose `Other…` unless `allowText: false` is
-explicitly supplied. The answer resumes the same Action and Run, and its committed timeline card keeps all
-questions/options visible with selected, custom-text, and skipped results. Non-TTY omits this tool, so the
-Planner emits a normal next-turn question list. Legacy item plans alone retain the Next Run panel and `/next`.
-`/work` and `/todo` are intentionally absent; Work Todo snapshots live in the conversation timeline.
+Rich TTY Plan and Agent Runs may block on `ask_question`. Its panel supports single/multiple/text/custom
+answers, Esc skip per question, and Ctrl+C Run cancellation; choice questions expose `Other…` unless
+`allowText: false` is explicitly supplied. The answer resumes the same Action and Run, and its committed
+timeline card keeps all questions/options visible with selected, custom-text, and skipped results. Non-TTY
+omits this tool, so the model emits a normal next-turn question list (freeform clarification). Ask mode never
+advertises `ask_question`. Legacy item plans alone retain the Next Run panel and `/next`.
+`/work` and `/todo` are intentionally absent; Work Todo snapshots live in the conversation timeline. Plan and
+Agent may call `update_plan` for multi-step focus (research, drafting, execution, Goal slices); Ask never does.
+Snapshots may revise status and step text, add or drop items, or create a fresh Work Plan after a prior Todo
+finishes. Work Plans remain navigation only—not Formal Plans or Goal evidence.
 
-Session-local 追寻 (`/goal`) binds Goal-continuation Runs in the current Session mode. `ask_question` remains
-Plan-only, so typical Agent-mode Goal Continues do not advertise it. Hub **Accept with evidence…** records
-human evidence with an optional note (empty is allowed); **Re-evaluate…** requires rationale only for
-`fail` / `unknown`. Accept/pass may leave the Goal open when the Evidence Ledger still has gaps.
-**Continue with guidance…** also allows an empty form (continues from the Goal objective).
+Session-local 追寻 (`/goal`) binds Goal-continuation Runs in the current Session mode. Typical Agent-mode Goal
+Continues may clarify via `ask_question` (rich TTY) or freeform assistant questions that stop for the next
+user turn, and may use successive Work Todos for focus without treating them as Evidence Ledger records. Hub
+**Accept with evidence…** records human evidence with an optional note (empty is allowed); **Re-evaluate…**
+requires rationale only for `fail` / `unknown`. Accept/pass may leave the Goal open when the Evidence Ledger
+still has gaps. **Continue with guidance…** also allows an empty form (continues from the Goal objective).
 
 ## Tool rendering
 
@@ -172,12 +177,13 @@ every column useful, the renderer switches to a per-row vertical field layout so
   durable Action card / Artifact reference.
 - `plan_document`: create/read/edit card for a complete Formal Plan; SHA-checked edits publish immutable
   `plans/<planId>/<sha256>.md` revisions. Durable truth remains under `/plan`.
-- `update_plan`: Codex-style Todo snapshot with stable Work item IDs and at most one `in_progress`. Timeline cards
-  keep the full ✔/◐/○ item list in the chat stream (including mid-Run collapsed Steps), with a
-  `Working on N to-dos · M/N done` header — not a sticky footer. It is implementation navigation, not completion
-  evidence. On create, Qi assigns the Work Plan and Work item IDs even if the model supplied provisional item IDs;
-  later calls use only IDs returned by a successful snapshot. Failed cards retain the rejection code and
-  actionable message.
+- `update_plan`: Codex-style Todo snapshot (Plan or Agent) with stable Work item IDs and at most one
+  `in_progress`. Timeline cards keep the full ✔/◐/○ item list in the chat stream (including mid-Run collapsed
+  Steps), with a `Working on N to-dos · M/N done` header — not a sticky footer. Each snapshot may change status,
+  rewrite steps, add or drop items, or start a new Work Plan for a later complex slice. It is navigation, not
+  completion or Goal evidence. On create, Qi assigns the Work Plan and Work item IDs even if the model supplied
+  provisional item IDs; later calls use only IDs returned by a successful snapshot. Failed cards retain the
+  rejection code and actionable message.
 - Consecutive same-Step read-only discovery Actions (`read/list/tree/find/search/git`) settle as
   `Explored N actions`. Expansion and the History Center preserve every durable child. Any failed, denied,
   cancelled, or indeterminate child expands the group automatically.

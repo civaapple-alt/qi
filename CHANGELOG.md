@@ -33,6 +33,13 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- Plan and Agent (rich TTY) may use in-Run `ask_question`; Ask mode still omits it. Agent mode guidance treats
+  structured cards and freeform assistant questions that stop for the next user turn as equally valid
+  clarification. `plan_document` remains Plan-only. See ADR-0011.
+- Plan and Agent may use `update_plan` Work Todos for multi-step focus (research, drafting, execution, Goal
+  slices); Ask still omits it. Snapshots may revise/add/drop items or create a fresh Work Plan for a new slice;
+  unfinished Work Plan navigation ContextBlocks inject for Plan and Agent. Work Plans remain navigation only,
+  never Goal evidence. See ADR-0011 / ADR-0032.
 - `/sessions` shows fewer entries by default (about 3–5, capped at 5) so the multi-line Session cards
   no longer fill a typical TUI height; ↑↓ still scrolls the full list.
 - `max_steps` range is now 8–1000 (was 8–100). `/max-steps` and Settings presets are
@@ -70,7 +77,7 @@ backup plus reset or a new data root rather than an automatic migration.
 - Consecutive Session Runs restore interrupted (`failed` / `cancelled` / non-budget `parked`) final assistant
   narrative in `<qi-interrupted-run>` (media still prefers `<qi-interrupted-media-run>`), surface
   `olderTurnsOmitted=<N>` when history budget drops earlier turns, and inject an unfinished Work Plan
-  navigation ContextBlock for Agent Runs. `update_plan` omitting `workPlanId` while supplying known
+  navigation ContextBlock for Plan and Agent Runs. `update_plan` omitting `workPlanId` while supplying known
   `workItemId` values continues `currentWorkPlanId`. Formal Plan executors remain `historyBudgetTokens: 0`.
   See ADR-0032.
 - `qi_session_inspect` guidance now treats restored conversation history as the default continue path and
@@ -130,6 +137,12 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Documentation
 
+- CLI and agent docs: Plan/Agent clarification via `ask_question` or freeform next-turn questions; Ask still
+  omits the tool; Goal Continues inherit Session mode (ADR-0011).
+- CLI and agent docs: Plan/Agent Work Todo (`update_plan`) for focus across research and Goal slices; successive
+  plans and item revise/add/drop; still not Formal Plan or Evidence Ledger (ADR-0011 / ADR-0032 / ADR-0033).
+- Web README and analyze-qi-session skill: Work Todo / ask_question cards are tool-keyed (Plan or Agent); Web
+  stays read-only for in-Run Questions.
 - CLI interaction-model / README and TUI README document `max_actions_per_step`, `/model` max output tokens
   (`output_reserve_tokens`), compact `/sessions`, Goal Accept optional notes, and length-truncated Thinking
   display bounds.

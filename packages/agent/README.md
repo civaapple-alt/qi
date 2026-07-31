@@ -43,8 +43,8 @@ explanatory model output, not completion evidence.
 Restored cross-Run conversation keeps assistant narrative separate from Runtime truth. Automatic model context
 receives restored final narratives (completed, budget handoff, interrupted wrappers), a local turn ordinal with
 coarse write settlement class, an omission count when history is truncated, and an unfinished Work Plan
-navigation snapshot when present. Run/Action telemetry, tool payloads, and exact settlement counters still
-require explicit bounded introspection. See
+navigation snapshot when present on Plan or Agent Runs. Run/Action telemetry, tool payloads, and exact
+settlement counters still require explicit bounded introspection. See
 [ADR 0026](../../design/decisions.md#adr-0026-treat-runtime-to-model-disclosure-as-a-least-information-boundary)
 and
 [ADR 0032](../../design/decisions.md#adr-0032-bound-automatic-disclosure-for-consecutive-session-runs).
@@ -53,10 +53,13 @@ Formal Plans, Work Plans, and Questions are separate state machines. A Formal Pl
 Markdown; acceptance starts one whole-plan Agent Run with empty conversation history (`historyBudgetTokens: 0`)
 so the Executor sees only the accepted document. A drafting Run requires a completed `write`-effect
 `plan_document create/edit` Action that records a new revision; reading the current document and SHA cannot
-satisfy that completion gate. `update_plan` snapshots are optional implementation Todo navigation and never
-completion evidence. Qi assigns Work Plan/Work item IDs on create; omitting `workPlanId` while supplying known
-`workItemId` values continues `currentWorkPlanId`. `run.question.*` can suspend and resume a read/control Action
-inside the same Plan Run, while legacy `control.question.*` remains the between-Run compatibility path.
+satisfy that completion gate. `update_plan` snapshots are optional Work Todo navigation in Plan or Agent (not
+Ask) and never completion or Goal evidence; revisions may add, drop, or rewrite items, and a Session may create
+successive Work Plans. Qi assigns Work Plan/Work item IDs on create; omitting `workPlanId` while supplying known
+`workItemId` values continues `currentWorkPlanId`. `run.question.*` can suspend and resume a read/control
+`ask_question` Action inside the same Plan or Agent Run, while legacy `control.question.*` remains the
+between-Run compatibility path. Ask mode never allows `ask_question` or `update_plan`; `plan_document` stays
+Plan-only.
 
 `qi-agent` does not depend on `qi-node`, `qi-tui`, or an application. Node filesystem, process, database,
 credential-file, network, and package-acquisition implementations stay behind ports.

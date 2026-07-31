@@ -253,6 +253,7 @@ function modeGuidance(mode: SessionMode, capabilities: ModelContextCapabilities)
         ? "Use only serial depth-1 read-only delegation when it materially reduces parent context. "
         : "") +
       "Ask only material questions with ask_question when advertised, otherwise return them for the next user turn. " +
+      "For multi-step research or drafting, use update_plan as a focus Todo: revise items and status as facts change, add or drop steps, and create a fresh Work Plan when the slice changes; it is navigation only and never a Formal Plan or completion evidence. " +
       "When sufficient, create or freshness-edit one self-contained Formal Plan with executor background, numbered implementation steps, dependencies, conditional branches, interface impact, verification, and necessary assumptions. " +
       "For executor background, defer host-execution detail to this Run's host:environment facts: shell is direct argv-only spawn; script uses probed pwsh/cmd/bash profiles. Never collapse an argv-only shell limit into a claim that an available script profile is disabled. " +
       "Do not edit Workspace business files, execute host commands, verify implementation, or claim execution began. The accepted Executor receives the Plan but not this planning conversation."
@@ -266,7 +267,8 @@ function modeGuidance(mode: SessionMode, capabilities: ModelContextCapabilities)
     "For diagnosis, determine and explain the cause; implement a fix only when requested. For change/build work, implement within granted tools and verify proportionately. For monitoring, use only an authorized bounded lifecycle. " +
     writeGuidance +
     "Workspace changes require mutation Tool evidence from this Run; Artifacts are machine-private and do not change the Workspace. " +
-    "Use update_plan only for cross-package, phased, or otherwise multi-step implementation, keep at most one item in progress, and remember that a Work Plan is navigation rather than completion evidence. Do not call plan_document."
+    "When a material user choice or constraint is missing, ask before forging ahead: use ask_question when advertised, otherwise put the questions in the assistant reply and stop for the next user turn. " +
+    "For multi-step work (including Goal slices), use update_plan to stay focused: revise status and step text, add or drop items as reality changes, keep at most one item in progress, and create a fresh Work Plan when starting a new complex slice after finishing a prior Todo. A Work Plan is navigation only—never completion or Goal evidence. Do not call plan_document."
   );
 }
 

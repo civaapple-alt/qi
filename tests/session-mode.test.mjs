@@ -49,6 +49,179 @@ test("legacy Sessions without mode replay as agent", () => {
   assert.equal(view.runs.run_legacy_001.mode, "agent");
 });
 
+test("Agent mode allows ask_question read Actions at the Kernel boundary", () => {
+  const sessionId = "ses_agent_askq_001";
+  const store = new InMemoryEventStore();
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { mode: "agent" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "run.triggered",
+    { runId: "run_agent_askq_001", trigger: "user", mode: "agent", input: "clarify" },
+    { kind: "user", id: "u" },
+  );
+  writer.append("run.started", { runId: "run_agent_askq_001" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "step.started",
+    { runId: "run_agent_askq_001", stepId: "stp_agent_askq_001" },
+    { kind: "runtime", id: "test" },
+  );
+  writer.append(
+    "action.proposed",
+    {
+      runId: "run_agent_askq_001",
+      stepId: "stp_agent_askq_001",
+      actionId: "act_agent_askq_001",
+      toolName: "ask_question",
+      toolIdentity: "ask_question@1",
+      input: { questions: [] },
+      effect: "read",
+      resources: ["run-question:user"],
+    },
+    { kind: "agent", id: "agent" },
+  );
+  const view = store.load(sessionId);
+  assert.equal(view?.runs.run_agent_askq_001?.actions.act_agent_askq_001?.status, "proposed");
+});
+
+test("Agent mode denies non-read ask_question at the Kernel boundary", () => {
+  const sessionId = "ses_agent_askq_effect_001";
+  const store = new InMemoryEventStore();
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { mode: "agent" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "run.triggered",
+    { runId: "run_agent_askq_effect_001", trigger: "user", mode: "agent", input: "clarify" },
+    { kind: "user", id: "u" },
+  );
+  writer.append("run.started", { runId: "run_agent_askq_effect_001" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "step.started",
+    { runId: "run_agent_askq_effect_001", stepId: "stp_agent_askq_effect_001" },
+    { kind: "runtime", id: "test" },
+  );
+  assert.throws(
+    () => writer.append(
+      "action.proposed",
+      {
+        runId: "run_agent_askq_effect_001",
+        stepId: "stp_agent_askq_effect_001",
+        actionId: "act_agent_askq_effect_001",
+        toolName: "ask_question",
+        toolIdentity: "ask_question@1",
+        input: { questions: [] },
+        effect: "write",
+        resources: ["run-question:user"],
+      },
+      { kind: "agent", id: "agent" },
+    ),
+    (error) => error instanceof StateTransitionError && error.code === "MODE_EFFECT_DENIED",
+  );
+});
+
+test("Plan mode allows update_plan read Actions at the Kernel boundary", () => {
+  const sessionId = "ses_plan_upd_001";
+  const store = new InMemoryEventStore();
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { mode: "plan" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "run.triggered",
+    { runId: "run_plan_upd_001", trigger: "user", mode: "plan", input: "research" },
+    { kind: "user", id: "u" },
+  );
+  writer.append("run.started", { runId: "run_plan_upd_001" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "step.started",
+    { runId: "run_plan_upd_001", stepId: "stp_plan_upd_001" },
+    { kind: "runtime", id: "test" },
+  );
+  writer.append(
+    "action.proposed",
+    {
+      runId: "run_plan_upd_001",
+      stepId: "stp_plan_upd_001",
+      actionId: "act_plan_upd_001",
+      toolName: "update_plan",
+      toolIdentity: "update_plan@1",
+      input: { plan: [] },
+      effect: "read",
+      resources: ["work-plan:new"],
+    },
+    { kind: "agent", id: "agent" },
+  );
+  const view = store.load(sessionId);
+  assert.equal(view?.runs.run_plan_upd_001?.actions.act_plan_upd_001?.status, "proposed");
+});
+
+test("Ask mode denies update_plan at the Kernel boundary", () => {
+  const sessionId = "ses_ask_upd_001";
+  const store = new InMemoryEventStore();
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { mode: "ask" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "run.triggered",
+    { runId: "run_ask_upd_001", trigger: "user", mode: "ask", input: "todo" },
+    { kind: "user", id: "u" },
+  );
+  writer.append("run.started", { runId: "run_ask_upd_001" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "step.started",
+    { runId: "run_ask_upd_001", stepId: "stp_ask_upd_001" },
+    { kind: "runtime", id: "test" },
+  );
+  assert.throws(
+    () => writer.append(
+      "action.proposed",
+      {
+        runId: "run_ask_upd_001",
+        stepId: "stp_ask_upd_001",
+        actionId: "act_ask_upd_001",
+        toolName: "update_plan",
+        toolIdentity: "update_plan@1",
+        input: { plan: [] },
+        effect: "read",
+        resources: ["work-plan:new"],
+      },
+      { kind: "agent", id: "agent" },
+    ),
+    (error) => error instanceof StateTransitionError && error.code === "MODE_TOOL_DENIED",
+  );
+});
+
+test("Ask mode denies ask_question at the Kernel boundary", () => {
+  const sessionId = "ses_ask_askq_001";
+  const store = new InMemoryEventStore();
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { mode: "ask" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "run.triggered",
+    { runId: "run_ask_askq_001", trigger: "user", mode: "ask", input: "clarify" },
+    { kind: "user", id: "u" },
+  );
+  writer.append("run.started", { runId: "run_ask_askq_001" }, { kind: "runtime", id: "test" });
+  writer.append(
+    "step.started",
+    { runId: "run_ask_askq_001", stepId: "stp_ask_askq_001" },
+    { kind: "runtime", id: "test" },
+  );
+  assert.throws(
+    () => writer.append(
+      "action.proposed",
+      {
+        runId: "run_ask_askq_001",
+        stepId: "stp_ask_askq_001",
+        actionId: "act_ask_askq_001",
+        toolName: "ask_question",
+        toolIdentity: "ask_question@1",
+        input: { questions: [] },
+        effect: "read",
+        resources: ["run-question:user"],
+      },
+      { kind: "agent", id: "agent" },
+    ),
+    (error) => error instanceof StateTransitionError && error.code === "MODE_TOOL_DENIED",
+  );
+});
+
 test("Ask mode denies write Actions at the Kernel boundary", () => {
   const sessionId = "ses_ask_mode_001";
   const store = new InMemoryEventStore();
@@ -634,17 +807,26 @@ test("Formal Plan acceptance starts one whole-plan Run and never creates a next-
   assert.equal(store.load(sessionId)?.runOrder.length, 1);
 });
 
-test("toolsForMode never advertises plan_document outside Plan", () => {
+test("toolsForMode advertises ask_question and update_plan in Plan and Agent, never plan_document outside Plan", () => {
   const registered = ["read", "write", "plan_document", "ask_question", "update_plan", "delegate", "shell"];
   assert.deepEqual(toolsForMode("ask", registered), ["read"]);
   assert.deepEqual(
     toolsForMode("plan", registered).sort(),
-    ["ask_question", "delegate", "plan_document", "read"].sort(),
+    ["ask_question", "delegate", "plan_document", "read", "update_plan"].sort(),
   );
   assert.deepEqual(
     toolsForMode("agent", registered).sort(),
-    ["delegate", "read", "shell", "update_plan", "write"].sort(),
+    ["ask_question", "delegate", "read", "shell", "update_plan", "write"].sort(),
   );
+  assert.equal(modeAllowsIntent("ask", "ask_question", "read").ok, false);
+  assert.equal(modeAllowsIntent("ask", "update_plan", "read").ok, false);
+  assert.equal(modeAllowsIntent("plan", "ask_question", "read").ok, true);
+  assert.equal(modeAllowsIntent("plan", "update_plan", "read").ok, true);
+  assert.equal(modeAllowsIntent("agent", "ask_question", "read").ok, true);
+  assert.equal(modeAllowsIntent("agent", "update_plan", "read").ok, true);
+  assert.equal(modeAllowsIntent("agent", "ask_question", "write").ok, false);
+  assert.equal(modeAllowsIntent("agent", "update_plan", "write").ok, false);
+  assert.equal(modeAllowsIntent("agent", "plan_document", "write").ok, false);
 });
 
 test("capability broker denies tools that the frozen Run mode forbids", async () => {

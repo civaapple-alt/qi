@@ -15,13 +15,19 @@ const askTools = new Set([
   "qi_session_inspect",
   "memory",
 ]);
-const planExtraTools = new Set(["plan_document", "ask_question", "delegate"]);
+/** Plan-only tools beyond Ask (Formal Plan + read-only research delegation). */
+const planOnlyExtraTools = new Set(["plan_document", "delegate"]);
+/** Clarification and Work Todo tools advertised in Plan and Agent when registered (not Ask). */
+const planAndAgentExtraTools = new Set(["ask_question", "update_plan"]);
 
 /** Tools Ask mode may advertise (registry intersection still applies). */
 export const ASK_MODE_TOOLS: readonly string[] = [...askTools];
 
 /** Tools Plan mode may advertise beyond Ask. */
-export const PLAN_MODE_EXTRA_TOOLS: readonly string[] = [...planExtraTools];
+export const PLAN_MODE_EXTRA_TOOLS: readonly string[] = [
+  ...planOnlyExtraTools,
+  ...planAndAgentExtraTools,
+];
 
 export function toolsForMode(mode: SessionMode, registered: readonly string[]): string[] {
   const available = new Set(registered);
@@ -29,17 +35,17 @@ export function toolsForMode(mode: SessionMode, registered: readonly string[]): 
   if (mode === "plan") {
     return [...ASK_MODE_TOOLS, ...PLAN_MODE_EXTRA_TOOLS].filter((name) => available.has(name));
   }
-  return registered.filter(
-    (name) => name !== "plan_document" && name !== "ask_question" && available.has(name),
-  );
+  return registered.filter((name) => name !== "plan_document" && available.has(name));
 }
 
 export function isToolAllowedInMode(mode: SessionMode, toolName: string): boolean {
-  if (toolName === "plan_document" || toolName === "ask_question") return mode === "plan";
-  if (toolName === "update_plan") return mode === "agent";
+  if (toolName === "plan_document") return mode === "plan";
+  if (toolName === "ask_question" || toolName === "update_plan") {
+    return mode === "plan" || mode === "agent";
+  }
   if (mode === "agent") return true;
   if (askTools.has(toolName)) return true;
-  return mode === "plan" && planExtraTools.has(toolName);
+  return mode === "plan" && planOnlyExtraTools.has(toolName);
 }
 
 /** Mode may only narrow launch leases; never invent authority. */
@@ -48,9 +54,15 @@ export function modeAllowsIntent(
   tool: string,
   effect: Effect,
 ): { ok: true } | { ok: false; reason: string } {
+  if (tool === "ask_question" && effect !== "read") {
+    return { ok: false, reason: "ask_question must declare read effect" };
+  }
+  if (tool === "update_plan" && effect !== "read") {
+    return { ok: false, reason: "update_plan must declare read effect" };
+  }
   if (mode === undefined || mode === "agent") {
-    if (tool === "plan_document" || tool === "ask_question") {
-      return { ok: false, reason: `${tool} is only available in Plan mode` };
+    if (tool === "plan_document") {
+      return { ok: false, reason: "plan_document is only available in Plan mode" };
     }
     return { ok: true };
   }
@@ -63,9 +75,6 @@ export function modeAllowsIntent(
   if (mode === "plan") {
     if (tool === "plan_document" && effect !== "read" && effect !== "write") {
       return { ok: false, reason: "plan_document must declare read or write effect" };
-    }
-    if (tool === "ask_question" && effect !== "read") {
-      return { ok: false, reason: "ask_question must declare read effect" };
     }
     if (tool === "delegate" && effect !== "read") {
       return { ok: false, reason: "delegate must declare read effect" };

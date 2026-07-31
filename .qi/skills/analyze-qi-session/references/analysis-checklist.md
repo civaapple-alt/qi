@@ -33,9 +33,9 @@ Accepted Formal Plan Runs bind `planBinding` and surface as `Accepted Plan · {t
 
 ### Formal Plan vs Work Plan
 
-A Formal Plan is the reviewed Markdown document (immutable path/revision). A Work Plan is the Agent-only
-`update_plan` Todo snapshot. Do not conflate Plan Review acceptance with Work Plan progress, and do not treat Todo
-status as proof that `edit`/`write` ran.
+A Formal Plan is the reviewed Markdown document (immutable path/revision). A Work Plan is the Plan or Agent
+`update_plan` Todo snapshot (not Ask). Do not conflate Plan Review acceptance with Work Plan progress, and do
+not treat Todo status as proof that `edit`/`write` ran or as Goal Evidence Ledger records.
 
 ### Thinking is not Evidence
 
