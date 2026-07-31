@@ -36,10 +36,10 @@ compact/standard/diagnostic density respectively, with a 1200-rendered-line ceil
 
 ```text
 Session
-└── selected Run       /runs History Center → Runs
-    ├── Subagents      /runs → Agents   (depth-1 delegation projection)
-    └── selected Step  /runs → Steps
-        └── Action     /runs → Actions
+└── selected Run       /runs (Run list)
+    ├── Steps          /runs → Run → Steps (chooser when Agents also present)
+    │   └── Actions    /runs → Step → Actions
+    └── Subagents      /runs → Agents (chooser when Steps also present)
 ```
 
 The current Run remains the execution target. Inspecting an older Run changes only the visible projection — pick
@@ -73,9 +73,10 @@ above the composer so long chats do not hide them. Operator info notices (login,
 failure/cancellation notices do not time out; they remain until the operator starts the next interaction or
 the Runtime explicitly clears the outcome.
 
-`/settings` opens a multi-level panel stack (Mode, Permissions, Providers, Config, Context, Theme, Language,
-Timeline density, Status, Session history). Density changes are local presentation state; only an explicit
-“save user default” choice writes `[ui].timeline_density` to user config.
+`/settings` opens a multi-level panel stack (Mode, Permissions, Shell, Step budget, Providers, Config, Context,
+Theme, Language, Timeline density). Density changes are local presentation state; only an
+explicit “save user default” choice writes `[ui].timeline_density` to user config. Step budget persists
+`max_steps` to user config and hot-applies on the next Run; `/max-steps` opens the same panel.
 `/providers` and empty `/login` open the provider list; selecting a provider offers API-key form or Kimi device
 login without writing secrets into Session events or TOML. Esc pops one panel level; an empty stack restores the
 composer.
@@ -102,11 +103,13 @@ Provider login details:
 Primary slash commands are intentionally few: overlapping inspect entries live under `/settings`, mount
 operations under `/mounts`, capability grants under `/permissions`, skill/task management under `/skills` and
 `/tasks`, Session history under `/runs` (height-paged, bounded type-to-search selection; no `/run N` style selectors), and Workspace
-Session resume under `/sessions`. List shortcuts `/steps` `/actions` `/agents` remain aliases.
+Session resume under `/sessions`. `/model` reconfigures provider, model, thinking effort, and context window
+without re-login (scope chosen in the panel). Steps and Agents are chosen inside the `/runs` hub; Actions
+are reached by selecting a Step — not via separate slash commands. Typing `/steps`, `/actions`, or `/agents` redirects to the hub with a notice.
 Previous command names that only selected by index/id were removed. UI copy for slash help, settings, and
 these hubs follows `language` in `~/.qi/config.toml` (`zh` default, or `en`).
 
-`/status` (alias) opens the denser Session/Run/Step/Action engineering panel. `Ctrl+O` expands or collapses the
+`/status` opens the denser Session/Run/Step/Action engineering panel. `Ctrl+O` expands or collapses the
 latest or explicitly selected Action/activity group/Thinking block, long paste, or Markdown code block.
 `Ctrl+G` opens pending gates in Run Question → Plan Review → Next Run → path grant order. New gates never replace
 a non-empty composer or follow-up editor; they leave a persistent attention notice. Focus and expansion are
@@ -170,7 +173,7 @@ every column useful, the renderer switches to a per-row vertical field layout so
 - Delegate: parent timeline shows a Subagents progress block (`Running` / `Finished` per depth-1 delegation) with
   child context tokens on each Subagent row; the sticky Running strip keeps parent-agent tokens only
   (`waiting on subagent` while `delegate` is in flight). Child transcripts stay in the child Session
-  (`runtime.childView` / `/agents`). Inspect panels (`/help`, …) dismiss with Esc and must not cancel the parent
+  (`runtime.childView` / `/runs` → Agents). Inspect panels (`/help`, …) dismiss with Esc and must not cancel the parent
   Run or in-flight Subagents. The UI never invents parallel fan-out beyond durable running delegations
   (Plan Subagents remain serial).
 - Legacy Plan Todo: historical item revisions still project progress and `/next`; Formal Plans never derive Todo

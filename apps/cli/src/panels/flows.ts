@@ -1,4 +1,5 @@
 import {
+  getProviderModelProfile,
   listProviderProfiles,
   providerModelContextTokens,
   type ProviderProfile,
@@ -104,6 +105,8 @@ export interface PanelFlowContext {
   readonly effectiveCapabilities: () => readonly CapabilityId[];
   readonly saveCapabilities: (capabilities: QiCapabilityConfig) => void;
   readonly saveShell: (shell: QiShellConfig) => void;
+  readonly currentMaxSteps: () => number;
+  readonly saveMaxSteps: (maxSteps: number) => void;
   readonly applyVerificationSetup: (selected: readonly VerificationCandidate[]) => void;
   readonly installSkill: (source: string, scope: "user" | "workspace") => void;
   readonly listTasks: () => ProcessTaskView[];
@@ -132,18 +135,17 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
       { id: "mode", label: t(locale, "settings.mode"), description: t(locale, "settings.mode.desc") },
       { id: "permissions", label: t(locale, "settings.permissions"), description: t(locale, "settings.permissions.desc") },
       { id: "shell", label: t(locale, "settings.shell"), description: t(locale, "settings.shell.desc") },
+      { id: "max-steps", label: t(locale, "settings.max-steps"), description: t(locale, "settings.max-steps.desc") },
       { id: "providers", label: t(locale, "settings.providers"), description: t(locale, "settings.providers.desc") },
-      { id: "runs", label: t(locale, "settings.runs"), description: t(locale, "settings.runs.desc") },
       { id: "config", label: t(locale, "settings.config"), description: t(locale, "settings.config.desc") },
       { id: "context", label: t(locale, "settings.context"), description: t(locale, "settings.context.desc") },
       { id: "theme", label: t(locale, "settings.theme"), description: t(locale, "settings.theme.desc") },
       {
         id: "timeline-density",
-        label: locale === "zh" ? "时间线密度" : "Timeline density",
-        description: locale === "zh" ? "简洁、标准或诊断信息层级" : "Compact, standard, or diagnostic hierarchy",
+        label: t(locale, "settings.timeline-density"),
+        description: t(locale, "settings.timeline-density.desc"),
       },
       { id: "language", label: t(locale, "settings.language"), description: t(locale, "settings.language.desc") },
-      { id: "status", label: t(locale, "settings.status"), description: t(locale, "settings.status.desc") },
     ],
     onClose: ctx.panels.dismiss,
     onSelect: (item) => {
@@ -159,12 +161,12 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
         openShellPanel(ctx);
         return;
       }
-      if (item.id === "providers") {
-        openProvidersPanel(ctx);
+      if (item.id === "max-steps") {
+        openMaxStepsPanel(ctx);
         return;
       }
-      if (item.id === "runs") {
-        openRunsHubPanel(ctx);
+      if (item.id === "providers") {
+        openProvidersPanel(ctx);
         return;
       }
       if (item.id === "theme") {
@@ -179,9 +181,7 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
         openLanguagePanel(ctx);
         return;
       }
-      openScroll(ctx, `/${item.id}`, ctx.presenter.renderPanel(
-        item.id === "status" ? "overview" : item.id as "config" | "context",
-      ));
+      openScroll(ctx, `/${item.id}`, ctx.presenter.renderPanel(item.id as "config" | "context"));
     },
   }));
 }
@@ -647,6 +647,49 @@ export function openPermissionsPanel(ctx: PanelFlowContext): void {
   }));
 }
 
+/** Effort levels advertised by the current model profile (empty when thinking is unavailable). */
+export function supportedEffortsForModel(profile: ProviderProfile, model: string): readonly string[] {
+  const modelProfile = getProviderModelProfile(profile, model);
+  if (!modelProfile?.thinking) return [];
+  if (modelProfile.thinking.mode === "toggle") {
+    return ["none", modelProfile.thinking.defaultEffort ?? "high"];
+  }
+  return [...(modelProfile.thinking.supportedEfforts ?? [])];
+}
+
+export function openMaxStepsPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const current = ctx.currentMaxSteps();
+  const presets = [16, 32, 48, 64, 80, 100] as const;
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "max_steps.title"),
+    hints: t(locale, "max_steps.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items: presets.map((steps) => ({
+      id: String(steps),
+      label: String(steps),
+      description: steps === current
+        ? (locale === "zh" ? "当前" : "Current")
+        : (locale === "zh" ? `每个 Run 最多 ${steps} Steps` : `Up to ${steps} Steps per Run`),
+      current: steps === current,
+    })),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      const steps = Number(item.id);
+      ctx.panels.closeAll();
+      ctx.saveMaxSteps(steps);
+    },
+  }));
+}
+
+function effortDescription(locale: Locale, effort: string): string {
+  if (effort === "low") return locale === "zh" ? "较快" : "Faster";
+  if (effort === "high") return locale === "zh" ? "较强思考" : "Stronger reasoning";
+  if (effort === "max") return locale === "zh" ? "最强思考" : "Maximum reasoning";
+  if (effort === "none") return locale === "zh" ? "关闭思考" : "Disable thinking";
+  return effort;
+}
+
 export function openShellPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   const snapshot = ctx.presenter.launch.shell;
@@ -903,22 +946,9 @@ export function openTimelineDensityPanel(ctx: PanelFlowContext): void {
   }));
 }
 
+/** Open the current Session's Run list (sessions-style); Enter drills into Steps or Agents (Actions via Step). */
 export function openRunsHubPanel(ctx: PanelFlowContext): void {
-  const locale = ctx.locale();
-  ctx.panels.push(new ListPanel({
-    title: t(locale, "runs.title"),
-    hints: t(locale, "runs.hints"),
-    items: [
-      { id: "runs", label: t(locale, "runs.runs"), description: t(locale, "runs.runs.desc") },
-      { id: "steps", label: t(locale, "runs.steps"), description: t(locale, "runs.steps.desc") },
-      { id: "actions", label: t(locale, "runs.actions"), description: t(locale, "runs.actions.desc") },
-      { id: "agents", label: t(locale, "runs.agents"), description: t(locale, "runs.agents.desc") },
-    ],
-    onClose: ctx.panels.dismiss,
-    onSelect: (item) => {
-      ctx.openHistoryList(item.id as "runs" | "steps" | "actions" | "agents");
-    },
-  }));
+  openHistoryListPanel(ctx, "runs");
 }
 
 export function openHistoryListPanel(
@@ -955,7 +985,7 @@ export function openHistoryListPanel(
   }
   const currentIndex = items.findIndex((item) => item.current);
   ctx.panels.push(new ListPanel({
-    title: t(locale, titleKey),
+    title: kind === "runs" ? t(locale, "runs.title") : t(locale, titleKey),
     hints: t(locale, "runs.list.hints"),
     items,
     searchable: true,
@@ -972,7 +1002,7 @@ export function openHistoryListPanel(
             : presenter.selectDelegation(item.id);
       presenter.setNotice(notice);
       if (kind === "runs") {
-        openHistoryRunDrilldown(ctx);
+        openHistoryRunEntry(ctx);
         ctx.render();
         return;
       }
@@ -987,24 +1017,42 @@ export function openHistoryListPanel(
   }));
 }
 
-function openHistoryRunDrilldown(ctx: PanelFlowContext): void {
+function openHistoryRunEntry(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   const run = ctx.presenter.selectedRun();
   if (!run) return;
-  ctx.panels.push(new ListPanel({
-    title: `Run · ${run.runId}`,
-    hints: t(locale, "runs.hints"),
-    items: [
-      { id: "steps", label: t(locale, "runs.steps"), description: `${run.stepOrder.length}` },
-      { id: "actions", label: t(locale, "runs.actions"), description: `${Object.keys(run.actions).length}` },
-      { id: "agents", label: t(locale, "runs.agents"), description: `${Object.keys(run.delegations).length}` },
-    ],
-    onClose: ctx.panels.dismiss,
-    onSelect: (item) => openHistoryListPanel(
-      ctx,
-      item.id as "steps" | "actions" | "agents",
-    ),
-  }));
+  const hasSteps = run.stepOrder.length > 0;
+  const hasAgents = Object.keys(run.delegations).length > 0;
+  if (hasSteps && hasAgents) {
+    ctx.panels.push(new ListPanel({
+      title: t(locale, "runs.drilldown.title", { runId: run.runId }),
+      hints: t(locale, "runs.drilldown.hints"),
+      items: [
+        {
+          id: "steps",
+          label: t(locale, "runs.steps"),
+          description: t(locale, "runs.drilldown.steps.desc", { count: String(run.stepOrder.length) }),
+        },
+        {
+          id: "agents",
+          label: t(locale, "runs.agents"),
+          description: t(locale, "runs.drilldown.agents.desc", { count: String(Object.keys(run.delegations).length) }),
+        },
+      ],
+      onClose: ctx.panels.dismiss,
+      onSelect: (item) => openHistoryListPanel(ctx, item.id as "steps" | "agents"),
+    }));
+    return;
+  }
+  if (hasSteps) {
+    openHistoryListPanel(ctx, "steps");
+    return;
+  }
+  if (hasAgents) {
+    openHistoryListPanel(ctx, "agents");
+    return;
+  }
+  ctx.presenter.setNotice(t(locale, "runs.empty.detail"));
 }
 
 function openHistoryStepActions(ctx: PanelFlowContext): void {
@@ -1115,10 +1163,7 @@ export function openModelConfigurationPanel(ctx: PanelFlowContext): void {
   const profile = listProviderProfiles().find((candidate) => candidate.id === status.provider);
   if (!profile) return;
   const locale = ctx.locale();
-  const modelProfile = profile.models?.find((candidate) => candidate.id === status.model);
-  const efforts = modelProfile?.thinking?.mode === "toggle"
-    ? ["none", modelProfile.thinking.defaultEffort ?? "high"]
-    : [...(modelProfile?.thinking?.supportedEfforts ?? [])];
+  const efforts = supportedEffortsForModel(profile, status.model);
   const fields: FormField[] = [
     {
       id: "model",
@@ -1450,8 +1495,10 @@ function kimiModelFields(
   const contextWindowTokens = activeStatus?.model === model
     ? activeStatus.contextWindowTokens
     : providerModelContextTokens(profile, model);
+  const efforts = supportedEffortsForModel(profile, model);
   const effort = (activeStatus?.model === model ? activeStatus.reasoningEffort : undefined)
     ?? modelProfile?.thinking?.defaultEffort
+    ?? efforts[0]
     ?? "high";
   return [
     {
@@ -1474,18 +1521,19 @@ function kimiModelFields(
         },
       ],
     },
-    {
-      id: "reasoningEffort",
-      label: locale === "zh" ? "Thinking effort" : "Thinking effort",
-      initialValue: effort,
-      required: true,
-      options: [
-        { value: "low", label: "Low", description: locale === "zh" ? "较快" : "Faster" },
-        { value: "high", label: "High", description: locale === "zh" ? "K3 默认（推荐）" : "K3 default (recommended)" },
-        { value: "max", label: "Max", description: locale === "zh" ? "最强思考" : "Maximum reasoning" },
-        { value: "none", label: "None", description: locale === "zh" ? "关闭思考" : "Disable thinking" },
-      ],
-    },
+    ...(efforts.length > 0
+      ? [{
+          id: "reasoningEffort",
+          label: locale === "zh" ? "Thinking effort" : "Thinking effort",
+          initialValue: efforts.includes(effort) ? effort : efforts[0]!,
+          required: true,
+          options: efforts.map((value) => ({
+            value,
+            label: value,
+            description: effortDescription(locale, value),
+          })),
+        } satisfies FormField]
+      : []),
     {
       id: "contextWindowTokens",
       label: locale === "zh" ? "上下文窗口（tokens）" : "Context window (tokens)",
@@ -1502,9 +1550,12 @@ function kimiLoginFieldChange(profile: ProviderProfile): NonNullable<
   return (fieldId, value) => {
     if (fieldId !== "model" || !value) return;
     const model = profile.models?.find((candidate) => candidate.id === value);
+    const efforts = supportedEffortsForModel(profile, value);
     return {
       contextWindowTokens: String(providerModelContextTokens(profile, value)),
-      reasoningEffort: model?.thinking?.defaultEffort ?? "high",
+      ...(efforts.length === 0
+        ? {}
+        : { reasoningEffort: model?.thinking?.defaultEffort ?? efforts[0]! }),
     };
   };
 }

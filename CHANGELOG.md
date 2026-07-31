@@ -7,11 +7,28 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Added
 
+- Step budget via `/settings` and `/max-steps` alias; persists to user config; hot-applies next Run.
+
 ### Changed
+
+- FormPanel dropdowns start collapsed (current value only); ↑↓ move between fields, ←→ cycle options while
+  collapsed, Enter expands fixed-choice lists then advances/submits, and Esc collapses an open dropdown before
+  closing the panel.
+- `/model` is panel-only (no slash args / `--session`); thinking effort is configured in the same panel.
+  `/status` promoted to primary and removed from settings hub.
+- `/settings` hub item labels use the English slash/command names (`/mode`, `/permissions`, `/shell`, …);
+  Chinese remains only in descriptions.
+- `/settings` no longer links to Session runs history; use `/runs`, `/sessions`, or `/status` instead.
+- `/steps`, `/actions`, and `/agents` slash aliases removed from help and autocomplete; use the `/runs` hub
+  (typing the old names redirects there with a notice).
+- `/runs` Run selection opens Steps or Agents directly when only one kind exists; a two-item chooser when both
+  exist; Actions are reached only via Step selection (not from the Run menu).
 
 ### Deprecated
 
 ### Removed
+
+- Standalone `/effort` command; configure thinking effort via `/model` (or login forms).
 
 ### Fixed
 

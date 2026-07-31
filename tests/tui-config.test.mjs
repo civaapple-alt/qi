@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
+import { getProviderProfile } from "@civaapple/qi-ai";
 import {
   defaultUserConfigPath,
   ensureUserShellConfig,
@@ -11,6 +12,7 @@ import {
   loadUserConfig,
   persistActiveCompatible,
   persistUserLanguage,
+  persistUserMaxSteps,
   persistUserProviderDefaults,
   persistUserShell,
   persistUserTheme,
@@ -21,6 +23,7 @@ import {
   resolveTheme,
   resolveTimelineDensity,
   saveUserConfig,
+  supportedEffortsForModel,
 } from "../apps/cli/dist/index.js";
 
 test("user config loads strict provider defaults and persistent capabilities", async () => {
@@ -545,6 +548,35 @@ function launchTui(workspace, config, extraArgs) {
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+test("persistUserMaxSteps writes max_steps and rejects out-of-range values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-config-max-steps-"));
+  const path = join(root, "config.toml");
+  try {
+    await writeFile(path, `
+version = 1
+provider = "xai"
+model = "grok-config"
+max_steps = 32
+`);
+    const saved = await persistUserMaxSteps(48, path);
+    assert.equal(saved.config.maxSteps, 48);
+    const reloaded = await loadUserConfig(path);
+    assert.equal(reloaded.config.maxSteps, 48);
+    assert.match(await readFile(path, "utf8"), /max_steps = 48/);
+
+    await assert.rejects(() => persistUserMaxSteps(7, path), /integer from 8 to 100/);
+    await assert.rejects(() => persistUserMaxSteps(101, path), /integer from 8 to 100/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("supportedEffortsForModel advertises Kimi K3 thinking efforts from provider profile", () => {
+  const kimi = getProviderProfile("kimi");
+  assert.ok(kimi);
+  assert.deepEqual(supportedEffortsForModel(kimi, "k3"), ["max"]);
+});
 
 test("ensureUserShellConfig writes detected profiles once and preserves later edits", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-user-shell-bootstrap-"));

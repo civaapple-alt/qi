@@ -62,6 +62,7 @@ import {
   capabilityIdsFromLaunchLabels,
   openHelpPanel,
   openHistoryListPanel,
+  openMaxStepsPanel,
   openModePanel,
   openModelConfigurationPanel,
   openMountsPanel,
@@ -1311,6 +1312,33 @@ export class InteractiveTui {
     }, "Shell");
   }
 
+  #saveMaxSteps(maxSteps: number): void {
+    if (this.#runtime.active) {
+      this.#presenter.setNotice(t(this.#presenter.locale(), "max_steps.active"));
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const configPath = this.#presenter.launch.configPath ?? defaultUserConfigPath();
+      const applied = await this.#runtime.applyMaxSteps(maxSteps, { configPath });
+      this.#presenter.launch = {
+        ...this.#presenter.launch,
+        maxSteps: applied.maxSteps,
+      };
+      const locale = this.#presenter.locale();
+      let notice = t(locale, "max_steps.saved", {
+        steps: String(applied.maxSteps),
+        path: applied.configPath,
+      });
+      if (applied.projectOverride !== undefined) {
+        notice += ` · ${t(locale, "max_steps.project_override", {
+          steps: String(applied.projectOverride),
+        })}`;
+      }
+      this.#presenter.setNotice(notice);
+    }, "Step budget");
+  }
+
   #installSkill(source: string, scope: "user" | "workspace"): void {
     if (this.#runtime.active) {
       this.#presenter.setNotice("Cannot install a Skill while a Run is active.");
@@ -1503,6 +1531,8 @@ export class InteractiveTui {
       effectiveCapabilities: () => capabilityIdsFromLaunchLabels(this.#runtime.capabilityLabels()),
       saveCapabilities: (capabilities) => this.#saveCapabilities(capabilities),
       saveShell: (shell) => this.#saveShell(shell),
+      currentMaxSteps: () => this.#runtime.maxSteps(),
+      saveMaxSteps: (maxSteps) => this.#saveMaxSteps(maxSteps),
       applyVerificationSetup: (selected) => this.#applyVerificationSetup(selected),
       installSkill: (source, scope) => this.#installSkill(source, scope),
       listTasks: () => this.#runtime.tasks(),
@@ -1956,41 +1986,21 @@ export class InteractiveTui {
       return;
     }
     if (name === "model") {
-      if (!argument.trim()) {
-        openModelConfigurationPanel(this.#panelFlow());
-        return;
-      }
-      const sessionOnly = /(?:^|\s)--session(?:\s|$)/.test(argument);
-      const model = argument.replace(/(?:^|\s)--session(?:\s|$)/g, " ").trim();
-      if (!model || /\s/.test(model)) {
-        this.#presenter.setNotice("Usage: /model [model-id] [--session]");
+      if (argument.trim()) {
+        this.#presenter.setNotice(t(this.#presenter.locale(), "model.use_panel"));
         this.#render();
         return;
       }
-      const status = this.#auth?.status();
-      this.#configureModel({
-        model,
-        ...(status?.reasoningEffort === undefined ? {} : { reasoningEffort: status.reasoningEffort }),
-        ...(status === undefined ? {} : { contextWindowTokens: status.contextWindowTokens }),
-        ...(status?.provider === "compatible" ? { imageInput: status.imageInput } : {}),
-      }, sessionOnly ? "session" : "account");
+      openModelConfigurationPanel(this.#panelFlow());
       return;
     }
-    if (name === "effort") {
-      const sessionOnly = /(?:^|\s)--session(?:\s|$)/.test(argument);
-      const effort = argument.replace(/(?:^|\s)--session(?:\s|$)/g, " ").trim();
-      const status = this.#auth?.status();
-      if (!status || !["low", "high", "max", "none"].includes(effort)) {
-        this.#presenter.setNotice("Usage: /effort <low|high|max|none> [--session]");
+    if (name === "max-steps") {
+      if (argument.trim()) {
+        this.#presenter.setNotice(t(this.#presenter.locale(), "max_steps.use_panel"));
         this.#render();
         return;
       }
-      this.#configureModel({
-        model: status.model,
-        reasoningEffort: effort,
-        contextWindowTokens: status.contextWindowTokens,
-        ...(status.provider === "compatible" ? { imageInput: status.imageInput } : {}),
-      }, sessionOnly ? "session" : "account");
+      openMaxStepsPanel(this.#panelFlow());
       return;
     }
     if (name === "reset-workspace") {
@@ -2170,7 +2180,8 @@ export class InteractiveTui {
       return;
     }
     if (name === "steps" || name === "actions" || name === "agents") {
-      openHistoryListPanel(this.#panelFlow(), name);
+      this.#presenter.setNotice(t(this.#presenter.locale(), "runs.use_hub"));
+      openRunsHubPanel(this.#panelFlow());
       return;
     }
     const panel = tuiCommands.find((command) => command.name === name)?.panel;

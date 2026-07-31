@@ -383,6 +383,27 @@ export async function persistUserShell(
 }
 
 /**
+ * Persist top-level `max_steps` into the user config.toml (creates it when missing).
+ */
+export async function persistUserMaxSteps(
+  maxSteps: number,
+  path = defaultUserConfigPath(),
+): Promise<LoadedUserConfig> {
+  if (!Number.isInteger(maxSteps) || maxSteps < 8 || maxSteps > 100) {
+    throw new RangeError("max_steps must be an integer from 8 to 100");
+  }
+  const absolute = resolve(path);
+  const loaded = await loadUserConfig(absolute);
+  const next: QiUserConfig = {
+    ...loaded.config,
+    version: 1,
+    maxSteps,
+  };
+  await saveUserConfig(absolute, next);
+  return { path: absolute, exists: true, config: next };
+}
+
+/**
  * Ensure `$QI_HOME/config.toml` has `[shell]`. When missing, probe installed profiles for this OS,
  * write them once, and return the updated config. Existing `[shell]` is left unchanged.
  */

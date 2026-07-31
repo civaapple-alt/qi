@@ -17,9 +17,9 @@ a deterministic line-oriented mode.
 
 ## Interaction model
 
-Selection is observational: `/runs` is the History Center; its paged Runs / Steps / Actions / Agents lists
-support bounded type-to-search and let you pick a history object
-without changing the active execution target. The chat transcript is the default surface; `/status` exposes
+Selection is observational: `/runs` lists Runs in the current Session (newest first), like `/sessions`;
+Enter opens that Run's Steps or Agents (a chooser when both exist); pick a Step to reach its Actions
+(type-to-search) without changing the active execution target. The chat transcript is the default surface; `/status` exposes
 denser engineering detail.
 
 The rich TTY has three stable regions: a committed同行 timeline, a provisional live status strip, and controls
@@ -66,7 +66,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | Command | Purpose |
 | --- | --- |
 | `/help [command\|advanced]` | Shortcuts + common commands; `advanced` lists aliases |
-| `/settings` | Settings hub: mode, **permissions**, **shell**, providers, config, context, theme, language, **timeline density**, status |
+| `/settings` | Settings hub: mode, **permissions**, **shell**, **Step budget**, providers, config, context, theme, language, **timeline density** |
 | `/memory [list\|remember\|accept\|correct\|forget\|promote\|pin\|unpin]` | Inspect actual Run injection, pending candidates, Project/User boundaries and provenance; explicitly manage the full Memory lifecycle |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
@@ -79,10 +79,10 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `policy.toml`) |
 | `/shell` | Select global shell profiles (`direct` / `pwsh` / `cmd` / `bash`; applies immediately and writes `$QI_HOME/config.toml`) |
 | `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
-| `/runs` | Session history hub → interactive Runs / Steps / Actions / Agents lists (Enter selects observation) |
+| `/runs` | Session history hub — choose Runs, then Steps or Agents (Actions via Step; chooser when both exist; Enter selects observation; no separate `/steps` / `/actions` / `/agents` shortcuts) |
 | `/sessions` | Active/Archived Session list; type-to-search; Enter resumes or restores; `a` archives (with confirm) |
-| `/model [model-id] [--session]` | Reconfigure model without re-login; omit args for picker; `--session` scopes to this Session |
-| `/effort <level> [--session]` | Set reasoning effort from the current model profile |
+| `/status` | Session/Run/Step/Action engineering detail panel |
+| `/model` | Open model picker / reconfigure without re-login (model, thinking effort, and context; scope chosen in panel) |
 | `/reset-workspace` | Preflight all active Sessions, archive them, and start a fresh Session |
 | `/next [continue\|stop\|plan]` | Next Run panel |
 | `/steer <text>` | Queue direction for the next safe Step boundary |
@@ -95,9 +95,9 @@ blinking hardware bar). Idle empty state uses `→ Add a message`. Use ↑ to se
 send-now (promote to front), Esc to cancel; after the Run ends, Qi starts the next follow-up automatically.
 Slash commands and `/steer` are unchanged.
 
-Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, `/status`, `/providers`,
-`/add-dir`, `/unmount`, `/skill`, `/task`, `/exit`, `/steps`, `/actions`, `/agents`, plus unimplemented `/coord` `/work`
-`/gate` `/extensions`.
+Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, `/max-steps`, `/providers`,
+`/add-dir`, `/unmount`, `/skill`, `/task`, `/exit`, plus unimplemented `/coord` `/work` `/gate` `/extensions`.
+Typing `/steps`, `/actions`, or `/agents` redirects to the `/runs` hub with a notice to use the hub instead.
 
 UI language defaults to Chinese. Set `language = "zh"` or `language = "en"` in `~/.qi/config.toml`, or
 change it under `/settings` → Language (persists to the same file).
@@ -285,9 +285,10 @@ Kimi `/login` shows these defaults before authentication and saves the selected 
 editable window to `~/.qi/config.toml`; the API key remains sealed under `QI_HOME`.
 
 Main Runs default to 32 Steps. `max_steps` accepts 8–100 in user or project TOML, with
-`--max-steps` > project > user > default precedence. Step 31 warns that only one executable Step remains; Step
-32 is a tool-free handoff and parks the Run for budget with explicit progress, blockers, next actions, and
-verification state.
+`--max-steps` > project > user > default precedence. `/settings` → **Step budget** and the `/max-steps` alias
+open the same panel (no args), persist the user default to `~/.qi/config.toml`, and hot-apply on the next Run.
+Step 31 warns that only one executable Step remains; Step 32 is a tool-free handoff and parks the Run for budget
+with explicit progress, blockers, next actions, and verification state.
 
 The Skill catalog combines `<workspace>/.qi/skills` and `$QI_HOME/resources/skills`; Workspace wins on a name
 collision. Only metadata enters the initial model context. The `skill` tool progressively loads a selected

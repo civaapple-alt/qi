@@ -41,6 +41,7 @@ export interface TuiCommandDefinition {
 export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "help", descriptionKey: "cmd.help", argumentHint: "[command|advanced]", category: "inspect", visibility: "primary", panel: "help", draftPolicy: "preserve" },
   { name: "settings", descriptionKey: "cmd.settings", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
+  { name: "status", descriptionKey: "cmd.status", category: "inspect", visibility: "primary", panel: "overview", draftPolicy: "preserve" },
   {
     name: "memory",
     descriptionKey: "cmd.memory",
@@ -73,16 +74,15 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "verify", descriptionKey: "cmd.verify", category: "inspect", visibility: "primary" },
   { name: "runs", descriptionKey: "cmd.runs", category: "navigate", visibility: "primary", panel: "runs" },
   { name: "sessions", descriptionKey: "cmd.sessions", category: "navigate", visibility: "primary", draftPolicy: "preserve" },
-  { name: "model", descriptionKey: "cmd.model", argumentHint: "[model-id] [--session]", category: "manage", visibility: "primary", draftPolicy: "preserve" },
-  { name: "effort", descriptionKey: "cmd.effort", argumentHint: "<level> [--session]", category: "manage", visibility: "primary", draftPolicy: "preserve" },
+  { name: "model", descriptionKey: "cmd.model", category: "manage", visibility: "primary", draftPolicy: "preserve" },
   { name: "reset-workspace", descriptionKey: "cmd.reset-workspace", category: "control", visibility: "primary", draftPolicy: "consume" },
   { name: "next", descriptionKey: "cmd.next", argumentHint: "[continue|stop|plan]", category: "control", visibility: "primary" },
   { name: "steer", descriptionKey: "cmd.steer", argumentHint: "<text>", category: "control", visibility: "primary" },
   { name: "cancel", descriptionKey: "cmd.cancel", category: "control", visibility: "primary" },
   { name: "quit", descriptionKey: "cmd.quit", category: "control", visibility: "primary" },
 
-  { name: "status", descriptionKey: "cmd.status", category: "inspect", visibility: "alias", panel: "overview" },
   { name: "config", descriptionKey: "cmd.config", category: "inspect", visibility: "alias", panel: "config" },
+  { name: "max-steps", descriptionKey: "cmd.max-steps", category: "manage", visibility: "alias", draftPolicy: "preserve" },
   { name: "context", descriptionKey: "cmd.context", category: "inspect", visibility: "alias", panel: "context" },
   { name: "providers", descriptionKey: "cmd.providers", category: "inspect", visibility: "alias" },
   { name: "skill", descriptionKey: "cmd.skill", category: "manage", visibility: "alias" },
@@ -90,9 +90,6 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "add-dir", descriptionKey: "cmd.add-dir", argumentHint: "<path>", category: "control", visibility: "alias" },
   { name: "unmount", descriptionKey: "cmd.unmount", argumentHint: "<id>", category: "control", visibility: "alias" },
   { name: "exit", descriptionKey: "cmd.exit", category: "control", visibility: "alias" },
-  { name: "steps", descriptionKey: "cmd.steps", category: "navigate", visibility: "alias", panel: "steps" },
-  { name: "actions", descriptionKey: "cmd.actions", category: "navigate", visibility: "alias", panel: "actions" },
-  { name: "agents", descriptionKey: "cmd.agents", category: "navigate", visibility: "alias", panel: "agents" },
 
   { name: "coord", descriptionKey: "cmd.coord", category: "inspect", visibility: "advanced", panel: "coord" },
   { name: "work", descriptionKey: "cmd.work", category: "inspect", visibility: "advanced", panel: "work" },
@@ -110,8 +107,8 @@ export function primarySlashCommands(locale: Locale = defaultLocale()): readonly
 
 /**
  * Slash commands offered in the editor `/` autocomplete.
- * Includes primary commands plus navigate/inspect aliases (`/steps`, `/actions`, …)
- * so prefixes like `ste` / `act` resolve without guessing hub names.
+ * Includes primary commands plus a small set of inspect/manage aliases (`/config`, `/max-steps`, …).
+ * History drill-downs (Steps / Actions / Agents) live under `/runs`, not as separate slash names.
  */
 export function autocompleteSlashCommands(locale: Locale = defaultLocale()): readonly SlashCommand[] {
   return Object.freeze(
@@ -119,11 +116,10 @@ export function autocompleteSlashCommands(locale: Locale = defaultLocale()): rea
       .filter((command) =>
         command.visibility === "primary"
         || (command.visibility === "alias" && (
-          command.category === "navigate"
-          || command.name === "status"
-          || command.name === "config"
+          command.name === "config"
           || command.name === "context"
           || command.name === "providers"
+          || command.name === "max-steps"
           || command.name === "exit"
         )))
       .map((command) => toSlashCommand(command, locale)),

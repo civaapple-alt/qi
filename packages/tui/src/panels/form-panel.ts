@@ -12,8 +12,9 @@ export interface FormField {
   readonly secret?: boolean;
   readonly required?: boolean;
   /**
-   * Render this field as a terminal dropdown. Up/down or left/right changes
-   * the selected option while Tab continues to move between fields.
+   * Render this field as a terminal dropdown. ←→ changes the selected option while
+   * collapsed; Enter expands the list so ↑↓ can browse choices. ↑↓ always move
+   * between fields when the dropdown is collapsed.
    */
   readonly options?: readonly FormFieldOption[];
 }
@@ -45,7 +46,7 @@ export interface FormPanelOptions {
   readonly onClose: () => void;
 }
 
-/** Multi-field form: Tab/↑↓ switch fields, Enter advances or submits, Esc cancels. */
+/** Multi-field form: ↑↓/Tab switch fields; Enter expands dropdown or advances; Esc cancels. */
 export class FormPanel implements PanelComponent, Focusable {
   readonly title: string;
   focused = false;
@@ -59,6 +60,8 @@ export class FormPanel implements PanelComponent, Focusable {
   readonly #selectedOptions: number[];
   readonly #dirty: boolean[];
   #index = 0;
+  /** When true, the focused dropdown shows its option list and ↑↓ browse choices. */
+  #dropdownOpen = false;
   #error: string | undefined;
 
   constructor(options: FormPanelOptions) {
@@ -89,47 +92,50 @@ export class FormPanel implements PanelComponent, Focusable {
 
   handleInput(data: string): void {
     if (matchesKey(data, Key.escape)) {
+      if (this.#dropdownOpen) {
+        this.#dropdownOpen = false;
+        this.#syncFocus();
+        return;
+      }
       this.#onClose();
       return;
     }
     const field = this.#fields[this.#index];
     if (matchesKey(data, Key.tab)) {
-      this.#index = Math.min(this.#fields.length - 1, this.#index + 1);
-      this.#syncFocus();
+      this.#moveField(1);
       return;
     }
     if (matchesKey(data, "shift+tab")) {
-      this.#index = Math.max(0, this.#index - 1);
-      this.#syncFocus();
+      this.#moveField(-1);
       return;
     }
-    if (
-      field?.options &&
-      (
-        matchesKey(data, Key.down) ||
-        matchesKey(data, Key.right) ||
-        matchesKey(data, Key.up) ||
-        matchesKey(data, Key.left)
-      )
-    ) {
-      const direction = matchesKey(data, Key.down) || matchesKey(data, Key.right) ? 1 : -1;
+    if (field?.options && (matchesKey(data, Key.right) || matchesKey(data, Key.left))) {
+      const direction = matchesKey(data, Key.right) ? 1 : -1;
       this.#selectOption(this.#index, direction);
       return;
     }
-    if (matchesKey(data, Key.down)) {
-      this.#index = Math.min(this.#fields.length - 1, this.#index + 1);
-      this.#syncFocus();
-      return;
-    }
-    if (matchesKey(data, Key.up)) {
-      this.#index = Math.max(0, this.#index - 1);
-      this.#syncFocus();
+    if (matchesKey(data, Key.down) || matchesKey(data, Key.up)) {
+      const direction = matchesKey(data, Key.down) ? 1 : -1;
+      if (this.#dropdownOpen && field?.options) {
+        this.#selectOption(this.#index, direction);
+        return;
+      }
+      this.#moveField(direction);
       return;
     }
     if (matchesKey(data, Key.enter)) {
+      // Fixed-choice dropdowns open on Enter, then Enter again advances / submits.
+      // customInput options already expose a text box, so Enter advances like plain fields.
+      if (field?.options && !this.#selectedOption(this.#index)?.customInput) {
+        if (!this.#dropdownOpen) {
+          this.#dropdownOpen = true;
+          this.#syncFocus();
+          return;
+        }
+        this.#dropdownOpen = false;
+      }
       if (this.#index < this.#fields.length - 1) {
-        this.#index += 1;
-        this.#syncFocus();
+        this.#moveField(1);
         return;
       }
       this.#submit();
@@ -147,7 +153,7 @@ export class FormPanel implements PanelComponent, Focusable {
     const lines = [
       ...panelHeader(
         this.title,
-        "Tab fields · ↑↓ choices · type to edit · Enter next/submit · Esc cancel",
+        "↑↓ fields · Enter expand/next · ←→ options · Esc cancel",
         safe,
       ),
       "",
@@ -163,7 +169,8 @@ export class FormPanel implements PanelComponent, Focusable {
       lines.push(truncateToWidth(`${marker}${theme.bold(field.label)}`, safe, "…"));
       if (field.options) {
         const selectedOption = this.#selectedOption(index);
-        if (selected) {
+        const expanded = selected && this.#dropdownOpen;
+        if (expanded) {
           for (const option of field.options) {
             const current = option === selectedOption;
             const optionMarker = current ? theme.fg("primary", "●") : theme.fg("textMuted", "○");
@@ -219,6 +226,12 @@ export class FormPanel implements PanelComponent, Focusable {
     return lines;
   }
 
+  #moveField(direction: number): void {
+    this.#dropdownOpen = false;
+    this.#index = Math.max(0, Math.min(this.#fields.length - 1, this.#index + direction));
+    this.#syncFocus();
+  }
+
   #syncFocus(): void {
     for (const [index, input] of this.#inputs.entries()) {
       input.focused = index === this.#index &&
@@ -233,6 +246,7 @@ export class FormPanel implements PanelComponent, Focusable {
       if (field.required !== false && !value) {
         this.#error = `${field.label} is required.`;
         this.#index = index;
+        this.#dropdownOpen = false;
         this.#syncFocus();
         return;
       }

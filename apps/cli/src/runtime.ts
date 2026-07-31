@@ -90,7 +90,7 @@ import { SqliteEffectJournal } from "@civaapple/qi-node/workspace";
 import { createCodeActTool } from "./codeact-tool.js";
 import { createAskQuestionTool, RunQuestionCoordinator } from "./ask-question-tool.js";
 import type { QiCapabilityConfig, QiImageConfig, QiShellConfig } from "./config.js";
-import { defaultUserConfigPath, persistUserShell } from "./config.js";
+import { defaultUserConfigPath, persistUserMaxSteps, persistUserShell } from "./config.js";
 import { createDelegateTool } from "./delegate-tool.js";
 import { defaultProjectConfigPath } from "./paths.js";
 import {
@@ -193,7 +193,7 @@ export class TuiRuntime {
   #contextWindowTokens: number;
   #contextBudgetTokens: number;
   #outputReserveTokens: number;
-  readonly #maxSteps: number;
+  #maxSteps: number;
   readonly #subject: string;
   readonly #eventStore: EventStore;
   readonly #ownedStore: SessionRepository | undefined;
@@ -592,6 +592,34 @@ export class TuiRuntime {
     this.#allowBackground = normalized.background;
     this.#allowDelegate = normalized.delegate;
     return { labels: this.capabilityLabels(), capabilities: normalized };
+  }
+
+  maxSteps(): number {
+    return this.#maxSteps;
+  }
+
+  /**
+   * Hot-apply main-Run Step budget: persist to `$QI_HOME/config.toml` and use on the next Run.
+   */
+  async applyMaxSteps(
+    maxSteps: number,
+    options?: { persist?: boolean; configPath?: string },
+  ): Promise<{ maxSteps: number; configPath: string; projectOverride?: number }> {
+    if (this.active) throw new Error("Cannot change max steps while a Run is active");
+    if (!Number.isInteger(maxSteps) || maxSteps < 8 || maxSteps > 100) {
+      throw new RangeError("maxSteps must be an integer from 8 to 100");
+    }
+    const configPath = options?.configPath ?? defaultUserConfigPath();
+    if (options?.persist !== false) {
+      await persistUserMaxSteps(maxSteps, configPath);
+    }
+    this.#maxSteps = maxSteps;
+    const project = await loadProjectConfig(this.#projectConfigPath);
+    return {
+      maxSteps,
+      configPath,
+      ...(project.config.maxSteps === undefined ? {} : { projectOverride: project.config.maxSteps }),
+    };
   }
 
   /**

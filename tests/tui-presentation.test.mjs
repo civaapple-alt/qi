@@ -53,6 +53,7 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   const helpZh = commandHelp(undefined, "zh");
   assert.ok(helpZh.some((line) => line.includes("键盘快捷键")));
   assert.ok(helpZh.some((line) => line.includes("/settings")));
+  assert.ok(helpZh.some((line) => line.includes("/status")));
   assert.ok(helpZh.some((line) => line.includes("/mounts")));
   assert.ok(helpZh.some((line) => line.includes("/skills")));
   assert.ok(helpZh.some((line) => line.includes("/steer")));
@@ -62,10 +63,15 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   const helpEn = commandHelp(undefined, "en");
   assert.ok(helpEn.some((line) => line.includes("Keyboard shortcuts")));
   assert.ok(helpEn.some((line) => line.includes("Ctrl+O")));
+  assert.ok(helpEn.some((line) => line.includes("/status")));
   const advanced = commandHelp("advanced", "en");
+  assert.ok(advanced.some((line) => line.includes("/max-steps")));
   assert.ok(advanced.some((line) => line.includes("/context")));
+  assert.ok(!advanced.some((line) => /^\s+\/status\b/.test(line)));
   assert.ok(advanced.some((line) => line.includes("/task stop")));
-  assert.ok(advanced.some((line) => line.includes("/agents")));
+  assert.ok(!advanced.some((line) => line.includes("/agents")));
+  assert.ok(!advanced.some((line) => line.includes("/steps")));
+  assert.ok(!advanced.some((line) => line.includes("/actions")));
   assert.ok(advanced.some((line) => line.includes("/coord")));
   const primary = primarySlashCommands("en");
   assert.ok(primary.some((command) => command.name === "help"));
@@ -73,18 +79,23 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.ok(primary.some((command) => command.name === "sessions"));
   assert.ok(primary.some((command) => command.name === "shell"));
   assert.ok(primary.some((command) => command.name === "permissions"));
+  assert.ok(primary.some((command) => command.name === "status"));
   assert.ok(!primary.some((command) => command.name === "config"));
+  assert.ok(!primary.some((command) => command.name === "max-steps"));
   assert.ok(!primary.some((command) => command.name === "run"));
+  assert.ok(!primary.some((command) => command.name === "effort"));
   const autocomplete = autocompleteSlashCommands("en");
   assert.ok(autocomplete.some((command) => command.name === "runs"));
   assert.ok(!autocomplete.some((command) => command.name === "run"));
   assert.ok(!autocomplete.some((command) => command.name === "step"));
   assert.ok(!autocomplete.some((command) => command.name === "action"));
   assert.ok(!autocomplete.some((command) => command.name === "agent"));
-  assert.ok(autocomplete.some((command) => command.name === "steps"));
-  assert.ok(autocomplete.some((command) => command.name === "actions"));
-  assert.ok(autocomplete.some((command) => command.name === "agents"));
+  assert.ok(!autocomplete.some((command) => command.name === "steps"));
+  assert.ok(!autocomplete.some((command) => command.name === "actions"));
+  assert.ok(!autocomplete.some((command) => command.name === "agents"));
   assert.ok(autocomplete.some((command) => command.name === "config"));
+  assert.ok(autocomplete.some((command) => command.name === "status"));
+  assert.ok(autocomplete.some((command) => command.name === "max-steps"));
   assert.ok(autocomplete.some((command) => command.name === "exit"));
   assert.ok(!autocomplete.some((command) => command.name === "coord"));
   assert.deepEqual(parseTuiCommand("/exit"), { name: "exit", argument: "" });
@@ -737,7 +748,11 @@ test("interactive TUI renders command help and exits through the editor", async 
     await delay(25);
     terminal.sendText("/settings\r");
     await waitUntil(() => /Providers|提供商|Language|语言/.test(terminal.output));
-    assert.match(terminal.output, /Theme|主题/);
+    assert.match(terminal.output, /\btheme\b|Theme|主题/);
+    const settingsSection = [...stripVTControlCharacters(terminal.output).matchAll(/(?:Settings|设置)[\s\S]*?(?=─{20,})/g)].at(-1)?.[0] ?? "";
+    assert.ok(settingsSection.length > 0);
+    assert.doesNotMatch(settingsSection, /^\s*[❯]?\s*\/runs\b/m);
+    assert.doesNotMatch(settingsSection, /Session history|会话历史|Run 历史/);
     terminal.sendText("\u001b");
     await delay(25);
     terminal.sendText("/skills\r");
@@ -3312,9 +3327,12 @@ test("FormPanel dropdowns support dependent defaults and a final custom text opt
     onClose: () => {},
   });
 
-  assert.match(stripVTControlCharacters(panel.render(90).join("\n")), /● K3/);
-  panel.handleInput("\u001b[B"); // model dropdown -> k3-256k
-  panel.handleInput("\t"); // effort
+  const collapsed = stripVTControlCharacters(panel.render(90).join("\n"));
+  assert.match(collapsed, /K3/);
+  assert.doesNotMatch(collapsed, /○ K3 256K/);
+  assert.doesNotMatch(collapsed, /● K3 256K/);
+  panel.handleInput("\u001b[C"); // right -> k3-256k while collapsed
+  panel.handleInput("\u001b[B"); // down -> effort field (not change model)
   panel.handleInput("\t"); // context
   panel.handleInput("\r");
   assert.deepEqual(submitted, {
@@ -3672,7 +3690,9 @@ test("history run list selects observational Run via Enter", () => {
   });
   const items = presenter.historyRunItems();
   assert.equal(items.length, 2);
-  assert.equal(items[1]?.current, true);
+  assert.equal(items[0]?.id, "run_b");
+  assert.equal(items[0]?.current, true);
+  assert.equal(items[1]?.id, "run_a");
   /** @type {string | undefined} */
   let selected;
   const panel = new ListPanel({
@@ -3682,7 +3702,7 @@ test("history run list selects observational Run via Enter", () => {
     onSelect: (item) => { selected = item.id; },
     onClose: () => {},
   });
-  panel.handleInput("\u001b[A"); // up to run_a
+  panel.handleInput("\u001b[B"); // down to older run_a
   panel.handleInput("\r");
   assert.equal(selected, "run_a");
   assert.match(presenter.selectRun("run_a"), /Inspecting Run 1/);

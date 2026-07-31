@@ -473,14 +473,16 @@ export class TuiPresenter {
     return `Inspecting Subagent ${position(ids, selected)} · ${short(selected)}`;
   }
 
-  /** Panel rows for interactive history pickers (`/runs` hub). */
+  /** Panel rows for `/runs` (newest first, like `/sessions`). */
   historyRunItems(): { id: string; label: string; description: string; current: boolean }[] {
     const view = this.#view;
     if (!view) return [];
     const selected = this.selectedRun()?.runId;
-    return view.runOrder.flatMap((id, index) => {
+    const ordered = [...view.runOrder].reverse();
+    return ordered.flatMap((id) => {
       const run = view.runs[id];
       if (!run) return [];
+      const index = view.runOrder.indexOf(id);
       return [{
         id,
         label: `${index + 1}. ${short(id)}  ${runDisplayStatus(run)}`,
