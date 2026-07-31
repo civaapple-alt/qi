@@ -33,7 +33,9 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
     assert.equal(directRuntime.shellProfiles.directEnabled, true);
     assert.match(directPrompt, new RegExp(`platform=.*${process.platform}`));
     assert.match(directPrompt, /bash=disallowed/);
-    assert.match(directPrompt, /does not interpret pipes/);
+    assert.match(directPrompt, /Authorized shell profiles \(config\/probe units, not a single tool\)/);
+    assert.match(directPrompt, /The shell tool is separate:.*does not interpret pipes/);
+    assert.match(directPrompt, /The script tool is separate:.*never treat an argv-only shell limit/);
     assert.match(directPrompt, /Multiple shell or script Actions may share a workdir/);
     assert.match(directPrompt, /BATCH_WRITE_CONFLICT/);
     assert.match(directPrompt, /do not repeat the same unsupported assumption/);
@@ -68,6 +70,7 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
         .map((part) => part.text)
         .join("\n");
       assert.match(scriptPrompt, /prefer one script for builtins, pipes, or multi-statement logic/);
+      assert.match(scriptPrompt, /The script tool is separate:/);
       const scriptDescription = scriptModel.requests[0].tools.find((tool) => tool.name === "script")?.description ?? "";
       assert.match(scriptDescription, /multi-statement logic/);
       assert.match(scriptDescription, /may share a workdir/);
@@ -77,6 +80,41 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
   } finally {
     if (directRuntime) await directRuntime.close();
     if (scriptRuntime) await scriptRuntime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Plan mode guidance keeps shell argv-only limits separate from script profiles", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-plan-shell-"));
+  const model = responseModel();
+  let runtime;
+  try {
+    runtime = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi", "plan-shell"),
+      modelPort: model,
+      model: { provider: "fake", model: "plan-shell" },
+      allowExecute: true,
+      shell: {
+        default: "direct",
+        allowed: process.platform === "win32" ? ["direct", "pwsh", "cmd"] : ["direct", "bash"],
+      },
+    });
+    runtime.changeMode("plan");
+    await runtime.run("Draft a Formal Plan for a small fix.");
+    const prompt = model.requests[0].messages
+      .flatMap((message) => message.content)
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+    assert.match(prompt, /Session mode is Plan/);
+    assert.match(prompt, /defer host-execution detail to this Run's host:environment/);
+    assert.match(prompt, /shell is direct argv-only spawn; script uses probed pwsh\/cmd\/bash profiles/);
+    assert.match(prompt, /Never collapse an argv-only shell limit/);
+    assert.match(prompt, /The shell tool is separate:/);
+    assert.match(prompt, /The script tool is separate:/);
+  } finally {
+    if (runtime) await runtime.close();
     await rm(root, { recursive: true, force: true });
   }
 });

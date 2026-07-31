@@ -15,6 +15,10 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
+- Plan-mode Formal Plan guidance and `host:environment` now keep the argv-only `shell` tool separate from
+  probed `script` profiles, so executor-background prose must not claim pwsh/cmd/bash are unavailable when
+  those profiles are listed as available.
+
 ### Security
 
 ### Documentation

@@ -117,6 +117,9 @@ Session mode is durable (`ask` / `plan` / `agent`). Plan mode records managed Fo
 Accept settles review, switches to Agent, and starts one whole-plan Run
 ([ADR 0011](../../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)). The
 Executor receives the accepted document plus ID/revision/SHA but none of the planning conversation.
+Formal Plan executor background may note the host platform, but must not collapse the argv-only `shell` tool
+into a claim that probed `script` profiles (`pwsh` / `cmd` / `bash`) are unavailable; the Executor still
+receives that Run's `host:environment` probe facts and advertised tool schemas as authority.
 The generated `<accepted-plan>` input remains machine context; the chat projection instead renders up to 200
 terminal lines of the bound Formal Plan Markdown without paste classification. Longer plans end with a
 Collapsed notice instead of `Ctrl+O`; every preview names the immutable local file path, and the Executor
@@ -213,10 +216,12 @@ directly. Cross-Run history compaction records each omitted Run as `history:omit
 reports compaction only after the runtime has recorded it.
 
 Every Run also receives a required `host:environment` constitution block generated from startup probes. It
-states the host platform, direct-command semantics, and every available/disallowed shell profile. On Windows it
-explicitly rejects POSIX-only assumptions such as `bash`, `lsof`, `xargs`, and `/dev/null` unless a corresponding
-profile was actually probed. A missing executable or unavailable-profile failure is treated as an environment
-fact for the remainder of that Run; the model must change approach instead of retrying the same assumption.
+states the host platform, every available/disallowed shell profile, then separately the `shell` tool
+(direct argv-only when `direct` is available) and the `script` tool (probed `pwsh` / `cmd` / `bash` only).
+An argv-only `shell` limit is not a claim that script profiles are missing. On Windows it explicitly rejects
+POSIX-only assumptions such as `bash`, `lsof`, `xargs`, and `/dev/null` unless a corresponding profile was
+actually probed. A missing executable or unavailable-profile failure is treated as an environment fact for the
+remainder of that Run; the model must change approach instead of retrying the same assumption.
 
 The effective configuration distinguishes the provider/model window, prompt working budget, and output reserve.
 Within a Run, `/context` lists reclaimed estimated tokens from committed `context.compacted` events. A settled

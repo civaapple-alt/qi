@@ -1855,6 +1855,7 @@ async function buildTuiContextBlocks(
   const platformGuidance = process.platform === "win32"
     ? "Do not attempt POSIX-only bash, lsof, xargs, sleep, kill, or /dev/null syntax. Use the dedicated task tool for background-process lifecycle; for finite shell logic use the probed pwsh script profile only when pwsh=available, and use NUL only where a native Windows executable requires a null device."
     : "Use only the probed script profiles listed as available; do not assume a shell merely because its syntax is familiar.";
+  const scriptProfileList = availableProfiles.length > 0 ? availableProfiles.join(", ") : "none";
   const blocks: TuiContextBlock[] = [
     {
       id: "constitution",
@@ -1873,7 +1874,10 @@ async function buildTuiContextBlocks(
       source: "qi:host-environment",
       role: "system",
       content:
-        `Host execution facts: platform=${hostPlatform}; shell profiles: ${profileFacts}. The shell tool executes one direct executable plus argv and does not interpret pipes, redirection, command chaining, variable expansion, or shell builtins. The script tool accepts only these currently probed profiles: ${availableProfiles.length > 0 ? availableProfiles.join(", ") : "none"}. Multiple shell or script Actions may share a workdir in one Step; they still execute sequentially. Prefer one script Action when you need builtins, pipes, or multi-statement logic. Same-Step overlapping file or artifact mutations still fail with BATCH_WRITE_CONFLICT. ${platformGuidance} Treat a missing executable or unavailable-profile ToolFailure as an environment fact for the remainder of the Run: change approach and do not repeat the same unsupported assumption unless new probe evidence appears. These facts are regenerated from startup probes for every Run, so they take precedence over remembered shell assumptions from earlier conversations.`,
+        `Host execution facts: platform=${hostPlatform}. Authorized shell profiles (config/probe units, not a single tool): ${profileFacts}. ` +
+        `The shell tool is separate: it is enabled only when direct=available, spawns one executable plus argv, and does not interpret pipes, redirection, command chaining, variable expansion, or shell builtins. ` +
+        `The script tool is separate: it accepts only these currently probed profiles (${scriptProfileList}) and is the path for builtins, pipes, or multi-statement logic; never treat an argv-only shell limit as proof that pwsh/cmd/bash are unavailable. ` +
+        `Multiple shell or script Actions may share a workdir in one Step; they still execute sequentially. Prefer one script Action when you need builtins, pipes, or multi-statement logic. Same-Step overlapping file or artifact mutations still fail with BATCH_WRITE_CONFLICT. ${platformGuidance} Treat a missing executable or unavailable-profile ToolFailure as an environment fact for the remainder of the Run: change approach and do not repeat the same unsupported assumption unless new probe evidence appears. These facts are regenerated from startup probes for every Run, so they take precedence over remembered shell assumptions from earlier conversations.`,
       priority: 98,
       required: true,
       retentionReason: "Probed host execution environment",
@@ -1953,7 +1957,11 @@ function modeGuidance(mode: SessionMode, allowDelegate: boolean, allowWrite: boo
       "for the user's next turn. When information is sufficient, call plan_document create with one self-contained Formal " +
       "Plan Markdown document, or read then edit an existing plan using its latest SHA. It must include executor background, " +
       "numbered implementation steps, dependencies, conditional branches, interface impact, verification, and necessary " +
-      "assumptions. Numbered steps are design instructions, not Todo: never use task-list checkboxes or statuses. Do not edit " +
+      "assumptions. For executor background, state the host platform and defer host-execution detail to this Run's " +
+      "host:environment facts plus the advertised shell and script tool schemas: shell is direct argv-only spawn; script " +
+      "uses probed pwsh/cmd/bash profiles. Never collapse an argv-only shell limit into a claim that pwsh, cmd, or bash " +
+      "are unavailable, and never mark a profile listed as available as disabled. Do not invent a second host model. " +
+      "Numbered steps are design instructions, not Todo: never use task-list checkboxes or statuses. Do not edit " +
       "Workspace business files, run shell/script/verify/task, or claim execution started. The human must accept review; the " +
       "Executor will receive the accepted plan but none of this planning conversation."
     );
