@@ -294,11 +294,68 @@ test("Kimi thinking uses explicit disable for none and boolean enable for K2.7 C
   for (const value of ["high", "medium"]) {
     assert.equal(normalizeKimiReasoningEffort(value), "high");
   }
-  for (const value of ["low", "minimum", "light"]) {
+  for (const value of ["low", "minimum", "light", "minimal"]) {
     assert.equal(normalizeKimiReasoningEffort(value), "low");
   }
   assert.equal(normalizeKimiReasoningEffort("none"), "none");
-  assert.throws(() => normalizeKimiReasoningEffort("extreme"), /Unsupported Kimi reasoning effort/);
+  assert.throws(() => normalizeKimiReasoningEffort("extreme"), /Unsupported reasoning effort/);
+});
+
+test("DeepSeek Chat Completions sends thinking and echoes reasoning_content", async () => {
+  let captured;
+  const client = {
+    chat: {
+      completions: {
+        create(body) {
+          captured = body;
+          return asyncEvents([{
+            id: "chatcmpl_ds",
+            choices: [{
+              index: 0,
+              delta: { reasoning_content: "Think", content: "Answer" },
+              finish_reason: "stop",
+            }],
+          }]);
+        },
+      },
+    },
+  };
+  const port = new OpenAIChatCompletionsModelPort(client, {
+    providerNames: ["deepseek"],
+    reasoningEffort: "high",
+  });
+  const events = [];
+  for await (const event of port.stream({
+    requestId: "request-deepseek-001",
+    model: { provider: "deepseek", model: "deepseek-v4-pro" },
+    tools: [],
+    messages: [
+      { role: "user", content: [{ type: "text", text: "weather?" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Need the weather tool" },
+          { type: "tool-call", callId: "call_w", name: "get_weather", input: { city: "Hangzhou" } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", callId: "call_w", output: "cloudy", isError: false },
+        ],
+      },
+    ],
+  })) events.push(event);
+
+  assert.deepEqual(captured.thinking, { type: "enabled" });
+  assert.equal(captured.reasoning_effort, "high");
+  assert.equal(captured.messages[1].reasoning_content, "Need the weather tool");
+  assert.equal(captured.messages[1].tool_calls[0].id, "call_w");
+  assert.deepEqual(events.map((event) => event.type), [
+    "reasoning.delta",
+    "text.delta",
+    "completed",
+  ]);
 });
 
 test("Chat Completions maps ordered image input and tool-result media", async () => {

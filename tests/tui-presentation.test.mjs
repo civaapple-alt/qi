@@ -1620,6 +1620,155 @@ test("active Run folds older Steps but keeps bounded edit diffs in the retained 
   assert.match(presenter.renderWorking(true, 30_001, 80)[0], /still running/);
 });
 
+test("length-truncated thinking dumps stay collapsed in the transcript", () => {
+  const wall = `UNIQUE_THINKING_MARKER ${"thinking ".repeat(2_000)}${"tail ".repeat(200)}`;
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "length-thinking",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const stepId = "stp_length";
+  const runId = "run_length";
+  presenter.update([], {
+    sessionId: "ses_length",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: [runId],
+    runs: {
+      [runId]: {
+        runId,
+        trigger: "user",
+        mode: "agent",
+        status: "parked",
+        input: "continue",
+        stepOrder: [stepId],
+        steps: {
+          [stepId]: {
+            stepId,
+            status: "completed",
+            context: {
+              estimatedTokens: 100,
+              budgetTokens: 64_000,
+              includedBlockIds: [],
+              omittedBlockIds: [],
+            },
+            model: {
+              text: wall,
+              reasoning: wall,
+              finishReason: "length",
+            },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "parked", reason: "budget", detail: "Model output reached its length boundary" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+  });
+  const collapsed = presenter.render(80);
+  const transcript = collapsed.join("\n");
+  assert.ok(collapsed.length < 40, `expected compact transcript, got ${collapsed.length} lines`);
+  assert.match(transcript, /Thinking · Ctrl\+O/);
+  assert.match(transcript, /truncated model output · Ctrl\+O/);
+  // Handoff may show a one-line preview; the wall of CoT must not appear in full.
+  assert.equal((transcript.match(/UNIQUE_THINKING_MARKER/g) ?? []).length, 1);
+  assert.doesNotMatch(transcript, /thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking/);
+});
+
+test("live reasoning activity does not render as agent narration in the transcript", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "live-reasoning",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const stepId = "stp_live";
+  const runId = "run_live";
+  presenter.update([], {
+    sessionId: "ses_live",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: [runId],
+    currentRunId: runId,
+    runs: {
+      [runId]: {
+        runId,
+        trigger: "user",
+        mode: "agent",
+        status: "active",
+        input: "continue",
+        stepOrder: [stepId],
+        steps: {
+          [stepId]: {
+            stepId,
+            status: "running",
+            context: {
+              estimatedTokens: 100,
+              budgetTokens: 64_000,
+              includedBlockIds: [],
+              omittedBlockIds: [],
+            },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+  });
+  presenter.applyActivity({
+    type: "model.reasoning",
+    sessionId: "ses_live",
+    runId,
+    stepId,
+    text: `LIVE_REASONING_MARKER ${"wall ".repeat(4_000)}`,
+    provisional: true,
+  });
+  const transcript = presenter.render(80).join("\n");
+  assert.doesNotMatch(transcript, /LIVE_REASONING_MARKER/);
+  assert.doesNotMatch(transcript, /wall wall wall/);
+  const working = presenter.renderWorking(true, 0, 80).join("\n");
+  assert.match(working, /thinking ·/);
+});
+
 test("line-mode panel snapshots append after the transcript without interleaving", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",

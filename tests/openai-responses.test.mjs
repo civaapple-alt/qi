@@ -415,3 +415,94 @@ test("OpenAI adapter reports API failure and validates provider ownership", asyn
   ]);
   await assert.rejects(async () => port.capabilities({ provider: "anthropic", model: "test" }), /does not serve/);
 });
+
+test("DeepSeek Responses sends reasoning effort, omits metadata, and echoes reasoning items", async () => {
+  let captured;
+  const client = {
+    responses: {
+      create(body) {
+        captured = body;
+        return asyncEvents([
+          { type: "response.reasoning_text.delta", delta: "Plan", sequence_number: 1 },
+          { type: "response.completed", sequence_number: 2, response: completedResponse() },
+        ]);
+      },
+    },
+  };
+  const { getProviderProfile } = await import("@civaapple/qi-ai");
+  const port = new OpenAIResponsesModelPort(client, {
+    providerNames: ["deepseek"],
+    requestMetadata: false,
+    imageInput: false,
+    reasoningEffort: "minimal",
+    profile: getProviderProfile("deepseek"),
+    contextTokens: 1_048_576,
+  });
+  const caps = await port.capabilities({ provider: "deepseek", model: "deepseek-v4-flash" });
+  assert.equal(caps.contextTokens, 1_048_576);
+  assert.equal(caps.input.has("image"), false);
+  assert.equal(caps.promptCache, true);
+
+  for await (const _event of port.stream(request({
+    model: { provider: "deepseek", model: "deepseek-v4-flash" },
+    tools: [],
+    messages: [
+      { role: "user", content: [{ type: "text", text: "Use the tool" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "I should call read_file" },
+          { type: "tool-call", callId: "call_ds", name: "read_file", input: { path: "a.txt" } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", callId: "call_ds", output: { text: "ok" }, isError: false },
+        ],
+      },
+    ],
+  }))) {
+    // Drain.
+  }
+
+  assert.equal("metadata" in captured, false);
+  assert.deepEqual(captured.reasoning, { effort: "low" });
+  assert.equal(captured.input[1].type, "reasoning");
+  assert.deepEqual(captured.input[1].content, [
+    { type: "reasoning_text", text: "I should call read_file" },
+  ]);
+  assert.equal(captured.input[2].type, "function_call");
+});
+
+test("DeepSeek Responses rejects image input", async () => {
+  let called = false;
+  const client = {
+    responses: {
+      create() {
+        called = true;
+        return asyncEvents([]);
+      },
+    },
+  };
+  const port = new OpenAIResponsesModelPort(client, {
+    providerNames: ["deepseek"],
+    imageInput: false,
+  });
+  await assert.rejects(async () => {
+    for await (const _event of port.stream(request({
+      model: { provider: "deepseek", model: "deepseek-v4-flash" },
+      messages: [{
+        role: "user",
+        content: [{
+          type: "image",
+          uri: "data:image/png;base64,iVBORw0KGgo=",
+          mediaType: "image/png",
+        }],
+      }],
+    }))) {
+      // Drain.
+    }
+  }, /does not accept image input/);
+  assert.equal(called, false);
+});

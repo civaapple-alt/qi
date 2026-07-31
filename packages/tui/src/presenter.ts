@@ -1406,8 +1406,9 @@ export class TuiPresenter {
     const actionLines = this.renderStepActions(run, stepActions, options);
     const reasoningLines = this.renderReasoning(step);
     const agentLines = this.renderAgentText(step, run, options);
+    const liveText = this.#modelActivity.get(step.stepId);
     const narrationFirst = step.model?.finishReason === "actions"
-      || (step.status === "running" && Boolean(this.#modelActivity.get(step.stepId)?.text))
+      || (step.status === "running" && liveText?.type === "model.text" && Boolean(liveText.text))
       || (Boolean(step.model?.text?.trim()) && stepActions.length > 0 && step.model?.finishReason !== "stop");
     const lines: string[] = [];
     const pushBlock = (block: readonly string[]): void => {
@@ -1580,23 +1581,38 @@ export class TuiPresenter {
     options: { collapse?: boolean } = {},
   ): string[] {
     const final = step.model?.text;
+    const width = Math.max(40, this.#width - 2);
+    const stepExpanded = this.#expanded.has(`step:${step.stepId}`)
+      || this.#expanded.has("markdown:final");
     if (final) {
-      if (options.collapse && !this.#expanded.has(`step:${step.stepId}`)) {
+      if (options.collapse && !stepExpanded) {
         return [`· ${oneLine(final, 100)}`];
       }
       if (isPlainShortText(final)) return [final.trim()];
       const isTerminalStep = run.stepOrder.at(-1) === step.stepId && run.status !== "active" && run.status !== "triggered";
-      return renderMarkdown(final, {
-        width: Math.max(40, this.#width - 2),
-        expandCodeBlocks: this.#expanded.has("markdown:final") || this.#expanded.has(`step:${step.stepId}`),
+      // Length-truncated turns often dump a wall of thinking into `text`; keep the transcript compact
+      // unless the operator explicitly expands the Step.
+      if (!stepExpanded && (step.model?.finishReason === "length" || final.length > 4_000)) {
+        const lines = boundedDisplayTailLines(final, width, 8);
+        if (lines.length === 0) return [];
+        return [
+          ...lines,
+          `… truncated model output · Ctrl+O`,
+        ];
+      }
+      const rendered = renderMarkdown(final, {
+        width,
+        expandCodeBlocks: stepExpanded,
         maxCodeLines: isTerminalStep ? 40 : 16,
       });
+      return boundRenderedAgentLines(rendered, stepExpanded ? 120 : (isTerminalStep ? 48 : 24));
     }
+    // Live reasoning belongs in the Working strip / Thinking block — never as agent narration.
     const liveModel = this.#modelActivity.get(step.stepId);
-    if (!liveModel?.text) return [];
+    if (!liveModel || liveModel.type !== "model.text" || !liveModel.text) return [];
     if (options.collapse) return [`· ${oneLine(liveModel.text, 100)}`];
     if (isPlainShortText(liveModel.text)) return [liveModel.text.trim()];
-    return boundedTailLines(liveModel.text, 8);
+    return boundedDisplayTailLines(liveModel.text, width, 8);
   }
 
   private renderReasoning(step: StepView): string[] {
@@ -2398,6 +2414,15 @@ function boundedDisplayTailLines(value: string, width: number, limit: number): s
     if (line.trim()) wrapped.push(line.trim());
   }
   return wrapped.slice(-limit);
+}
+
+/** Cap markdown/prose blocks so a length-truncated thinking dump cannot fill the TUI. */
+function boundRenderedAgentLines(lines: readonly string[], limit: number): string[] {
+  if (lines.length <= limit) return [...lines];
+  return [
+    ...lines.slice(-limit),
+    `… ${lines.length - limit} earlier lines · Ctrl+O`,
+  ];
 }
 
 function normalizedLineCount(value: string): number {

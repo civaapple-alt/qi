@@ -2,6 +2,7 @@ import {
   getProviderModelProfile,
   listProviderProfiles,
   providerModelContextTokens,
+  providerModelOutputReserveTokens,
   type ProviderProfile,
 } from "@civaapple/qi-ai";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
@@ -19,6 +20,11 @@ import { t, type Locale, type MessageKey } from "../i18n.js";
 import type { TuiPresenter } from "../presenter.js";
 import type { TimelineDensity } from "../presenter.js";
 import { formatProviderLabel } from "../provider.js";
+import {
+  resolveOutputReserveTokens,
+  TUI_MAX_ACTIONS_PER_STEP_PRESETS,
+  TUI_MAX_STEPS_PRESETS,
+} from "../runtime.js";
 import type { ThemeName } from "../theme/index.js";
 import type { SessionId } from "@civaapple/qi-protocol";
 import type { SessionEntry } from "../session-list.js";
@@ -71,6 +77,7 @@ export interface PanelFlowContext {
       model: string;
       reasoningEffort?: string;
       contextWindowTokens: number;
+      outputReserveTokens: number;
       imageInput?: boolean;
     },
     persistence: "account" | "session",
@@ -107,6 +114,8 @@ export interface PanelFlowContext {
   readonly saveShell: (shell: QiShellConfig) => void;
   readonly currentMaxSteps: () => number;
   readonly saveMaxSteps: (maxSteps: number) => void;
+  readonly currentMaxActionsPerStep: () => number;
+  readonly saveMaxActionsPerStep: (maxActionsPerStep: number) => void;
   readonly applyVerificationSetup: (selected: readonly VerificationCandidate[]) => void;
   readonly installSkill: (source: string, scope: "user" | "workspace") => void;
   readonly listTasks: () => ProcessTaskView[];
@@ -125,6 +134,13 @@ function maxVisible(rows: number): number {
   return Math.max(6, rows - 12);
 }
 
+/** SessionsPanel entries are multi-line (title + meta + preview + gap); keep the overlay compact. */
+function sessionsMaxVisible(rows: number): number {
+  const linesPerSession = 4;
+  const chrome = 16;
+  return Math.max(3, Math.min(5, Math.floor(Math.max(0, rows - chrome) / linesPerSession)));
+}
+
 export function openSettingsPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   ctx.panels.push(new ListPanel({
@@ -136,6 +152,11 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
       { id: "permissions", label: t(locale, "settings.permissions"), description: t(locale, "settings.permissions.desc") },
       { id: "shell", label: t(locale, "settings.shell"), description: t(locale, "settings.shell.desc") },
       { id: "max-steps", label: t(locale, "settings.max-steps"), description: t(locale, "settings.max-steps.desc") },
+      {
+        id: "max-actions-per-step",
+        label: t(locale, "settings.max-actions-per-step"),
+        description: t(locale, "settings.max-actions-per-step.desc"),
+      },
       { id: "providers", label: t(locale, "settings.providers"), description: t(locale, "settings.providers.desc") },
       { id: "config", label: t(locale, "settings.config"), description: t(locale, "settings.config.desc") },
       { id: "context", label: t(locale, "settings.context"), description: t(locale, "settings.context.desc") },
@@ -163,6 +184,10 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
       }
       if (item.id === "max-steps") {
         openMaxStepsPanel(ctx);
+        return;
+      }
+      if (item.id === "max-actions-per-step") {
+        openMaxActionsPerStepPanel(ctx);
         return;
       }
       if (item.id === "providers") {
@@ -660,7 +685,9 @@ export function supportedEffortsForModel(profile: ProviderProfile, model: string
 export function openMaxStepsPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   const current = ctx.currentMaxSteps();
-  const presets = [16, 32, 48, 64, 80, 100] as const;
+  const presets = (TUI_MAX_STEPS_PRESETS as readonly number[]).includes(current)
+    ? [...TUI_MAX_STEPS_PRESETS]
+    : [...TUI_MAX_STEPS_PRESETS, current].sort((left, right) => left - right);
   ctx.panels.push(new ListPanel({
     title: t(locale, "max_steps.title"),
     hints: t(locale, "max_steps.hints"),
@@ -678,6 +705,35 @@ export function openMaxStepsPanel(ctx: PanelFlowContext): void {
       const steps = Number(item.id);
       ctx.panels.closeAll();
       ctx.saveMaxSteps(steps);
+    },
+  }));
+}
+
+export function openMaxActionsPerStepPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const current = ctx.currentMaxActionsPerStep();
+  const presets = (TUI_MAX_ACTIONS_PER_STEP_PRESETS as readonly number[]).includes(current)
+    ? [...TUI_MAX_ACTIONS_PER_STEP_PRESETS]
+    : [...TUI_MAX_ACTIONS_PER_STEP_PRESETS, current].sort((left, right) => left - right);
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "max_actions_per_step.title"),
+    hints: t(locale, "max_actions_per_step.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items: presets.map((count) => ({
+      id: String(count),
+      label: String(count),
+      description: count === current
+        ? (locale === "zh" ? "当前" : "Current")
+        : (locale === "zh"
+          ? `每个 Step 最多执行 ${count} 个 Action`
+          : `Execute up to ${count} Actions per Step`),
+      current: count === current,
+    })),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      const count = Number(item.id);
+      ctx.panels.closeAll();
+      ctx.saveMaxActionsPerStep(count);
     },
   }));
 }
@@ -1099,7 +1155,7 @@ export function openSessionsPanel(ctx: PanelFlowContext): void {
     }),
     items,
     ...(currentIndex > 0 ? { initialSelected: currentIndex } : {}),
-    maxVisible: Math.max(3, Math.floor(maxVisible(ctx.terminalRows) / 2)),
+    maxVisible: sessionsMaxVisible(ctx.terminalRows),
     onClose: ctx.panels.dismiss,
     onArchive: (item) => {
       const sessionId = (item.sessionId ?? item.id) as SessionId;
@@ -1195,6 +1251,12 @@ export function openModelConfigurationPanel(ctx: PanelFlowContext): void {
       initialValue: String(status.contextWindowTokens),
       required: true,
     },
+    {
+      id: "outputReserveTokens",
+      label: locale === "zh" ? "最大输出（tokens）" : "Max output tokens",
+      initialValue: String(ctx.presenter.launch.outputReserveTokens),
+      required: true,
+    },
     ...(status.provider === "compatible"
       ? [{
           id: "imageInput",
@@ -1224,26 +1286,46 @@ export function openModelConfigurationPanel(ctx: PanelFlowContext): void {
       ? `${status.provider}:${status.accountAlias} · endpoint ${status.baseURL} (read-only)`
       : `${status.provider}:${status.accountAlias}`,
     fields,
-    onChange: (fieldId, value) => {
-      if (fieldId !== "model" || !value) return;
-      const next = profile.models?.find((candidate) => candidate.id === value);
-      return {
-        contextWindowTokens: String(providerModelContextTokens(profile, value)),
-        ...(next?.thinking?.defaultEffort === undefined
-          ? {}
-          : { reasoningEffort: next.thinking.defaultEffort }),
-      };
+    onChange: (fieldId, value, values) => {
+      if (fieldId === "model" && value) {
+        const next = profile.models?.find((candidate) => candidate.id === value);
+        const windowTokens = providerModelContextTokens(profile, value);
+        return {
+          contextWindowTokens: String(windowTokens),
+          outputReserveTokens: String(resolveOutputReserveTokens(
+            windowTokens,
+            providerModelOutputReserveTokens(profile, value),
+          )),
+          ...(next?.thinking?.defaultEffort === undefined
+            ? {}
+            : { reasoningEffort: next.thinking.defaultEffort }),
+        };
+      }
+      if (fieldId === "contextWindowTokens" && value) {
+        const windowTokens = Number(value);
+        if (!Number.isInteger(windowTokens) || windowTokens < 8_192) return;
+        const modelId = (values.model ?? status.model).trim() || status.model;
+        return {
+          outputReserveTokens: String(resolveOutputReserveTokens(
+            windowTokens,
+            providerModelOutputReserveTokens(profile, modelId),
+          )),
+        };
+      }
+      return;
     },
     submitLabel: locale === "zh" ? "应用" : "Apply",
     onClose: ctx.panels.dismiss,
     onSubmit: (values) => {
       ctx.panels.closeAll();
+      const contextWindowTokens = parseLoginContextWindow(values.contextWindowTokens);
       ctx.configureModel({
         model: (values.model ?? "").trim(),
         ...(values.reasoningEffort === undefined
           ? {}
           : { reasoningEffort: values.reasoningEffort }),
-        contextWindowTokens: parseLoginContextWindow(values.contextWindowTokens),
+        contextWindowTokens,
+        outputReserveTokens: parseLoginOutputReserve(values.outputReserveTokens, contextWindowTokens),
         ...(status.provider === "compatible"
           ? { imageInput: values.imageInput === "true" }
           : {}),
@@ -1289,8 +1371,8 @@ async function openProviderAuthPanel(ctx: PanelFlowContext, providerId: string):
           id: "configure",
           label: locale === "zh" ? "配置模型（无需重新登录）" : "Configure model (no re-login)",
           description: locale === "zh"
-            ? "修改 model / effort / context / 图片能力，不读取密钥"
-            : "Change model / effort / context / image capability without reading the secret",
+            ? "修改 model / effort / context / max output / 图片能力，不读取密钥"
+            : "Change model / effort / context / max output / image capability without reading the secret",
         }]
       : []),
     ...(profile.authSchemes.includes("api-key")
@@ -1564,6 +1646,17 @@ function parseLoginContextWindow(value: string | undefined): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 8_192 || parsed > 2_000_000) {
     throw new RangeError("Context window must be an integer from 8192 to 2000000 tokens.");
+  }
+  return parsed;
+}
+
+function parseLoginOutputReserve(value: string | undefined, contextWindowTokens: number): number {
+  const parsed = Number(value);
+  const hardCap = Math.floor(contextWindowTokens / 8);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > hardCap) {
+    throw new RangeError(
+      `Max output tokens must be an integer from 1 to ${hardCap} (1/8 of the context window).`,
+    );
   }
   return parsed;
 }

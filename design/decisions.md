@@ -87,6 +87,10 @@ before it can enter the Tool Registry.
 - Terminal model text and reasoning, Action settlement, failure meaning, and Artifact references enter the
   Session stream once. A UI may render committed reasoning as a distinct Thinking block, but it remains
   explanatory model output rather than evidence.
+- For providers that require thinking-mode tool continuation, the Turn Loop may echo committed reasoning into
+  the same-Run portable `ModelMessage` history (as a non-evidence reasoning part) so adapters can round-trip it.
+  Cross-Run conversation restore does not revive that CoT into long-term model memory, and reasoning never
+  becomes Goal or verification evidence.
 
 After a crash, only committed events and Artifacts are reconstructed.
 
@@ -113,9 +117,11 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 
 ## ADR-0009: use explicit provider profiles and execution-side credentials
 
-- Provider profiles declare wire API, base URL, auth schemes, transport capabilities, and model-specific context
-  windows or thinking modes where those differ within one provider.
-- Qi never probes failed endpoints to guess a wire API.
+- Provider profiles declare a default wire API, base URL, auth schemes, transport capabilities, and
+  model-specific context windows, thinking modes, or wire-API overrides where those differ within one provider.
+- A model entry may override the profile wire API (for example DeepSeek `deepseek-v4-flash` uses Responses while
+  `deepseek-v4-pro` stays on Chat Completions until the vendor supports Responses). Selection remains explicit
+  from the profile catalog; Qi never probes failed endpoints to guess a wire API.
 - Responses and Chat Completions adapters remain thin implementations of one portable model protocol.
 - Provider-specific thinking fields are derived deterministically from the selected model profile and explicit
   operator configuration; unknown effort values fail before network execution.

@@ -18,7 +18,12 @@ import {
   type ModelRef,
   type ModelRequest,
 } from "./model.js";
-import { normalizeFunctionParameters } from "./openai-chat-completions.js";
+import { normalizeFunctionParameters, normalizeReasoningEffort } from "./openai-chat-completions.js";
+import {
+  getProviderModelProfile,
+  type ProviderProfile,
+  type ProviderThinkingEffort,
+} from "./provider-profile.js";
 
 export interface OpenAIResponsesClient {
   responses: {
@@ -38,6 +43,12 @@ export interface OpenAIResponsesModelPortOptions {
   store?: boolean;
   /** Send portable request metadata to providers that support the Responses metadata field. */
   requestMetadata?: boolean;
+  /** When false, image parts are rejected at the adapter boundary. Defaults to true. */
+  imageInput?: boolean;
+  /** Operator-selected thinking effort; resolved against the model profile when present. */
+  reasoningEffort?: string | null;
+  /** Optional profile for per-model thinking defaults. */
+  profile?: ProviderProfile;
 }
 
 const DEFAULT_CONTEXT_TOKENS = 128_000;
@@ -53,6 +64,9 @@ export class OpenAIResponsesModelPort implements ModelPort {
   readonly #contextTokens: number;
   readonly #store: boolean;
   readonly #requestMetadata: boolean;
+  readonly #imageInput: boolean;
+  readonly #reasoningEffort: string | null | undefined;
+  readonly #profile: ProviderProfile | undefined;
 
   constructor(client: OpenAIResponsesClient, options: OpenAIResponsesModelPortOptions = {}) {
     this.#client = client;
@@ -60,6 +74,9 @@ export class OpenAIResponsesModelPort implements ModelPort {
     this.#contextTokens = options.contextTokens ?? DEFAULT_CONTEXT_TOKENS;
     this.#store = options.store ?? false;
     this.#requestMetadata = options.requestMetadata ?? true;
+    this.#imageInput = options.imageInput ?? true;
+    this.#reasoningEffort = options.reasoningEffort;
+    this.#profile = options.profile;
     if (this.#providerNames.size === 0) throw new TypeError("At least one provider name is required");
     if (!Number.isInteger(this.#contextTokens) || this.#contextTokens <= 0) {
       throw new RangeError("contextTokens must be a positive integer");
@@ -75,9 +92,15 @@ export class OpenAIResponsesModelPort implements ModelPort {
 
   async capabilities(model: ModelRef): Promise<ModelCapabilities> {
     this.#assertProvider(model);
+    const input = new Set<"text" | "image" | "artifact">(["text"]);
+    if (this.#imageInput) input.add("image");
+    const output = new Set<"text" | "reasoning" | "action">(["text", "action"]);
+    if (this.#profile === undefined || this.#profile.capabilities.reasoning) {
+      output.add("reasoning");
+    }
     return {
-      input: new Set(["text", "image"]),
-      output: new Set(["text", "reasoning", "action"]),
+      input,
+      output,
       contextTokens: this.#contextTokens,
       parallelActions: true,
       promptCache: true,
@@ -89,9 +112,16 @@ export class OpenAIResponsesModelPort implements ModelPort {
     this.#assertProvider(request.model);
     throwIfAborted(signal);
 
-    const body: ResponseCreateParamsStreaming = {
+    const reasoning = responsesReasoningConfig(
+      this.#profile,
+      request.model.model,
+      this.#reasoningEffort,
+    );
+    const body: ResponseCreateParamsStreaming & {
+      reasoning?: { effort: ProviderThinkingEffort | "none" | "minimal" | "medium" | "xhigh" };
+    } = {
       model: request.model.model,
-      input: toResponseInput(request.messages),
+      input: toResponseInput(request.messages, { imageInput: this.#imageInput }),
       tools: request.tools.map((tool) => ({
         type: "function" as const,
         name: tool.name,
@@ -107,6 +137,7 @@ export class OpenAIResponsesModelPort implements ModelPort {
       ...(!this.#requestMetadata || request.metadata === undefined
         ? {}
         : { metadata: request.metadata }),
+      ...(reasoning === undefined ? {} : { reasoning }),
     };
 
     const stream = await this.#client.responses.create(
@@ -171,7 +202,36 @@ export class OpenAIResponsesModelPort implements ModelPort {
   }
 }
 
-function toResponseInput(messages: readonly ModelMessage[]): ResponseInputItem[] {
+function responsesReasoningConfig(
+  profile: ProviderProfile | undefined,
+  model: string,
+  requestedEffort: string | null | undefined,
+): { effort: ProviderThinkingEffort | "none" } | undefined {
+  if (profile === undefined) {
+    const effort = normalizeReasoningEffort(requestedEffort);
+    return effort === undefined ? undefined : { effort };
+  }
+  const modelProfile = getProviderModelProfile(profile, model);
+  if (!modelProfile?.thinking && requestedEffort === undefined) return undefined;
+  const effort = normalizeReasoningEffort(requestedEffort);
+  if (effort === "none") return { effort: "none" };
+  if (!modelProfile?.thinking) {
+    return effort === undefined ? undefined : { effort };
+  }
+  if (modelProfile.thinking.mode === "toggle") {
+    return { effort: "high" };
+  }
+  const supported = modelProfile.thinking.supportedEfforts;
+  const selected = effort !== undefined && supported?.includes(effort)
+    ? effort
+    : modelProfile.thinking.defaultEffort ?? supported?.[0] ?? "high";
+  return { effort: selected };
+}
+
+function toResponseInput(
+  messages: readonly ModelMessage[],
+  options: { imageInput: boolean },
+): ResponseInputItem[] {
   const input: ResponseInputItem[] = [];
   // Keep function_call_output items contiguous for a parallel tool batch; defer synthetic
   // user media messages until that batch ends (same contract as Chat Completions).
@@ -203,7 +263,21 @@ function toResponseInput(messages: readonly ModelMessage[]): ResponseInputItem[]
         case "text":
           pending.push({ type: "input_text", text: part.text });
           break;
+        case "reasoning":
+          flush();
+          if (message.role !== "assistant") {
+            throw new TypeError("reasoning parts must belong to an assistant message");
+          }
+          flushToolMedia();
+          input.push({
+            type: "reasoning",
+            content: [{ type: "reasoning_text", text: part.text }],
+          } as ResponseInputItem);
+          break;
         case "image":
+          if (!options.imageInput) {
+            throw new TypeError("This Responses provider profile does not accept image input");
+          }
           assertSupportedImageUri(part);
           pending.push({ type: "input_image", image_url: part.uri, detail: "auto" });
           break;
@@ -235,6 +309,9 @@ function toResponseInput(messages: readonly ModelMessage[]): ResponseInputItem[]
             output: encodeJson({ ok: !part.isError, output }),
           });
           if (images.length > 0) {
+            if (!options.imageInput) {
+              throw new TypeError("This Responses provider profile does not accept image input");
+            }
             pendingToolMedia.push({
               type: "message",
               role: "user",

@@ -5,6 +5,9 @@ import { defaultUserConfigPath, persistUserProviderDefaults } from "./config.js"
 export async function persistLoginProviderDefaults(
   status: AuthSessionStatus,
   configPath = defaultUserConfigPath(),
+  extras?: {
+    readonly outputReserveTokens?: number;
+  },
 ): Promise<string> {
   const saved = await persistUserProviderDefaults(
     {
@@ -18,6 +21,9 @@ export async function persistLoginProviderDefaults(
       ...(status.contextWindowTokensOverride
         ? { contextWindowTokens: status.contextWindowTokens }
         : {}),
+      ...(extras?.outputReserveTokens === undefined
+        ? {}
+        : { outputReserveTokens: extras.outputReserveTokens }),
       ...(status.provider === "compatible" ? { imageInput: status.imageInput } : {}),
     },
     configPath,

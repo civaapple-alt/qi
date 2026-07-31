@@ -18,6 +18,13 @@ export const ModelContentPartSchema = Type.Union([
   ),
   Type.Object(
     {
+      type: Type.Literal("reasoning"),
+      text: Type.String({ maxLength: 1_000_000 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
       type: Type.Literal("image"),
       uri: Type.String({ minLength: 1, maxLength: 6_000_000 }),
       mediaType: Type.String({ minLength: 1, maxLength: 200 }),

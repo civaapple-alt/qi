@@ -10,6 +10,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- DeepSeek V4 Flash Responses adaptation: `deepseek-v4-flash` uses the Responses wire API with 1M context,
+  effort thinking (`low`/`high`/`max`), and no image/`metadata` fields; `deepseek-v4-pro` stays on Chat
+  Completions until the vendor supports Responses. Portable `{ type: "reasoning" }` parts echo committed CoT
+  on same-Run tool-call turns so thinking-mode tool continuation does not 400. See ADR-0005 / ADR-0009.
 - Session-local 追寻: optional `run.triggered.goalBinding` / `trigger: "goal"`, TurnLoop Goal ContextBlock and
   attempt/token budget accounting, portable `settleGoalBoundTurn` after Goal-bound Runs, and CLI `/goal`
   (plan-like: `/goal <objective>` creates and starts; bare `/goal` opens a status + actions hub including
@@ -19,6 +23,8 @@ backup plus reset or a new data root rather than an automatic migration.
   gates for forbidden Actions, test tampering, and false completion.
 - Settings and `/max-steps` alias for the existing Step budget; the selected value persists to user config and
   hot-applies to the next Run.
+- Settings and `/max-actions-per-step` for the per-Step Action batch limit; persists `max_actions_per_step` to
+  user config (1–32, default 6) and applies on the next Run.
 - Read-only `git` tool operations: `log` (bounded oneline), `rev-parse`, `show` (metadata + stat), `branch`, and
   `remote`, still under read authority so Ask/Plan can inspect history without execute.
 - `qi_session_inspect` `operation=recovery` returns one bounded projection for the newest interrupted
@@ -27,6 +33,19 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- `/sessions` shows fewer entries by default (about 3–5, capped at 5) so the multi-line Session cards
+  no longer fill a typical TUI height; ↑↓ still scrolls the full list.
+- `max_steps` range is now 8–1000 (was 8–100). `/max-steps` and Settings presets are
+  16 / 32 / 64 / 100 / 200 / 500 / 1000; TOML and `--max-steps` still accept any integer in range.
+- Per-Step Action batch limit is configurable: user `max_actions_per_step` (1–32, default 6), Settings /
+  `/max-actions-per-step` presets 2 / 4 / 6 / 8 / 12 / 16, persisted to `~/.qi/config.toml`.
+- Provider profiles may override wire API per model (`resolveProviderWireApi`); DeepSeek defaults to Responses
+  for Flash while Pro remains Chat Completions. CLI `/login`, config `reasoning_effort`, and `QI_REASONING_EFFORT`
+  accept DeepSeek as well as Kimi.
+- DeepSeek V4 catalog models recommend a 65,536-token output reserve (thinking shares `max_output_tokens`), so
+  the CLI no longer parks high-effort Flash/Pro turns on the generic 16k length boundary as readily.
+- `/model` shows and edits **Max output tokens** (output reserve). Account save writes `output_reserve_tokens`
+  to `~/.qi/config.toml` (still hard-capped at 1/8 of the context window; catalog default when unset).
 - `edit` accepts multi-hunk `edits[]` matched against the original file snapshot in one atomic write (with
   freshness `expectedSha256`), limited fuzzy matching for trailing whitespace / smart quotes / dashes, and
   `EDIT_TARGETS_OVERLAP` for nested hunks. Legacy top-level `oldText`/`newText` still normalize to one hunk.
@@ -40,8 +59,9 @@ backup plus reset or a new data root rather than an automatic migration.
 - `/goal` hub **Continue** starts the next Goal-bound Run immediately; **Continue with guidance…** is a separate
   optional form when corrections should become the next Run input (`continueGoal(guidance)`).
 - Session-local 追寻 settlement is portable (`settleGoalBoundTurn`); CLI surfaces post-Run Goal notices; Session
-  resume demotes `active` Goals to `paused`; `/goal` hub Accept records human evidence toward verified complete;
-  Goal ContextBlock states bounded-slice / non-narrative completion discipline.
+  resume demotes `active` Goals to `paused`; `/goal` hub Accept records human evidence toward verified complete
+  (acceptance note optional; fail/unknown re-evaluate still requires rationale); Goal ContextBlock states
+  bounded-slice / non-narrative completion discipline.
 - CLI model context is now assembled as deterministic policy, mode, capability, host, Workspace, Memory, and
   per-Skill blocks. Required policy and advertised Tool schemas reserve budget before whole restored turns;
   one conservative Unicode-aware estimator accounts for blocks, messages, framing, and schemas.
@@ -77,6 +97,9 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Fixed
 
+- Length-truncated model turns (thinking exhausting `max_output_tokens`) no longer flood the interactive
+  transcript with a wall of CoT/`text`; the TUI keeps Thinking collapsed and shows a short truncated
+  tail unless the Step is expanded. Live `model.reasoning` activity stays in the Working strip only.
 - Edit/write TUI cards show the full Workspace-relative path instead of only the last two segments, so they
   match `read` discovery paths when diagnosing `EDIT_TARGET_NOT_FOUND`.
 - Absolute paths under the Workspace (and authorized read mounts) are rewritten onto the authorized root for
@@ -107,6 +130,9 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Documentation
 
+- CLI interaction-model / README and TUI README document `max_actions_per_step`, `/model` max output tokens
+  (`output_reserve_tokens`), compact `/sessions`, Goal Accept optional notes, and length-truncated Thinking
+  display bounds.
 - Added the CLI model-context composition, precedence, disclosure, and omission contract plus normalized
   Ask/Plan/Agent prompt goldens.
 - Corrected the self-model and protocol compatibility links to the current ADR-0014 heading.

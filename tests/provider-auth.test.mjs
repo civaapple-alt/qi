@@ -6,10 +6,13 @@ import test from "node:test";
 import { InMemoryCredentialBroker } from "@civaapple/qi-agent/capability";
 import { EncryptedFileCredentialStore } from "@civaapple/qi-node/storage";
 import {
+  createModelPortForProfile,
   getProviderModelProfile,
   getProviderProfile,
   listProviderProfiles,
   providerModelContextTokens,
+  providerModelOutputReserveTokens,
+  resolveProviderWireApi,
 } from "@civaapple/qi-ai";
 import { AuthSession, parseLoginCommand } from "../apps/cli/dist/auth.js";
 import {
@@ -25,9 +28,11 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.ok(ids.includes("openai"));
   assert.ok(ids.includes("kimi"));
   assert.ok(ids.includes("compatible"));
+  assert.ok(ids.includes("deepseek"));
   assert.equal(getProviderProfile("openai")?.wireApi, "responses");
   assert.equal(getProviderProfile("kimi")?.wireApi, "chat.completions");
   assert.equal(getProviderProfile("compatible")?.wireApi, "chat.completions");
+  assert.equal(getProviderProfile("deepseek")?.wireApi, "responses");
   assert.equal(getProviderProfile("compatible")?.displayName, "OpenAI Compatible");
   assert.equal(getProviderProfile("openai")?.officialBaseURL, "https://api.openai.com/v1");
   assert.equal(getProviderProfile("kimi")?.capabilities.toolCalls, true);
@@ -49,6 +54,30 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.deepEqual(getProviderModelProfile(kimi, "kimi-for-coding")?.thinking, {
     mode: "toggle",
   });
+  const deepseek = getProviderProfile("deepseek");
+  assert.ok(deepseek);
+  assert.equal(deepseek.defaultModel, "deepseek-v4-flash");
+  assert.equal(providerModelContextTokens(deepseek, "deepseek-v4-flash"), 1_048_576);
+  assert.equal(providerModelContextTokens(deepseek, "deepseek-v4-pro"), 1_048_576);
+  assert.equal(providerModelOutputReserveTokens(deepseek, "deepseek-v4-flash"), 65_536);
+  assert.equal(providerModelOutputReserveTokens(deepseek, "deepseek-v4-pro"), 65_536);
+  assert.equal(resolveProviderWireApi(deepseek, "deepseek-v4-flash"), "responses");
+  assert.equal(resolveProviderWireApi(deepseek, "deepseek-v4-pro"), "chat.completions");
+  assert.equal(deepseek.capabilities.requestMetadata, false);
+  assert.equal(deepseek.capabilities.reasoning, true);
+  assert.deepEqual(getProviderModelProfile(deepseek, "deepseek-v4-flash")?.thinking, {
+    mode: "effort",
+    supportedEfforts: ["low", "high", "max"],
+    defaultEffort: "high",
+  });
+  assert.equal(
+    createModelPortForProfile(deepseek, { apiKey: "sk-test", model: "deepseek-v4-flash" }).constructor.name,
+    "OpenAIResponsesModelPort",
+  );
+  assert.equal(
+    createModelPortForProfile(deepseek, { apiKey: "sk-test", model: "deepseek-v4-pro" }).constructor.name,
+    "OpenAIChatCompletionsModelPort",
+  );
 });
 
 test("compatible provider labels use the configured name", () => {
@@ -71,6 +100,27 @@ test("resolveProviderConfig allows missing credentials for unauthenticated start
   assert.equal(config.authStatus, "missing");
   assert.equal(config.wireApi, "chat.completions");
   assert.equal(config.apiKey, undefined);
+});
+
+test("resolveProviderConfig selects DeepSeek wire API and effort per model", () => {
+  const flash = resolveProviderConfig({
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    reasoningEffort: "minimal",
+    allowMissingCredential: true,
+    environment: {},
+  });
+  assert.equal(flash.wireApi, "responses");
+  assert.equal(flash.reasoningEffort, "low");
+  const pro = resolveProviderConfig({
+    provider: "deepseek",
+    model: "deepseek-v4-pro",
+    reasoningEffort: "max",
+    allowMissingCredential: true,
+    environment: {},
+  });
+  assert.equal(pro.wireApi, "chat.completions");
+  assert.equal(pro.reasoningEffort, "max");
 });
 
 test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported values", () => {
@@ -97,7 +147,7 @@ test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported
   }).reasoningEffort, "max");
   assert.throws(
     () => resolveProviderConfig({ ...base, reasoningEffort: "extreme" }),
-    /Unsupported Kimi reasoning effort/,
+    /Unsupported reasoning effort/,
   );
   assert.throws(
     () => resolveProviderConfig({
@@ -107,7 +157,7 @@ test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported
       allowMissingCredential: true,
       environment: {},
     }),
-    /only by the Kimi provider/,
+    /only by the Kimi and DeepSeek providers/,
   );
 });
 
@@ -273,11 +323,22 @@ test("API-key login accepts an explicit model override", async () => {
       store: new EncryptedFileCredentialStore(root),
     });
     const status = await auth.loginApiKey("deepseek", "sk-deepseek-test", {
-      model: "deepseek-reasoner",
+      model: "deepseek-v4-flash",
+      reasoningEffort: "high",
     });
     assert.equal(status.provider, "deepseek");
-    assert.equal(status.model, "deepseek-reasoner");
+    assert.equal(status.model, "deepseek-v4-flash");
+    assert.equal(status.wireApi, "responses");
+    assert.equal(status.reasoningEffort, "high");
     assert.equal(auth.config.baseURL, "https://api.deepseek.com/v1");
+    assert.equal(auth.requireModelPort().constructor.name, "OpenAIResponsesModelPort");
+
+    const pro = await auth.loginApiKey("deepseek", "sk-deepseek-pro", {
+      model: "deepseek-v4-pro",
+    });
+    assert.equal(pro.model, "deepseek-v4-pro");
+    assert.equal(pro.wireApi, "chat.completions");
+    assert.equal(auth.requireModelPort().constructor.name, "OpenAIChatCompletionsModelPort");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

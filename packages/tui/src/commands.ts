@@ -90,6 +90,13 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
 
   { name: "config", descriptionKey: "cmd.config", category: "inspect", visibility: "alias", panel: "config" },
   { name: "max-steps", descriptionKey: "cmd.max-steps", category: "manage", visibility: "alias", draftPolicy: "preserve" },
+  {
+    name: "max-actions-per-step",
+    descriptionKey: "cmd.max-actions-per-step",
+    category: "manage",
+    visibility: "alias",
+    draftPolicy: "preserve",
+  },
   { name: "context", descriptionKey: "cmd.context", category: "inspect", visibility: "alias", panel: "context" },
   { name: "providers", descriptionKey: "cmd.providers", category: "inspect", visibility: "alias" },
   { name: "skill", descriptionKey: "cmd.skill", category: "manage", visibility: "alias" },
@@ -127,6 +134,7 @@ export function autocompleteSlashCommands(locale: Locale = defaultLocale()): rea
           || command.name === "context"
           || command.name === "providers"
           || command.name === "max-steps"
+          || command.name === "max-actions-per-step"
           || command.name === "exit"
         )))
       .map((command) => toSlashCommand(command, locale)),

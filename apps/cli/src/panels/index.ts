@@ -9,6 +9,7 @@ export {
   openHelpPanel,
   openHistoryListPanel,
   openLanguagePanel,
+  openMaxActionsPerStepPanel,
   openMaxStepsPanel,
   openModePanel,
   openModelConfigurationPanel,

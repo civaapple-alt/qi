@@ -74,6 +74,7 @@ import {
   capabilityIdsFromLaunchLabels,
   openHelpPanel,
   openHistoryListPanel,
+  openMaxActionsPerStepPanel,
   openMaxStepsPanel,
   openModePanel,
   openModelConfigurationPanel,
@@ -1368,6 +1369,27 @@ export class InteractiveTui {
     }, "Step budget");
   }
 
+  #saveMaxActionsPerStep(maxActionsPerStep: number): void {
+    if (this.#runtime.active) {
+      this.#presenter.setNotice(t(this.#presenter.locale(), "max_actions_per_step.active"));
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const configPath = this.#presenter.launch.configPath ?? defaultUserConfigPath();
+      const applied = await this.#runtime.applyMaxActionsPerStep(maxActionsPerStep, { configPath });
+      this.#presenter.launch = {
+        ...this.#presenter.launch,
+        maxActionsPerStep: applied.maxActionsPerStep,
+      };
+      const locale = this.#presenter.locale();
+      this.#presenter.setNotice(t(locale, "max_actions_per_step.saved", {
+        count: String(applied.maxActionsPerStep),
+        path: applied.configPath,
+      }));
+    }, "Action batch");
+  }
+
   #installSkill(source: string, scope: "user" | "workspace"): void {
     if (this.#runtime.active) {
       this.#presenter.setNotice("Cannot install a Skill while a Run is active.");
@@ -1562,6 +1584,8 @@ export class InteractiveTui {
       saveShell: (shell) => this.#saveShell(shell),
       currentMaxSteps: () => this.#runtime.maxSteps(),
       saveMaxSteps: (maxSteps) => this.#saveMaxSteps(maxSteps),
+      currentMaxActionsPerStep: () => this.#runtime.maxActionsPerStep(),
+      saveMaxActionsPerStep: (maxActionsPerStep) => this.#saveMaxActionsPerStep(maxActionsPerStep),
       applyVerificationSetup: (selected) => this.#applyVerificationSetup(selected),
       installSkill: (source, scope) => this.#installSkill(source, scope),
       listTasks: () => this.#runtime.tasks(),
@@ -2161,9 +2185,12 @@ export class InteractiveTui {
     this.#render();
   }
 
-  async #persistLoginDefaults(status: AuthSessionStatus): Promise<string> {
+  async #persistLoginDefaults(
+    status: AuthSessionStatus,
+    extras?: { readonly outputReserveTokens?: number },
+  ): Promise<string> {
     const configPath = this.#presenter.launch.configPath ?? defaultUserConfigPath();
-    return persistLoginProviderDefaults(status, configPath);
+    return persistLoginProviderDefaults(status, configPath, extras);
   }
 
   #switchSealedAccount(
@@ -2204,6 +2231,7 @@ export class InteractiveTui {
       model: string;
       reasoningEffort?: string;
       contextWindowTokens?: number;
+      outputReserveTokens?: number;
       imageInput?: boolean;
     },
     persistence: "account" | "session",
@@ -2221,16 +2249,30 @@ export class InteractiveTui {
     }
     const current = auth.status();
     this.#startManagementTask(async () => {
+      const { outputReserveTokens, ...authRouting } = routing;
       const status = await auth.useAccount(
         current.provider,
         current.accountAlias,
         {
-          ...routing,
+          ...authRouting,
           ...(current.baseURL === undefined ? {} : { baseURL: current.baseURL }),
         },
         persistence,
       );
       this.#syncAuthLaunch(status);
+      const output = outputReserveTokens === undefined
+        ? {
+          contextWindowTokens: this.#presenter.launch.contextWindowTokens,
+          contextBudgetTokens: this.#presenter.launch.contextBudgetTokens,
+          outputReserveTokens: this.#runtime.outputReserveTokens(),
+        }
+        : this.#runtime.configureOutputReserve(outputReserveTokens);
+      this.#presenter.launch = {
+        ...this.#presenter.launch,
+        contextWindowTokens: output.contextWindowTokens,
+        contextBudgetTokens: output.contextBudgetTokens,
+        outputReserveTokens: output.outputReserveTokens,
+      };
       this.#runtime.recordModelConfiguration({
         provider: status.provider,
         accountAlias: status.accountAlias,
@@ -2239,10 +2281,15 @@ export class InteractiveTui {
         contextWindowTokens: status.contextWindowTokens,
         imageInput: status.imageInput,
       }, persistence);
-      if (persistence === "account") await this.#persistLoginDefaults(status);
+      if (persistence === "account") {
+        await this.#persistLoginDefaults(status, {
+          outputReserveTokens: output.outputReserveTokens,
+        });
+      }
       this.#presenter.setNotice(
         `Model → ${status.model}` +
         (status.reasoningEffort ? ` · effort ${status.reasoningEffort}` : "") +
+        ` · output ${output.outputReserveTokens}` +
         ` · ${persistence === "account" ? "saved to account" : "current Session only"}`,
       );
     }, "model");
@@ -2338,6 +2385,15 @@ export class InteractiveTui {
         return;
       }
       openMaxStepsPanel(this.#panelFlow());
+      return;
+    }
+    if (name === "max-actions-per-step") {
+      if (argument.trim()) {
+        this.#presenter.setNotice(t(this.#presenter.locale(), "max_actions_per_step.use_panel"));
+        this.#render();
+        return;
+      }
+      openMaxActionsPerStepPanel(this.#panelFlow());
       return;
     }
     if (name === "reset-workspace") {

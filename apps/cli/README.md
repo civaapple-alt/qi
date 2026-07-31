@@ -73,7 +73,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/help [command\|advanced]` | Shortcuts + common commands; `advanced` lists aliases |
 | `/settings` | Settings hub: mode, **permissions**, **shell**, **Step budget**, providers, config, context, theme, language, **timeline density** |
 | `/memory [list\|remember\|accept\|correct\|forget\|promote\|pin\|unpin]` | Inspect actual Run injection, pending candidates, Project/User boundaries and provenance; explicitly manage the full Memory lifecycle |
-| `/goal [prompt]` | Session-local 追寻: `/goal <objective>` creates and starts; bare `/goal` opens status + actions (Continue starts immediately; Continue with guidance… is optional / Pause / Resume / Accept / Re-evaluate… / Cancel). Status shows Goal progress and **Evidence Ledger** gaps (diagnostics ≠ ledger). Re-evaluate records human pass/fail/unknown. Default Goal `attempts` equals current `maxSteps`; only Steps with non-read Actions consume attempts. Formal Plan / Work Plan are orthogonal (`/plan` / `update_plan`); neither auto-creates from Goal. Session resume demotes active Goals to paused |
+| `/goal [prompt]` | Session-local 追寻: `/goal <objective>` creates and starts; bare `/goal` opens status + actions (Continue starts immediately; Continue with guidance… and Accept notes are optional / Pause / Resume / Accept / Re-evaluate… / Cancel). Status shows Goal progress and **Evidence Ledger** gaps (diagnostics ≠ ledger). Accept/pass may leave gaps open; Re-evaluate requires rationale only for fail/unknown. Default Goal `attempts` equals current `maxSteps`; only Steps with non-read Actions consume attempts. Formal Plan / Work Plan are orthogonal (`/plan` / `update_plan`); neither auto-creates from Goal. Session resume demotes active Goals to paused |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
 | `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek`). For **OpenAI Compatible**, also set a **Name** (e.g. `qianwenai` / `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
@@ -86,9 +86,9 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/shell` | Select global shell profiles (`direct` / `pwsh` / `cmd` / `bash`; applies immediately and writes `$QI_HOME/config.toml`) |
 | `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
 | `/runs` | Session history hub — choose Runs, then Steps or Agents (Actions via Step; chooser when both exist; Enter selects observation; no separate `/steps` / `/actions` / `/agents` shortcuts) |
-| `/sessions` | Active/Archived Session list; type-to-search; Enter resumes or restores; `a` archives (with confirm) |
+| `/sessions` | Active/Archived Session list (about 3–5 cards visible; ↑↓ scrolls); type-to-search; Enter resumes or restores; `a` archives (with confirm) |
 | `/status` | Session/Run/Step/Action engineering detail panel |
-| `/model` | Open model picker / reconfigure without re-login (model, thinking effort, and context; scope chosen in panel) |
+| `/model` | Reconfigure without re-login (model, thinking effort, context window, max output tokens; scope chosen in panel) |
 | `/reset-workspace` | Preflight all active Sessions, archive them, and start a fresh Session |
 | `/next [continue\|stop\|plan]` | Next Run panel |
 | `/steer <text>` | Queue direction for the next safe Step boundary |
@@ -101,8 +101,9 @@ blinking hardware bar). Idle empty state uses `→ Add a message`. Use ↑ to se
 send-now (promote to front), Esc to cancel; after the Run ends, Qi starts the next follow-up automatically.
 Slash commands and `/steer` are unchanged.
 
-Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, `/max-steps`, `/providers`,
-`/add-dir`, `/unmount`, `/skill`, `/task`, `/exit`, plus unimplemented `/coord` `/work` `/gate` `/extensions`.
+Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, `/max-steps`,
+`/max-actions-per-step`, `/providers`, `/add-dir`, `/unmount`, `/skill`, `/task`, `/exit`, plus unimplemented
+`/coord` `/work` `/gate` `/extensions`.
 Typing `/steps`, `/actions`, or `/agents` redirects to the `/runs` hub with a notice to use the hub instead.
 
 UI language defaults to Chinese. Set `language = "zh"` or `language = "en"` in `~/.qi/config.toml`, or
@@ -280,8 +281,10 @@ SQLite). Esc/`ctrl+c` on `/help` and other inspect panels only dismiss the panel
 Run or in-flight Subagent. Unsettled delegations cancel on Session recovery before the parent Run parks
 ([ADR 0008](../../design/decisions.md#adr-0008-limit-subagent-delegation-to-one-isolated-layer)).
 
-User TOML may set `context_window_tokens`. The TUI reserves up to 16K tokens for model output and shows window,
-prompt budget, reserve, current use, and compacted-exchange savings. One deterministic estimator accounts for
+User TOML may set `context_window_tokens` and `output_reserve_tokens`. `/model` edits both (Max output tokens =
+the next-response reserve / API `max_output_tokens`, including thinking where the provider counts it). The reserve
+defaults from the model catalog (16K generic; DeepSeek V4 65,536) and is hard-capped at 1/8 of the window. The TUI
+shows window, prompt budget, reserve, current use, and compacted-exchange savings. One deterministic estimator accounts for
 ContextBlocks, portable messages, Tool schemas, framing, and images; the Unicode fallback is conservative and a
 ModelPort may supply a model-calibrated estimator. Required policy/control and advertised Tools reserve budget
 before whole restored turns and optional blocks. `/context` projects committed
@@ -299,11 +302,17 @@ An in-process model switch refreshes the model-derived window before the next Ru
 Kimi `/login` shows these defaults before authentication and saves the selected model, normalized effort, and
 editable window to `~/.qi/config.toml`; the API key remains sealed under `QI_HOME`.
 
-Main Runs default to 32 Steps. `max_steps` accepts 8–100 in user or project TOML, with
+Main Runs default to 32 Steps. `max_steps` accepts 8–1000 in user or project TOML, with
 `--max-steps` > project > user > default precedence. `/settings` → **Step budget** and the `/max-steps` alias
-open the same panel (no args), persist the user default to `~/.qi/config.toml`, and hot-apply on the next Run.
-Step 31 warns that only one executable Step remains; Step 32 is a tool-free handoff and parks the Run for budget
-with explicit progress, blockers, next actions, and verification state.
+open the same panel (presets 16 / 32 / 64 / 100 / 200 / 500 / 1000; no args), persist the user default to
+`~/.qi/config.toml`, and hot-apply on the next Run. The penultimate Step warns that only one executable Step
+remains; the final Step is a tool-free handoff and parks the Run for budget with explicit progress, blockers,
+next actions, and verification state.
+
+Each Step executes at most `max_actions_per_step` model Action proposals (default 6, range 1–32 in user TOML).
+`/settings` → **Per-Step Action limit** and `/max-actions-per-step` share presets 2 / 4 / 6 / 8 / 12 / 16,
+persist to `~/.qi/config.toml`, and apply on the next Run. Extra tool calls in the same Step settle as
+`ACTION_BATCH_LIMIT`.
 
 The Skill catalog combines `<workspace>/.qi/skills` and `$QI_HOME/resources/skills`; Workspace wins on a name
 collision. Only independently omittable metadata entries enter initial model context, plus a short required

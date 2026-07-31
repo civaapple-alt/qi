@@ -73,10 +73,11 @@ above the composer so long chats do not hide them. Operator info notices (login,
 failure/cancellation notices do not time out; they remain until the operator starts the next interaction or
 the Runtime explicitly clears the outcome.
 
-`/settings` opens a multi-level panel stack (Mode, Permissions, Shell, Step budget, Providers, Config, Context,
-Theme, Language, Timeline density). Density changes are local presentation state; only an
-explicit “save user default” choice writes `[ui].timeline_density` to user config. Step budget persists
-`max_steps` to user config and hot-applies on the next Run; `/max-steps` opens the same panel.
+`/settings` opens a multi-level panel stack (Mode, Permissions, Shell, Step budget, Per-Step Action limit,
+Providers, Config, Context, Theme, Language, Timeline density). Density changes are local presentation state;
+only an explicit “save user default” choice writes `[ui].timeline_density` to user config. Step budget persists
+`max_steps` to user config and hot-applies on the next Run; `/max-steps` opens the same panel. Per-Step Action
+limit persists `max_actions_per_step` (1–32, default 6); `/max-actions-per-step` opens the same panel.
 `/providers` and empty `/login` open the provider list; selecting a provider offers API-key form or Kimi device
 login without writing secrets into Session events or TOML. Esc pops one panel level; an empty stack restores the
 composer.
@@ -103,9 +104,12 @@ Provider login details:
 Primary slash commands are intentionally few: overlapping inspect entries live under `/settings`, mount
 operations under `/mounts`, capability grants under `/permissions`, skill/task management under `/skills` and
 `/tasks`, Session history under `/runs` (height-paged, bounded type-to-search selection; no `/run N` style selectors), and Workspace
-Session resume under `/sessions`. `/model` reconfigures provider, model, thinking effort, and context window
-without re-login (scope chosen in the panel). Steps and Agents are chosen inside the `/runs` hub; Actions
-are reached by selecting a Step — not via separate slash commands. Typing `/steps`, `/actions`, or `/agents` redirects to the hub with a notice.
+Session resume under `/sessions` (about 3–5 multi-line Session cards visible by default, capped at 5; ↑↓
+scrolls the full list). `/model` reconfigures provider, model, thinking effort, context window, and max output
+tokens (output reserve) without re-login (scope chosen in the panel). Account save may write
+`context_window_tokens` and `output_reserve_tokens` to user config; the reserve stays hard-capped at 1/8 of the
+window. Steps and Agents are chosen inside the `/runs` hub; Actions are reached by selecting a Step — not via
+separate slash commands. Typing `/steps`, `/actions`, or `/agents` redirects to the hub with a notice.
 Previous command names that only selected by index/id were removed. UI copy for slash help, settings, and
 these hubs follows `language` in `~/.qi/config.toml` (`zh` default, or `en`).
 
@@ -140,6 +144,12 @@ explicitly supplied. The answer resumes the same Action and Run, and its committ
 questions/options visible with selected, custom-text, and skipped results. Non-TTY omits this tool, so the
 Planner emits a normal next-turn question list. Legacy item plans alone retain the Next Run panel and `/next`.
 `/work` and `/todo` are intentionally absent; Work Todo snapshots live in the conversation timeline.
+
+Session-local 追寻 (`/goal`) binds Goal-continuation Runs in the current Session mode. `ask_question` remains
+Plan-only, so typical Agent-mode Goal Continues do not advertise it. Hub **Accept with evidence…** records
+human evidence with an optional note (empty is allowed); **Re-evaluate…** requires rationale only for
+`fail` / `unknown`. Accept/pass may leave the Goal open when the Evidence Ledger still has gaps.
+**Continue with guidance…** also allows an empty form (continues from the Goal objective).
 
 ## Tool rendering
 
@@ -186,8 +196,12 @@ Model deltas and process pipes may arrive before their durable terminal events. 
 bounded, process-local tail labelled `live`; it never treats this provisional channel as settlement or evidence.
 Model reasoning uses the same boundary: the Working strip keeps three display-wrapped lines, and
 `model.completed.reasoning` replays in standard density as `Thinking · duration`; expansion/diagnostic shows a
-bounded three-line excerpt, while compact hides settled Thinking. Reasoning remains explanatory model
-output rather than completion evidence. Committed terminal output replaces the live interpretation. See
+bounded three-line excerpt, while compact hides settled Thinking. Live `model.reasoning` never paints into the
+agent narration block. When a turn hits the length boundary (`finishReason: length`) or commits a very large
+`text` wall (common when thinking exhausts `max_output_tokens`), the transcript keeps Thinking collapsed and
+shows only a short truncated assistant tail unless the Step is expanded with `Ctrl+O`. Reasoning remains
+explanatory model output rather than completion evidence. Committed terminal output replaces the live
+interpretation. See
 [ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-activity-outside-durable-session-truth).
 
 ## Composer and background work

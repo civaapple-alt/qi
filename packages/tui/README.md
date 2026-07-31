@@ -11,9 +11,10 @@ Reusable Qi-specific terminal presentation and control components built on
 - Render bounded Markdown and Action cards without turning provisional activity into settlement.
 - Wrap wide Markdown table cells (or stack fields on narrow terminals) so later columns are not clipped, and
   keep the latest three display-wrapped provisional model text/reasoning/tool lines visible in the Working strip.
-- Keep provisional reasoning in the live strip; render settled reasoning as a one-line, expandable Thinking item,
-  and render an accepted Formal Plan
-  as a 200-line transcript preview with its immutable local path instead of treating it as pasted input.
+- Keep provisional reasoning in the live Working strip only (never as agent narration); render settled reasoning
+  as a one-line, expandable Thinking item. Length-truncated or very large assistant `text` stays as a short
+  truncated tail unless the Step is expanded. Render an accepted Formal Plan as a 200-line transcript preview
+  with its immutable local path instead of treating it as pasted input.
 - Render that same bounded Formal Plan preview before Plan Review choices, so the reviewed document is visible
   before acceptance.
 - Retain confirmed `ask_question` cards with every question and option plus selected, custom-text, and skipped

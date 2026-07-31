@@ -2,8 +2,9 @@ import {
   classifyProfileEndpoint,
   getProviderProfile,
   listProviderProfiles,
-  normalizeKimiReasoningEffort,
+  normalizeReasoningEffort,
   requireProviderProfile,
+  resolveProviderWireApi,
   type ProviderThinkingEffort,
   type ProviderProfile,
 } from "@civaapple/qi-ai";
@@ -109,15 +110,16 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
   if (!model) {
     throw new TypeError(`${profile.displayName} requires ${profile.envModel ?? "QI_MODEL"} or --model`);
   }
+  const supportsReasoningEffort = provider === "kimi" || provider === "deepseek";
   const requestedReasoningEffort = optionalValue(input.reasoningEffort) ??
     optionalValue(environment.QI_REASONING_EFFORT) ??
     (provider === "kimi" ? optionalValue(environment.KIMI_MODEL_THINKING_EFFORT) : undefined) ??
     optionalValue(matchingDefaults?.reasoningEffort);
-  if (requestedReasoningEffort !== undefined && provider !== "kimi") {
-    throw new TypeError("reasoning effort is currently supported only by the Kimi provider");
+  if (requestedReasoningEffort !== undefined && !supportsReasoningEffort) {
+    throw new TypeError("reasoning effort is currently supported only by the Kimi and DeepSeek providers");
   }
-  const normalizedReasoningEffort = provider === "kimi"
-    ? normalizeKimiReasoningEffort(requestedReasoningEffort)
+  const normalizedReasoningEffort = supportsReasoningEffort
+    ? normalizeReasoningEffort(requestedReasoningEffort)
     : undefined;
   const reasoningEffort = provider === "kimi" && (model === "k3" || model === "k3-256k") &&
       normalizedReasoningEffort !== undefined && normalizedReasoningEffort !== "none"
@@ -137,7 +139,7 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
     profile,
     accountAlias,
     authStatus: apiKey ? "ready" : "missing",
-    wireApi: profile.wireApi,
+    wireApi: resolveProviderWireApi(profile, model),
     ...(imageInput === undefined ? {} : { imageInput }),
   };
 }

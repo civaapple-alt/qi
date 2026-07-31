@@ -29,7 +29,13 @@ import {
   type SessionSummary,
   type SessionView,
 } from "@civaapple/qi-agent/kernel";
-import type { ModelCapabilities, ModelPort, ModelRef } from "@civaapple/qi-ai";
+import {
+  getProviderProfile,
+  providerModelOutputReserveTokens,
+  type ModelCapabilities,
+  type ModelPort,
+  type ModelRef,
+} from "@civaapple/qi-ai";
 import {
   HumanControlService,
   EventWriter,
@@ -106,7 +112,12 @@ import { SqliteEffectJournal } from "@civaapple/qi-node/workspace";
 import { createCodeActTool } from "./codeact-tool.js";
 import { createAskQuestionTool, RunQuestionCoordinator } from "./ask-question-tool.js";
 import type { QiCapabilityConfig, QiImageConfig, QiShellConfig } from "./config.js";
-import { defaultUserConfigPath, persistUserMaxSteps, persistUserShell } from "./config.js";
+import {
+  defaultUserConfigPath,
+  persistUserMaxActionsPerStep,
+  persistUserMaxSteps,
+  persistUserShell,
+} from "./config.js";
 import { createDelegateTool } from "./delegate-tool.js";
 import { defaultProjectConfigPath } from "./paths.js";
 import {
@@ -163,7 +174,13 @@ export interface TuiRuntimeOptions {
   contextWindowTokens?: number;
   contextWindowTokensOverride?: boolean;
   outputReserveTokens?: number;
+  /**
+   * User-preferred output reserve from config / `/model`. When set, model switches keep this
+   * preference (still hard-capped at 1/8 of the window).
+   */
+  outputReserveTokensPreferred?: number;
   maxSteps?: number;
+  maxActionsPerStep?: number;
   allowWrite?: boolean;
   allowVerify?: boolean;
   allowExecute?: boolean;
@@ -200,8 +217,54 @@ export interface AppliedCapabilities {
 export const TUI_DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 export const TUI_DEFAULT_OUTPUT_RESERVE_TOKENS = 16_000;
 export const TUI_HISTORY_BUDGET_TOKENS = 16_000;
+
+/** Cap output reserve at 1/8 of the window; prefer a model catalog value when present. */
+export function resolveOutputReserveTokens(
+  contextWindowTokens: number,
+  preferredReserveTokens?: number,
+): number {
+  if (!Number.isInteger(contextWindowTokens) || contextWindowTokens < 8_192) {
+    throw new RangeError("contextWindowTokens must be an integer >= 8192");
+  }
+  const hardCap = Math.floor(contextWindowTokens / 8);
+  const preferred = preferredReserveTokens ?? TUI_DEFAULT_OUTPUT_RESERVE_TOKENS;
+  if (!Number.isInteger(preferred) || preferred < 1) {
+    throw new RangeError("preferredReserveTokens must be a positive integer");
+  }
+  return Math.min(preferred, hardCap);
+}
 export const TUI_DEFAULT_MAX_STEPS = 32;
+export const TUI_MIN_MAX_STEPS = 8;
+export const TUI_MAX_MAX_STEPS = 1_000;
+/** Panel /settings and `/max-steps` choices (still accepts any integer in the validated range via TOML/flag). */
+export const TUI_MAX_STEPS_PRESETS = [16, 32, 64, 100, 200, 500, 1_000] as const;
+/** @deprecated Prefer {@link TUI_DEFAULT_MAX_ACTIONS_PER_STEP}. */
 export const TUI_MAX_ACTIONS_PER_STEP = 6;
+export const TUI_DEFAULT_MAX_ACTIONS_PER_STEP = 6;
+export const TUI_MIN_MAX_ACTIONS_PER_STEP = 1;
+export const TUI_MAX_MAX_ACTIONS_PER_STEP = 32;
+/** Panel /settings and `/max-actions-per-step` choices. */
+export const TUI_MAX_ACTIONS_PER_STEP_PRESETS = [2, 4, 6, 8, 12, 16] as const;
+
+export function assertMaxSteps(maxSteps: number, label = "maxSteps"): number {
+  if (!Number.isInteger(maxSteps) || maxSteps < TUI_MIN_MAX_STEPS || maxSteps > TUI_MAX_MAX_STEPS) {
+    throw new RangeError(`${label} must be an integer from ${TUI_MIN_MAX_STEPS} to ${TUI_MAX_MAX_STEPS}`);
+  }
+  return maxSteps;
+}
+
+export function assertMaxActionsPerStep(value: number, label = "maxActionsPerStep"): number {
+  if (
+    !Number.isInteger(value)
+    || value < TUI_MIN_MAX_ACTIONS_PER_STEP
+    || value > TUI_MAX_MAX_ACTIONS_PER_STEP
+  ) {
+    throw new RangeError(
+      `${label} must be an integer from ${TUI_MIN_MAX_ACTIONS_PER_STEP} to ${TUI_MAX_MAX_ACTIONS_PER_STEP}`,
+    );
+  }
+  return value;
+}
 
 export class TuiRuntime {
   readonly sessionId: SessionId;
@@ -214,7 +277,9 @@ export class TuiRuntime {
   #contextWindowTokens: number;
   #contextBudgetTokens: number;
   #outputReserveTokens: number;
+  #outputReserveTokensPreferred: number | undefined;
   #maxSteps: number;
+  #maxActionsPerStep: number;
   readonly #subject: string;
   readonly #eventStore: EventStore;
   readonly #ownedStore: SessionRepository | undefined;
@@ -300,13 +365,17 @@ export class TuiRuntime {
     this.#contextWindowTokensOverride = options.contextWindowTokensOverride
       ?? options.contextWindowTokens !== undefined;
     this.#contextWindowTokens = contextWindowTokens;
+    this.#outputReserveTokensPreferred = options.outputReserveTokensPreferred;
     this.#outputReserveTokens = options.outputReserveTokens
-      ?? Math.min(TUI_DEFAULT_OUTPUT_RESERVE_TOKENS, Math.floor(contextWindowTokens / 8));
+      ?? resolveOutputReserveTokens(
+        contextWindowTokens,
+        this.#outputReserveTokensPreferred ?? this.#preferredOutputReserve(),
+      );
     this.#contextBudgetTokens = contextBudgetFromWindow(contextWindowTokens, this.#outputReserveTokens);
-    this.#maxSteps = options.maxSteps ?? TUI_DEFAULT_MAX_STEPS;
-    if (!Number.isInteger(this.#maxSteps) || this.#maxSteps < 8 || this.#maxSteps > 100) {
-      throw new RangeError("maxSteps must be an integer from 8 to 100");
-    }
+    this.#maxSteps = assertMaxSteps(options.maxSteps ?? TUI_DEFAULT_MAX_STEPS);
+    this.#maxActionsPerStep = assertMaxActionsPerStep(
+      options.maxActionsPerStep ?? TUI_DEFAULT_MAX_ACTIONS_PER_STEP,
+    );
     this.#subject = options.subject ?? "main-agent";
     this.#eventStore = eventStore;
     this.#ownedStore = ownedStore;
@@ -357,15 +426,8 @@ export class TuiRuntime {
   } {
     if (!this.#contextWindowTokensOverride) {
       this.#contextWindowTokens = contextWindowTokens;
-      this.#outputReserveTokens = Math.min(
-        TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
-        Math.floor(contextWindowTokens / 8),
-      );
-      this.#contextBudgetTokens = contextBudgetFromWindow(
-        this.#contextWindowTokens,
-        this.#outputReserveTokens,
-      );
     }
+    this.#recomputeOutputReserve();
     return {
       contextWindowTokens: this.#contextWindowTokens,
       contextBudgetTokens: this.#contextBudgetTokens,
@@ -383,19 +445,62 @@ export class TuiRuntime {
     }
     this.#contextWindowTokensOverride = true;
     this.#contextWindowTokens = contextWindowTokens;
-    this.#outputReserveTokens = Math.min(
-      TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
-      Math.floor(contextWindowTokens / 8),
-    );
-    this.#contextBudgetTokens = contextBudgetFromWindow(
-      this.#contextWindowTokens,
-      this.#outputReserveTokens,
-    );
+    this.#recomputeOutputReserve();
     return {
       contextWindowTokens: this.#contextWindowTokens,
       contextBudgetTokens: this.#contextBudgetTokens,
       outputReserveTokens: this.#outputReserveTokens,
     };
+  }
+
+  configureOutputReserve(outputReserveTokens: number): {
+    contextWindowTokens: number;
+    contextBudgetTokens: number;
+    outputReserveTokens: number;
+  } {
+    if (!Number.isInteger(outputReserveTokens) || outputReserveTokens < 1) {
+      throw new RangeError("max output tokens must be a positive integer");
+    }
+    const hardCap = Math.floor(this.#contextWindowTokens / 8);
+    if (outputReserveTokens > hardCap) {
+      throw new RangeError(
+        `max output tokens must be <= ${hardCap} (1/8 of the ${this.#contextWindowTokens}-token context window)`,
+      );
+    }
+    this.#outputReserveTokensPreferred = outputReserveTokens;
+    this.#recomputeOutputReserve();
+    return {
+      contextWindowTokens: this.#contextWindowTokens,
+      contextBudgetTokens: this.#contextBudgetTokens,
+      outputReserveTokens: this.#outputReserveTokens,
+    };
+  }
+
+  outputReserveTokens(): number {
+    return this.#outputReserveTokens;
+  }
+
+  outputReserveTokensPreferred(): number | undefined {
+    return this.#outputReserveTokensPreferred;
+  }
+
+  #recomputeOutputReserve(): void {
+    this.#outputReserveTokens = resolveOutputReserveTokens(
+      this.#contextWindowTokens,
+      this.#outputReserveTokensPreferred ?? this.#preferredOutputReserve(),
+    );
+    this.#contextBudgetTokens = contextBudgetFromWindow(
+      this.#contextWindowTokens,
+      this.#outputReserveTokens,
+    );
+  }
+
+  #preferredOutputReserve(): number | undefined {
+    const model = this.#resolveModel();
+    const profile = getProviderProfile(model.provider);
+    return profile === undefined
+      ? undefined
+      : providerModelOutputReserveTokens(profile, model.model);
   }
 
   static async create(options: TuiRuntimeOptions): Promise<TuiRuntime> {
@@ -628,6 +733,10 @@ export class TuiRuntime {
     return this.#maxSteps;
   }
 
+  maxActionsPerStep(): number {
+    return this.#maxActionsPerStep;
+  }
+
   /**
    * Hot-apply main-Run Step budget: persist to `$QI_HOME/config.toml` and use on the next Run.
    */
@@ -636,9 +745,7 @@ export class TuiRuntime {
     options?: { persist?: boolean; configPath?: string },
   ): Promise<{ maxSteps: number; configPath: string; projectOverride?: number }> {
     if (this.active) throw new Error("Cannot change max steps while a Run is active");
-    if (!Number.isInteger(maxSteps) || maxSteps < 8 || maxSteps > 100) {
-      throw new RangeError("maxSteps must be an integer from 8 to 100");
-    }
+    assertMaxSteps(maxSteps);
     const configPath = options?.configPath ?? defaultUserConfigPath();
     if (options?.persist !== false) {
       await persistUserMaxSteps(maxSteps, configPath);
@@ -650,6 +757,23 @@ export class TuiRuntime {
       configPath,
       ...(project.config.maxSteps === undefined ? {} : { projectOverride: project.config.maxSteps }),
     };
+  }
+
+  /**
+   * Hot-apply per-Step Action batch limit: persist to `$QI_HOME/config.toml` and use on the next Run.
+   */
+  async applyMaxActionsPerStep(
+    maxActionsPerStep: number,
+    options?: { persist?: boolean; configPath?: string },
+  ): Promise<{ maxActionsPerStep: number; configPath: string }> {
+    if (this.active) throw new Error("Cannot change max actions per step while a Run is active");
+    assertMaxActionsPerStep(maxActionsPerStep);
+    const configPath = options?.configPath ?? defaultUserConfigPath();
+    if (options?.persist !== false) {
+      await persistUserMaxActionsPerStep(maxActionsPerStep, configPath);
+    }
+    this.#maxActionsPerStep = maxActionsPerStep;
+    return { maxActionsPerStep, configPath };
   }
 
   /**
@@ -1450,7 +1574,7 @@ export class TuiRuntime {
         historyBudgetTokens: options.historyBudgetTokens ?? TUI_HISTORY_BUDGET_TOKENS,
         maxSteps: this.#maxSteps,
         reserveFinalHandoff: true,
-        maxActionsPerStep: TUI_MAX_ACTIONS_PER_STEP,
+        maxActionsPerStep: this.#maxActionsPerStep,
         ...(options.requiredCompletionTool === undefined
           ? {}
           : { requiredCompletionTool: options.requiredCompletionTool }),

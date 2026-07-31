@@ -13,6 +13,7 @@ import {
   normalizeKimiReasoningEffort,
   providerModelContextTokens,
   requireProviderProfile,
+  resolveProviderWireApi,
   type ModelPort,
 } from "@civaapple/qi-ai";
 import {
@@ -235,7 +236,7 @@ export class AuthSession {
       provider,
       profile,
       accountAlias: alias,
-      wireApi: profile.wireApi,
+      wireApi: resolveProviderWireApi(profile, model),
       model,
       baseURL,
       endpointTrust,
@@ -357,7 +358,7 @@ export class AuthSession {
       provider,
       profile,
       accountAlias: normalizedAlias,
-      wireApi: profile.wireApi,
+      wireApi: resolveProviderWireApi(profile, model),
       model,
       baseURL,
       endpointTrust: classifyProfileEndpoint(profile, baseURL),
@@ -443,7 +444,7 @@ export class AuthSession {
       provider: "kimi",
       profile,
       accountAlias: alias,
-      wireApi: profile.wireApi,
+      wireApi: resolveProviderWireApi(profile, model),
       model,
       baseURL: KIMI_CODING_API_BASE,
       endpointTrust: "official",
@@ -527,6 +528,7 @@ export class AuthSession {
     const accessToken = authKind === "oauth" ? safeAccessToken(secret) : secret;
     this.#modelPort = createModelPortForProfile(this.#config.profile, {
       apiKey: accessToken,
+      model: this.#config.model,
       ...(this.#config.baseURL === undefined ? {} : { baseURL: this.#config.baseURL }),
       ...(this.#config.reasoningEffort === undefined
         ? {}
@@ -763,9 +765,9 @@ function loginReasoningEffort(
   requested: string | undefined,
   current: ProviderConfig["reasoningEffort"],
 ): ProviderConfig["reasoningEffort"] {
-  if (provider !== "kimi") {
+  if (provider !== "kimi" && provider !== "deepseek") {
     if (requested !== undefined) {
-      throw new TypeError("reasoning effort is currently supported only by the Kimi provider");
+      throw new TypeError("reasoning effort is currently supported only by the Kimi and DeepSeek providers");
     }
     return undefined;
   }

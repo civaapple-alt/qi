@@ -159,6 +159,61 @@ test("TurnLoop completes a response-only Run with durable context and model boun
   });
 });
 
+test("TurnLoop echoes committed reasoning on tool-call assistant turns only", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_read",
+      subject: "agent_main",
+      tools: ["read"],
+      effects: ["read"],
+      resources: ["**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("read", readTool);
+    await mkdir(root, { recursive: true });
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(root, "README.md"), "hello\n", "utf8");
+
+    const model = new ScriptedModelPort([
+      [
+        { type: "reasoning.delta", delta: "I should read README" },
+        {
+          type: "action.requested",
+          callId: "call_read_reason",
+          name: "read",
+          input: { path: "README.md" },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      (request) => {
+        const assistant = request.messages.find((message) =>
+          message.role === "assistant" &&
+          message.content.some((part) => part.type === "tool-call")
+        );
+        assert.ok(assistant);
+        assert.deepEqual(assistant.content[0], {
+          type: "reasoning",
+          text: "I should read README",
+        });
+        assert.equal(assistant.content.some((part) => part.type === "tool-call"), true);
+        return [
+          { type: "reasoning.delta", delta: "Done thinking" },
+          { type: "text.delta", delta: "README says hello." },
+          { type: "completed", finishReason: "stop" },
+        ];
+      },
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+    const result = await loop.run(turnRequest(root, artifactStore, { maxSteps: 3 }));
+    assert.equal(result.status, "completed");
+    assert.equal(result.text, "README says hello.");
+    assert.equal(model.requests.length, 2);
+  });
+});
+
 test("TurnLoop reserves the final Step for a zero-Action handoff and carries it into the next Run", async () => {
   await withRuntime(async ({ root, artifactStore }) => {
     const store = new InMemoryEventStore();

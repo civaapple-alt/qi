@@ -64,7 +64,7 @@ export class SessionsPanel implements PanelComponent, Focusable {
     this.#emptyLabel = options.emptyLabel;
     this.#currentMark = options.currentMark;
     this.#showingLabel = options.showingLabel;
-    this.#maxVisible = Math.max(3, options.maxVisible ?? 8);
+    this.#maxVisible = Math.max(3, options.maxVisible ?? 4);
     this.#onSelect = options.onSelect;
     this.#onArchive = options.onArchive;
     this.#onClose = options.onClose;

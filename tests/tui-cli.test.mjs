@@ -105,7 +105,7 @@ test("CLI defaults data to QI_HOME/projects/<project-id> and honors --safe", asy
   }
 });
 
-test("CLI max_steps precedence is flag over project over user over default and enforces 8..100", async () => {
+test("CLI max_steps precedence is flag over project over user over default and enforces 8..1000", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-cli-max-steps-"));
   try {
     const workspace = join(root, "workspace");
@@ -141,11 +141,17 @@ test("CLI max_steps precedence is flag over project over user over default and e
     assert.equal(user.options.maxSteps, 16);
     await assert.rejects(
       () => parseTuiCliArguments(["--no-config", "--max-steps", "7"], { cwd: root, environment }),
-      /8 to 100/,
+      /8 to 1000/,
     );
+    const high = await parseTuiCliArguments(
+      ["--workspace", workspace, "--config", userConfig, "--max-steps", "1000"],
+      { cwd: root, environment },
+    );
+    assert.equal(high.kind, "run");
+    assert.equal(high.options.maxSteps, 1000);
     await assert.rejects(
-      () => parseTuiCliArguments(["--no-config", "--max-steps", "101"], { cwd: root, environment }),
-      /8 to 100/,
+      () => parseTuiCliArguments(["--no-config", "--max-steps", "1001"], { cwd: root, environment }),
+      /8 to 1000/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });

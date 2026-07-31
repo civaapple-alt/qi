@@ -629,6 +629,11 @@ export class TurnLoop {
       );
 
       const assistantContent: ModelMessage["content"] = [];
+      // Providers that require thinking-mode tool continuation (e.g. DeepSeek) need the
+      // committed CoT echoed on the same-Run portable history when Actions were proposed.
+      if (modelResult.actions.length > 0 && modelResult.reasoning) {
+        assistantContent.push({ type: "reasoning", text: modelResult.reasoning });
+      }
       if (modelResult.text) assistantContent.push({ type: "text", text: modelResult.text });
       for (const action of modelResult.actions) {
         assistantContent.push({ type: "tool-call", callId: action.callId, name: action.name, input: action.input });

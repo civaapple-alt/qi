@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { providerModelContextTokens } from "@civaapple/qi-ai";
+import { providerModelContextTokens, providerModelOutputReserveTokens } from "@civaapple/qi-ai";
 import { SessionIdSchema, assertSchema, type SessionId } from "@civaapple/qi-protocol";
 import {
   defaultUserConfigPath,
@@ -22,8 +22,12 @@ import {
 } from "./project-config.js";
 import { resolveProviderConfig, type ProviderConfig } from "./provider.js";
 import {
+  assertMaxSteps,
+  resolveOutputReserveTokens,
+  TUI_DEFAULT_MAX_ACTIONS_PER_STEP,
   TUI_DEFAULT_MAX_STEPS,
-  TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
+  TUI_MAX_MAX_STEPS,
+  TUI_MIN_MAX_STEPS,
 } from "./runtime.js";
 
 export interface CliMountSpec {
@@ -58,9 +62,12 @@ export interface TuiCliOptions {
   /** True only for an explicit user `context_window_tokens`; model switches must otherwise refresh the window. */
   contextWindowTokensOverride: boolean;
   outputReserveTokens: number;
+  /** Present when user config sets `output_reserve_tokens`; kept across model switches. */
+  outputReserveTokensPreferred?: number;
   maxSteps: number;
   /** Explicit CLI override retained across in-process Session relaunches. */
   maxStepsOverride?: number;
+  maxActionsPerStep: number;
   configPath?: string;
   projectConfigPath?: string;
   mounts: readonly CliMountSpec[];
@@ -79,7 +86,7 @@ const HELP_TEXT =
   "qi list [--scope user|project] [--workspace PATH]\n" +
   "  WORKSPACE defaults to the current directory (same as `qi --workspace .`).\n" +
   "  Options: [--workspace PATH] [--data PATH] [--provider ID] [--model ID] [--effort LEVEL] [--base-url URL]\n" +
-  "           [--session ID] [--max-steps 8..100] [--config PATH|--no-config] [--add-dir PATH]…\n" +
+  "           [--session ID] [--max-steps 8..1000] [--config PATH|--no-config] [--add-dir PATH]…\n" +
   "           [--allow-write|--no-write] [--allow-verify|--no-verify] [--allow-network|--no-network]\n" +
   "           [--allow-execute|--no-execute] [--allow-background|--no-background]\n" +
   "           [--allow-delegate|--no-delegate] [--safe]\n";
@@ -209,10 +216,16 @@ export async function parseTuiCliArguments(
   });
   const contextWindowTokens = loaded.config.contextWindowTokens
     ?? providerModelContextTokens(provider.profile, provider.model);
-  const outputReserveTokens = Math.min(TUI_DEFAULT_OUTPUT_RESERVE_TOKENS, Math.floor(contextWindowTokens / 8));
+  const outputReserveTokensPreferred = loaded.config.outputReserveTokens;
+  const outputReserveTokens = resolveOutputReserveTokens(
+    contextWindowTokens,
+    outputReserveTokensPreferred
+      ?? providerModelOutputReserveTokens(provider.profile, provider.model),
+  );
   const maxSteps = values.has("--max-steps")
     ? parseMaxSteps(values.get("--max-steps")!, "--max-steps")
     : project.config.maxSteps ?? loaded.config.maxSteps ?? TUI_DEFAULT_MAX_STEPS;
+  const maxActionsPerStep = loaded.config.maxActionsPerStep ?? TUI_DEFAULT_MAX_ACTIONS_PER_STEP;
   const mounts = buildLaunchMounts(project.config.mounts ?? [], addDirs, cwd);
 
   return {
@@ -224,8 +237,12 @@ export async function parseTuiCliArguments(
       contextWindowTokens,
       contextWindowTokensOverride: loaded.config.contextWindowTokens !== undefined,
       outputReserveTokens,
+      ...(outputReserveTokensPreferred === undefined
+        ? {}
+        : { outputReserveTokensPreferred }),
       maxSteps,
       ...(values.has("--max-steps") ? { maxStepsOverride: maxSteps } : {}),
+      maxActionsPerStep,
       language: resolveLanguage(loaded.config),
       theme: resolveTheme(loaded.config),
       timelineDensity: resolveTimelineDensity(loaded.config),
@@ -247,10 +264,14 @@ export async function parseTuiCliArguments(
 }
 
 function parseMaxSteps(value: string, label: string): number {
-  if (!/^\d+$/.test(value)) throw new TypeError(`${label} must be an integer from 8 to 100`);
-  const parsed = Number(value);
-  if (parsed < 8 || parsed > 100) throw new TypeError(`${label} must be an integer from 8 to 100`);
-  return parsed;
+  if (!/^\d+$/.test(value)) {
+    throw new TypeError(`${label} must be an integer from ${TUI_MIN_MAX_STEPS} to ${TUI_MAX_MAX_STEPS}`);
+  }
+  try {
+    return assertMaxSteps(Number(value), label);
+  } catch (error) {
+    throw new TypeError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 /**
@@ -268,6 +289,8 @@ export async function refreshLaunchCapabilities(
   allowBackground: boolean;
   allowDelegate: boolean;
   maxSteps: number;
+  maxActionsPerStep: number;
+  outputReserveTokensPreferred?: number;
   projectConfigPath: string;
   shell?: import("./config.js").QiShellConfig;
 }> {
@@ -279,6 +302,10 @@ export async function refreshLaunchCapabilities(
       ...caps,
       projectConfigPath,
       maxSteps: options.maxStepsOverride ?? TUI_DEFAULT_MAX_STEPS,
+      maxActionsPerStep: options.maxActionsPerStep ?? TUI_DEFAULT_MAX_ACTIONS_PER_STEP,
+      ...(options.outputReserveTokensPreferred === undefined
+        ? {}
+        : { outputReserveTokensPreferred: options.outputReserveTokensPreferred }),
     };
   }
   const loaded = options.configPath
@@ -299,6 +326,10 @@ export async function refreshLaunchCapabilities(
       ?? project.config.maxSteps
       ?? loaded.config.maxSteps
       ?? TUI_DEFAULT_MAX_STEPS,
+    maxActionsPerStep: loaded.config.maxActionsPerStep ?? TUI_DEFAULT_MAX_ACTIONS_PER_STEP,
+    ...(loaded.config.outputReserveTokens === undefined
+      ? {}
+      : { outputReserveTokensPreferred: loaded.config.outputReserveTokens }),
     ...(shell === undefined ? {} : { shell }),
   };
 }

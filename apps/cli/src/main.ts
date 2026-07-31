@@ -24,11 +24,11 @@ import { discoveryAcceleratorTip, missingDiscoveryAccelerators } from "./discove
 import { renderEvent, renderStatus } from "./render.js";
 import { t } from "./i18n.js";
 import { formatProviderLabel } from "./provider.js";
+import { providerModelOutputReserveTokens } from "@civaapple/qi-ai";
 import {
   contextBudgetFromWindow,
-  TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
+  resolveOutputReserveTokens,
   TUI_HISTORY_BUDGET_TOKENS,
-  TUI_MAX_ACTIONS_PER_STEP,
   TuiRuntime,
 } from "./runtime.js";
 import { runPackageCliCommand } from "./package-command.js";
@@ -94,10 +94,6 @@ async function main(): Promise<void> {
       }
       const authStatus = auth.status();
       const contextWindowTokens = authStatus.contextWindowTokens;
-      const outputReserveTokens = Math.min(
-        TUI_DEFAULT_OUTPUT_RESERVE_TOKENS,
-        Math.floor(contextWindowTokens / 8),
-      );
       // In-process New Session / resume is a launch: re-read project/user capability policy.
       const policy = await refreshLaunchCapabilities(options);
       options.allowWrite = policy.allowWrite;
@@ -107,7 +103,18 @@ async function main(): Promise<void> {
       options.allowBackground = policy.allowBackground;
       options.allowDelegate = policy.allowDelegate;
       options.maxSteps = policy.maxSteps;
+      options.maxActionsPerStep = policy.maxActionsPerStep;
       options.projectConfigPath = policy.projectConfigPath;
+      if (policy.outputReserveTokensPreferred === undefined) {
+        delete (options as { outputReserveTokensPreferred?: number }).outputReserveTokensPreferred;
+      } else {
+        options.outputReserveTokensPreferred = policy.outputReserveTokensPreferred;
+      }
+      options.outputReserveTokens = resolveOutputReserveTokens(
+        contextWindowTokens,
+        policy.outputReserveTokensPreferred
+          ?? providerModelOutputReserveTokens(auth.config.profile, auth.config.model),
+      );
       delete (options as { shell?: unknown }).shell;
       if (policy.shell !== undefined) options.shell = policy.shell;
       runtime = await TuiRuntime.create({
@@ -126,8 +133,12 @@ async function main(): Promise<void> {
         }),
         contextWindowTokens,
         contextWindowTokensOverride: authStatus.contextWindowTokensOverride,
-        outputReserveTokens,
+        outputReserveTokens: options.outputReserveTokens,
+        ...(options.outputReserveTokensPreferred === undefined
+          ? {}
+          : { outputReserveTokensPreferred: options.outputReserveTokensPreferred }),
         maxSteps: options.maxSteps,
+        maxActionsPerStep: options.maxActionsPerStep,
         allowWrite: options.allowWrite,
         allowVerify: options.allowVerify,
         allowExecute: options.allowExecute,
@@ -147,7 +158,7 @@ async function main(): Promise<void> {
         ...options,
         contextWindowTokens,
         contextWindowTokensOverride: authStatus.contextWindowTokensOverride,
-        outputReserveTokens,
+        outputReserveTokens: options.outputReserveTokens,
         provider: {
           ...providerOptions,
           provider: auth.config.provider,
@@ -229,7 +240,11 @@ async function main(): Promise<void> {
     contextWindowTokens: options.contextWindowTokens,
     contextWindowTokensOverride: options.contextWindowTokensOverride,
     outputReserveTokens: options.outputReserveTokens,
+    ...(options.outputReserveTokensPreferred === undefined
+      ? {}
+      : { outputReserveTokensPreferred: options.outputReserveTokensPreferred }),
     maxSteps: options.maxSteps,
+    maxActionsPerStep: options.maxActionsPerStep,
     allowWrite: options.allowWrite,
     allowVerify: options.allowVerify,
     allowExecute: options.allowExecute,
@@ -840,7 +855,7 @@ async function launchInfo(
     outputReserveTokens: options.outputReserveTokens,
     historyBudgetTokens: TUI_HISTORY_BUDGET_TOKENS,
     maxSteps: options.maxSteps,
-    maxActionsPerStep: TUI_MAX_ACTIONS_PER_STEP,
+    maxActionsPerStep: options.maxActionsPerStep,
     skillRoots: runtime.skillRoots,
     ...(branch === undefined ? {} : { branch }),
     version: qiCliVersion().slice("qi ".length),

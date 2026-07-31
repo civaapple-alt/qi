@@ -71,8 +71,15 @@ export interface QiUserConfig {
   /** Saved OpenAI-compatible endpoints; active selection is the top-level fields. */
   readonly compatible?: readonly CompatibleEndpoint[];
   readonly contextWindowTokens?: number;
+  /**
+   * Preferred next-response reserve (`max_output_tokens` / thinking-inclusive budget).
+   * Still hard-capped at 1/8 of the context window at resolve time.
+   */
+  readonly outputReserveTokens?: number;
   readonly imageInput?: boolean;
   readonly maxSteps?: number;
+  /** Max model Action proposals executed per Step (TurnLoop batch envelope). */
+  readonly maxActionsPerStep?: number;
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
   readonly memory?: QiMemoryConfig;
@@ -148,6 +155,7 @@ export interface UserProviderDefaults {
   readonly accountAlias?: string;
   readonly reasoningEffort?: "low" | "high" | "max" | "none";
   readonly contextWindowTokens?: number;
+  readonly outputReserveTokens?: number;
   readonly imageInput?: boolean;
 }
 
@@ -192,10 +200,19 @@ export async function persistUserProviderDefaults(
     ...(contextWindowTokens === undefined
       ? {}
       : { contextWindowTokens }),
+    ...(selection.outputReserveTokens === undefined
+      ? (loaded.config.outputReserveTokens === undefined
+        ? {}
+        : { outputReserveTokens: loaded.config.outputReserveTokens })
+      : { outputReserveTokens: selection.outputReserveTokens }),
     ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
+    ...(loaded.config.maxActionsPerStep === undefined
+      ? {}
+      : { maxActionsPerStep: loaded.config.maxActionsPerStep }),
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
     ...(loaded.config.memory === undefined ? {} : { memory: loaded.config.memory }),
+    ...(loaded.config.ui === undefined ? {} : { ui: loaded.config.ui }),
     ...(loaded.config.image === undefined ? {} : { image: loaded.config.image }),
   };
   await saveUserConfig(absolute, next);
@@ -252,10 +269,17 @@ export async function removeCompatibleEndpoint(
     ...(loaded.config.contextWindowTokens === undefined
       ? {}
       : { contextWindowTokens: loaded.config.contextWindowTokens }),
+    ...(loaded.config.outputReserveTokens === undefined
+      ? {}
+      : { outputReserveTokens: loaded.config.outputReserveTokens }),
     ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
+    ...(loaded.config.maxActionsPerStep === undefined
+      ? {}
+      : { maxActionsPerStep: loaded.config.maxActionsPerStep }),
     ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
     ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
     ...(loaded.config.memory === undefined ? {} : { memory: loaded.config.memory }),
+    ...(loaded.config.ui === undefined ? {} : { ui: loaded.config.ui }),
     ...(loaded.config.image === undefined ? {} : { image: loaded.config.image }),
   };
   await saveUserConfig(absolute, next);
@@ -389,8 +413,8 @@ export async function persistUserMaxSteps(
   maxSteps: number,
   path = defaultUserConfigPath(),
 ): Promise<LoadedUserConfig> {
-  if (!Number.isInteger(maxSteps) || maxSteps < 8 || maxSteps > 100) {
-    throw new RangeError("max_steps must be an integer from 8 to 100");
+  if (!Number.isInteger(maxSteps) || maxSteps < 8 || maxSteps > 1_000) {
+    throw new RangeError("max_steps must be an integer from 8 to 1000");
   }
   const absolute = resolve(path);
   const loaded = await loadUserConfig(absolute);
@@ -398,6 +422,27 @@ export async function persistUserMaxSteps(
     ...loaded.config,
     version: 1,
     maxSteps,
+  };
+  await saveUserConfig(absolute, next);
+  return { path: absolute, exists: true, config: next };
+}
+
+/**
+ * Persist top-level `max_actions_per_step` into the user config.toml (creates it when missing).
+ */
+export async function persistUserMaxActionsPerStep(
+  maxActionsPerStep: number,
+  path = defaultUserConfigPath(),
+): Promise<LoadedUserConfig> {
+  if (!Number.isInteger(maxActionsPerStep) || maxActionsPerStep < 1 || maxActionsPerStep > 32) {
+    throw new RangeError("max_actions_per_step must be an integer from 1 to 32");
+  }
+  const absolute = resolve(path);
+  const loaded = await loadUserConfig(absolute);
+  const next: QiUserConfig = {
+    ...loaded.config,
+    version: 1,
+    maxActionsPerStep,
   };
   await saveUserConfig(absolute, next);
   return { path: absolute, exists: true, config: next };
@@ -443,7 +488,13 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
       ...(config.contextWindowTokens === undefined
         ? {}
         : { context_window_tokens: config.contextWindowTokens }),
+      ...(config.outputReserveTokens === undefined
+        ? {}
+        : { output_reserve_tokens: config.outputReserveTokens }),
       ...(config.maxSteps === undefined ? {} : { max_steps: config.maxSteps }),
+      ...(config.maxActionsPerStep === undefined
+        ? {}
+        : { max_actions_per_step: config.maxActionsPerStep }),
       ...(config.capabilities === undefined ? {} : { capabilities: { ...config.capabilities } }),
       ...(config.shell === undefined
         ? {}
@@ -501,7 +552,13 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
     ...(config.contextWindowTokens === undefined
       ? {}
       : { context_window_tokens: config.contextWindowTokens }),
+    ...(config.outputReserveTokens === undefined
+      ? {}
+      : { output_reserve_tokens: config.outputReserveTokens }),
     ...(config.maxSteps === undefined ? {} : { max_steps: config.maxSteps }),
+    ...(config.maxActionsPerStep === undefined
+      ? {}
+      : { max_actions_per_step: config.maxActionsPerStep }),
     ...(config.capabilities === undefined ? {} : { capabilities: { ...config.capabilities } }),
     ...(config.shell === undefined
       ? {}
@@ -591,7 +648,9 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "reasoning_effort",
     "compatible",
     "context_window_tokens",
+    "output_reserve_tokens",
     "max_steps",
+    "max_actions_per_step",
     "capabilities",
     "shell",
     "memory",
@@ -625,12 +684,26 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     8_192,
     2_000_000,
   );
-  const maxSteps = optionalIntegerField(root.max_steps, `${path}: max_steps`, 8, 100);
+  const outputReserveTokens = optionalIntegerField(
+    root.output_reserve_tokens,
+    `${path}: output_reserve_tokens`,
+    1,
+    2_000_000,
+  );
+  const maxSteps = optionalIntegerField(root.max_steps, `${path}: max_steps`, 8, 1_000);
+  const maxActionsPerStep = optionalIntegerField(
+    root.max_actions_per_step,
+    `${path}: max_actions_per_step`,
+    1,
+    32,
+  );
   if ((model !== undefined || baseURL !== undefined || reasoningEffort !== undefined) && provider === undefined) {
     throw new TypeError(`${path}: provider is required when model, base_url, or reasoning_effort is configured`);
   }
-  if (reasoningEffort !== undefined && provider !== "kimi") {
-    throw new TypeError(`${path}: reasoning_effort is currently supported only when provider = "kimi"`);
+  if (reasoningEffort !== undefined && provider !== "kimi" && provider !== "deepseek") {
+    throw new TypeError(
+      `${path}: reasoning_effort is currently supported only when provider = "kimi" or "deepseek"`,
+    );
   }
   let capabilities: QiCapabilityConfig | undefined;
   if (root.capabilities !== undefined) {
@@ -718,7 +791,9 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     ...(compatible === undefined ? {} : { compatible }),
     ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+    ...(outputReserveTokens === undefined ? {} : { outputReserveTokens }),
     ...(maxSteps === undefined ? {} : { maxSteps }),
+    ...(maxActionsPerStep === undefined ? {} : { maxActionsPerStep }),
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(shell === undefined ? {} : { shell }),
     ...(memory === undefined ? {} : { memory }),

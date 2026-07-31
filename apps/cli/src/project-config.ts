@@ -193,8 +193,8 @@ function validateProjectConfig(value: unknown, path: string): QiProjectConfig {
 
 function validateMaxSteps(value: unknown, path: string): number | undefined {
   if (value === undefined) return undefined;
-  if (!Number.isInteger(value) || (value as number) < 8 || (value as number) > 100) {
-    throw new TypeError(`${path}: max_steps must be an integer from 8 to 100`);
+  if (!Number.isInteger(value) || (value as number) < 8 || (value as number) > 1_000) {
+    throw new TypeError(`${path}: max_steps must be an integer from 8 to 1000`);
   }
   return value as number;
 }

@@ -104,14 +104,20 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
     this.#assertProvider(request.model);
     const profile = this.#profile ?? tryProfile(request.model.provider);
     if (profile) {
-      assertProfileSupportsRequest(profile, { toolCount: request.tools.length });
+      assertProfileSupportsRequest(profile, {
+        toolCount: request.tools.length,
+        model: request.model.model,
+      });
     }
     throwIfAborted(signal);
 
     const thinking = profile === undefined
       ? undefined
-      : kimiThinkingConfig(profile, request.model.model, this.#reasoningEffort);
-    const body: ChatCompletionCreateParamsStreaming & { thinking?: KimiThinkingConfig } = {
+      : chatThinkingConfig(profile, request.model.model, this.#reasoningEffort);
+    const body: ChatCompletionCreateParamsStreaming & {
+      thinking?: KimiThinkingConfig | DeepSeekThinkingConfig;
+      reasoning_effort?: ProviderThinkingEffort;
+    } = {
       model: request.model.model,
       messages: toChatMessages(request.messages),
       tools: request.tools.map(toChatTool),
@@ -122,7 +128,10 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
         : profile?.id === "kimi"
           ? { max_completion_tokens: request.maxOutputTokens }
           : { max_tokens: request.maxOutputTokens }),
-      ...(thinking === undefined ? {} : { thinking }),
+      ...(thinking?.thinking === undefined ? {} : { thinking: thinking.thinking }),
+      ...(thinking?.reasoningEffort === undefined
+        ? {}
+        : { reasoning_effort: thinking.reasoningEffort }),
     };
 
     const stream = await this.#client.chat.completions.create(
@@ -150,7 +159,7 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
       if (!choice) continue;
       if (choice.finish_reason) finishReason = choice.finish_reason;
       const delta = choice.delta;
-      const reasoning = kimiReasoningDelta(delta);
+      const reasoning = providerReasoningDelta(delta);
       if (reasoning !== undefined && reasoning.length > 0) {
         yield parseModelEvent({ type: "reasoning.delta", delta: reasoning });
       }
@@ -259,30 +268,59 @@ interface KimiThinkingConfig {
   readonly effort?: ProviderThinkingEffort;
 }
 
-function kimiThinkingConfig(
+interface DeepSeekThinkingConfig {
+  readonly type: "enabled" | "disabled";
+}
+
+interface ChatThinkingWire {
+  readonly thinking?: KimiThinkingConfig | DeepSeekThinkingConfig;
+  readonly reasoningEffort?: ProviderThinkingEffort;
+}
+
+function chatThinkingConfig(
   profile: ProviderProfile,
   model: string,
   requestedEffort: string | null | undefined,
-): KimiThinkingConfig | undefined {
-  if (profile.id !== "kimi") return undefined;
-  const modelProfile = getProviderModelProfile(profile, model);
-  const effort = normalizeKimiReasoningEffort(requestedEffort);
-  if (effort === "none") return { type: "disabled" };
-  if (!modelProfile?.thinking) {
-    return effort === undefined ? undefined : { type: "enabled", effort };
+): ChatThinkingWire | undefined {
+  if (profile.id === "kimi") {
+    const modelProfile = getProviderModelProfile(profile, model);
+    const effort = normalizeReasoningEffort(requestedEffort);
+    if (effort === "none") return { thinking: { type: "disabled" } };
+    if (!modelProfile?.thinking) {
+      return effort === undefined ? undefined : { thinking: { type: "enabled", effort } };
+    }
+    if (modelProfile.thinking.mode === "toggle") return { thinking: { type: "enabled" } };
+    const supported = modelProfile.thinking.supportedEfforts;
+    const selected = effort !== undefined && supported?.includes(effort)
+      ? effort
+      : modelProfile.thinking.defaultEffort ?? supported?.[0] ?? "high";
+    return {
+      thinking: {
+        type: "enabled",
+        effort: selected,
+      },
+    };
   }
-  if (modelProfile.thinking.mode === "toggle") return { type: "enabled" };
-  const supported = modelProfile.thinking.supportedEfforts;
-  const selected = effort !== undefined && supported?.includes(effort)
-    ? effort
-    : modelProfile.thinking.defaultEffort ?? supported?.[0] ?? "high";
-  return {
-    type: "enabled",
-    effort: selected,
-  };
+  if (profile.id === "deepseek") {
+    const modelProfile = getProviderModelProfile(profile, model);
+    if (!modelProfile?.thinking && requestedEffort === undefined) return undefined;
+    const effort = normalizeReasoningEffort(requestedEffort);
+    if (effort === "none") return { thinking: { type: "disabled" } };
+    const supported = modelProfile?.thinking?.supportedEfforts;
+    const selected = effort !== undefined && supported?.includes(effort)
+      ? effort
+      : modelProfile?.thinking?.defaultEffort ?? supported?.[0] ?? effort;
+    if (selected === undefined) return { thinking: { type: "enabled" } };
+    return {
+      thinking: { type: "enabled" },
+      reasoningEffort: selected,
+    };
+  }
+  return undefined;
 }
 
-export function normalizeKimiReasoningEffort(
+/** Normalize operator effort aliases used by Kimi and DeepSeek. */
+export function normalizeReasoningEffort(
   value: string | null | undefined,
 ): ProviderThinkingEffort | "none" | undefined {
   if (value === undefined || value === null) return undefined;
@@ -297,17 +335,25 @@ export function normalizeKimiReasoningEffort(
     case "low":
     case "minimum":
     case "light":
+    case "minimal":
       return "low";
     case "none":
       return "none";
     default:
       throw new TypeError(
-        `Unsupported Kimi reasoning effort "${value}"; expected ultra|max|xhigh|high|medium|low|minimum|light|none`,
+        `Unsupported reasoning effort "${value}"; expected ultra|max|xhigh|high|medium|low|minimum|minimal|light|none`,
       );
   }
 }
 
-function kimiReasoningDelta(delta: ChatCompletionChunk["choices"][number]["delta"]): string | undefined {
+/** @deprecated Prefer {@link normalizeReasoningEffort}. */
+export function normalizeKimiReasoningEffort(
+  value: string | null | undefined,
+): ProviderThinkingEffort | "none" | undefined {
+  return normalizeReasoningEffort(value);
+}
+
+function providerReasoningDelta(delta: ChatCompletionChunk["choices"][number]["delta"]): string | undefined {
   const candidate = delta as typeof delta & {
     reasoning_content?: unknown;
     reasoning?: unknown;
@@ -405,25 +451,32 @@ function toChatMessages(messages: readonly ModelMessage[]): ChatCompletionMessag
           .filter((part): part is Extract<ModelContentPart, { type: "text" }> => part.type === "text")
           .map((part) => part.text)
           .join("");
-        if (toolCalls.length > 0) {
-          result.push({
-            role: "assistant",
-            ...(text ? { content: text } : { content: null }),
-            tool_calls: toolCalls.map((part) => {
-              if (part.type !== "tool-call") throw new TypeError("expected tool-call");
-              return {
-                id: part.callId,
-                type: "function" as const,
-                function: {
-                  name: part.name,
-                  arguments: JSON.stringify(part.input ?? {}),
-                },
-              };
-            }),
-          });
-        } else {
-          result.push({ role: "assistant", content: text });
-        }
+        const reasoning = message.content
+          .filter((part): part is Extract<ModelContentPart, { type: "reasoning" }> =>
+            part.type === "reasoning"
+          )
+          .map((part) => part.text)
+          .join("");
+        const assistantMessage: ChatCompletionMessageParam & { reasoning_content?: string } =
+          toolCalls.length > 0
+            ? {
+              role: "assistant",
+              ...(text ? { content: text } : { content: null }),
+              tool_calls: toolCalls.map((part) => {
+                if (part.type !== "tool-call") throw new TypeError("expected tool-call");
+                return {
+                  id: part.callId,
+                  type: "function" as const,
+                  function: {
+                    name: part.name,
+                    arguments: JSON.stringify(part.input ?? {}),
+                  },
+                };
+              }),
+            }
+            : { role: "assistant", content: text };
+        if (reasoning) assistantMessage.reasoning_content = reasoning;
+        result.push(assistantMessage);
         break;
       }
       case "tool":
@@ -467,7 +520,9 @@ function toChatUserContent(
   for (const part of message.content) {
     if (part.type === "text") content.push({ type: "text", text: part.text });
     else if (part.type === "image") content.push(toChatImagePart(part));
-    else if (part.type === "artifact") {
+    else if (part.type === "reasoning") {
+      throw new TypeError("user messages cannot contain reasoning parts");
+    } else if (part.type === "artifact") {
       throw new TypeError(`Artifact ${part.ref} must be resolved before invoking the Chat Completions adapter`);
     } else {
       throw new TypeError(`user messages cannot contain ${part.type} parts`);
@@ -517,7 +572,10 @@ function textOnly(message: ModelMessage, role: string): string {
   const parts: string[] = [];
   for (const part of message.content) {
     if (part.type === "text") parts.push(part.text);
-    else if (part.type === "image" || part.type === "artifact") {
+    else if (part.type === "reasoning") {
+      // System/user messages never carry provider CoT; ignore if present.
+      continue;
+    } else if (part.type === "image" || part.type === "artifact") {
       throw new TypeError(`Chat Completions adapter does not accept ${part.type} parts on ${role} messages`);
     } else {
       throw new TypeError(`${role} messages cannot contain ${part.type} parts`);

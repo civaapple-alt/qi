@@ -12,6 +12,7 @@ import {
   loadUserConfig,
   persistActiveCompatible,
   persistUserLanguage,
+  persistUserMaxActionsPerStep,
   persistUserMaxSteps,
   persistUserProviderDefaults,
   persistUserShell,
@@ -216,12 +217,12 @@ test("user config is optional, strict, and cannot contain an API key", async () 
     await assert.rejects(loadUserConfig(invalidContext), /integer between 8192 and 2000000/);
 
     const invalidSteps = join(root, "invalid-steps.toml");
-    await writeFile(invalidSteps, "max_steps = 101\n");
-    await assert.rejects(loadUserConfig(invalidSteps), /integer between 8 and 100/);
+    await writeFile(invalidSteps, "max_steps = 1001\n");
+    await assert.rejects(loadUserConfig(invalidSteps), /integer between 8 and 1000/);
 
     const invalidEffort = join(root, "invalid-effort.toml");
     await writeFile(invalidEffort, 'provider = "kimi"\nreasoning_effort = "extreme"\n');
-    await assert.rejects(loadUserConfig(invalidEffort), /Unsupported Kimi reasoning effort/);
+    await assert.rejects(loadUserConfig(invalidEffort), /Unsupported reasoning effort/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -565,8 +566,65 @@ max_steps = 32
     assert.equal(reloaded.config.maxSteps, 48);
     assert.match(await readFile(path, "utf8"), /max_steps = 48/);
 
-    await assert.rejects(() => persistUserMaxSteps(7, path), /integer from 8 to 100/);
-    await assert.rejects(() => persistUserMaxSteps(101, path), /integer from 8 to 100/);
+    await assert.rejects(() => persistUserMaxSteps(7, path), /integer from 8 to 1000/);
+    await assert.rejects(() => persistUserMaxSteps(1001, path), /integer from 8 to 1000/);
+    const high = await persistUserMaxSteps(1000, path);
+    assert.equal(high.config.maxSteps, 1000);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("output_reserve_tokens loads from user config and persists via provider defaults", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-output-reserve-"));
+  const path = join(root, "config.toml");
+  try {
+    await writeFile(path, `
+version = 1
+provider = "deepseek"
+model = "deepseek-v4-flash"
+output_reserve_tokens = 65536
+`);
+    const loaded = await loadUserConfig(path);
+    assert.equal(loaded.config.outputReserveTokens, 65_536);
+    const parsed = await parseTuiCliArguments(
+      ["--workspace", root, "--config", path],
+      { environment: { QI_HOME: join(root, "state") } },
+    );
+    assert.equal(parsed.kind, "run");
+    assert.equal(parsed.options.outputReserveTokensPreferred, 65_536);
+    assert.equal(parsed.options.outputReserveTokens, 65_536);
+
+    const saved = await persistUserProviderDefaults({
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      outputReserveTokens: 32_768,
+    }, path);
+    assert.equal(saved.config.outputReserveTokens, 32_768);
+    assert.match(await readFile(path, "utf8"), /output_reserve_tokens = 32768/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("persistUserMaxActionsPerStep writes max_actions_per_step and rejects out-of-range values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-max-actions-"));
+  const path = join(root, "config.toml");
+  try {
+    await writeFile(path, `
+version = 1
+provider = "xai"
+model = "grok-config"
+max_actions_per_step = 4
+`);
+    const saved = await persistUserMaxActionsPerStep(8, path);
+    assert.equal(saved.config.maxActionsPerStep, 8);
+    const reloaded = await loadUserConfig(path);
+    assert.equal(reloaded.config.maxActionsPerStep, 8);
+    assert.match(await readFile(path, "utf8"), /max_actions_per_step = 8/);
+
+    await assert.rejects(() => persistUserMaxActionsPerStep(0, path), /integer from 1 to 32/);
+    await assert.rejects(() => persistUserMaxActionsPerStep(33, path), /integer from 1 to 32/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

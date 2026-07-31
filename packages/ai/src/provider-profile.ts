@@ -29,6 +29,13 @@ export interface ProviderModelProfile {
   readonly contextTokens: number;
   readonly inputModalities?: readonly ("text" | "image")[];
   readonly thinking?: ProviderModelThinking;
+  /** Optional per-model wire API override when one vendor exposes mixed protocols. */
+  readonly wireApi?: ProviderWireApi;
+  /**
+   * Recommended next-response reserve (includes hidden reasoning when the provider counts it).
+   * Composition roots may raise the default output reserve up to this value, still capped by the window.
+   */
+  readonly outputReserveTokens?: number;
 }
 
 export interface ProviderProfile {
@@ -154,13 +161,51 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
   {
     id: "deepseek",
     displayName: "DeepSeek",
-    wireApi: "chat.completions",
+    wireApi: "responses",
     officialBaseURL: "https://api.deepseek.com/v1",
     officialHosts: ["api.deepseek.com"],
     authSchemes: ["api-key"],
     defaultModel: "deepseek-v4-flash",
-    contextTokens: 128_000,
-    capabilities: { ...chatCaps },
+    contextTokens: 1_048_576,
+    inputModalities: ["text"],
+    models: [
+      {
+        id: "deepseek-v4-flash",
+        displayName: "DeepSeek V4 Flash",
+        contextTokens: 1_048_576,
+        // Thinking tokens share max_output_tokens; 16k defaults truncates high-effort agent turns.
+        outputReserveTokens: 65_536,
+        inputModalities: ["text"],
+        wireApi: "responses",
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "deepseek-v4-pro",
+        displayName: "DeepSeek V4 Pro",
+        contextTokens: 1_048_576,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text"],
+        wireApi: "chat.completions",
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+    ],
+    capabilities: {
+      chatCompletions: true,
+      responses: true,
+      streaming: true,
+      toolCalls: true,
+      reasoning: true,
+      usage: true,
+      requestMetadata: false,
+    },
     envApiKey: "DEEPSEEK_API_KEY",
     envBaseURL: "DEEPSEEK_BASE_URL",
     envModel: "DEEPSEEK_MODEL",
@@ -223,8 +268,21 @@ export function getProviderModelProfile(
   return profile.models?.find((candidate) => candidate.id === model);
 }
 
+/** Resolve the effective wire API for a model; model catalog overrides the profile default. */
+export function resolveProviderWireApi(profile: ProviderProfile, model: string): ProviderWireApi {
+  return getProviderModelProfile(profile, model)?.wireApi ?? profile.wireApi;
+}
+
 export function providerModelContextTokens(profile: ProviderProfile, model: string): number {
   return getProviderModelProfile(profile, model)?.contextTokens ?? profile.contextTokens;
+}
+
+/** Optional model-catalog output reserve; undefined means the composition root keeps its default. */
+export function providerModelOutputReserveTokens(
+  profile: ProviderProfile,
+  model: string,
+): number | undefined {
+  return getProviderModelProfile(profile, model)?.outputReserveTokens;
 }
 
 export function classifyProfileEndpoint(
@@ -257,18 +315,21 @@ export function modelCapabilitiesFromProfile(
   const input = new Set<"text" | "image" | "artifact">(["text"]);
   const profileImageInput = (modelProfile?.inputModalities ?? profile.inputModalities)?.includes("image") ?? false;
   if (narrowing.imageInput ?? profileImageInput) input.add("image");
+  const wireApi = narrowing.model === undefined
+    ? profile.wireApi
+    : resolveProviderWireApi(profile, narrowing.model);
   return {
     input,
     output,
     contextTokens: narrowing.contextTokens ?? modelProfile?.contextTokens ?? profile.contextTokens,
     parallelActions: toolCalls,
-    promptCache: profile.wireApi === "responses",
+    promptCache: wireApi === "responses",
   };
 }
 
 export function assertProfileSupportsRequest(
   profile: ProviderProfile,
-  options: { toolCount: number; needsReasoning?: boolean },
+  options: { toolCount: number; needsReasoning?: boolean; model?: string },
 ): void {
   if (!profile.capabilities.streaming) {
     throw new TypeError(`Provider profile ${profile.id} does not support streaming`);
@@ -279,10 +340,13 @@ export function assertProfileSupportsRequest(
   if (options.needsReasoning && !profile.capabilities.reasoning) {
     throw new TypeError(`Provider profile ${profile.id} does not support reasoning output`);
   }
-  if (profile.wireApi === "responses" && !profile.capabilities.responses) {
+  const wireApi = options.model === undefined
+    ? profile.wireApi
+    : resolveProviderWireApi(profile, options.model);
+  if (wireApi === "responses" && !profile.capabilities.responses) {
     throw new TypeError(`Provider profile ${profile.id} is not configured for the Responses wire API`);
   }
-  if (profile.wireApi === "chat.completions" && !profile.capabilities.chatCompletions) {
+  if (wireApi === "chat.completions" && !profile.capabilities.chatCompletions) {
     throw new TypeError(`Provider profile ${profile.id} is not configured for Chat Completions`);
   }
 }
