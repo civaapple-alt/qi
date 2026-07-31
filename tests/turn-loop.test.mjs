@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Type } from "@sinclair/typebox";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
+import { GoalEngine } from "@civaapple/qi-agent/eval";
 import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
 import {
@@ -1781,4 +1782,58 @@ test("HumanControlService continues current Work Plan when workPlanId is omitted
     }),
     /does not exist/,
   );
+});
+
+test("TurnLoop binds a Goal, injects Goal ContextBlock, and consumes attempt budget", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const sessionId = "ses_turn_goal_bind";
+    new EventWriter(store, sessionId).append("session.created", { title: "Goal bind" }, { kind: "runtime", id: "test" });
+    const goals = new GoalEngine(store, sessionId);
+    const goal = goals.create(
+      {
+        objective: "Ship a verified change",
+        assertions: [{ assertionId: "tests.pass", description: "Tests pass" }],
+        resources: [{ resource: "attempts", limit: 2, unit: "attempt" }],
+      },
+      {
+        issuedTo: "user",
+        startRight: "user",
+        stopRight: "user",
+        acceptanceRight: "human",
+        delegationRight: false,
+        actionLeaseIds: [],
+      },
+    );
+    let sawGoalBlock = false;
+    const model = new ScriptedModelPort([
+      (request) => {
+        sawGoalBlock = JSON.stringify(request.messages).includes("Session-local")
+          || JSON.stringify(request.messages).includes(goal.objective);
+        return [
+          { type: "text.delta", delta: "Working toward the Goal; not claiming completion." },
+          { type: "completed", finishReason: "stop" },
+        ];
+      },
+    ]);
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: model,
+      toolRegistry: new ToolRegistry(new InMemoryCapabilityBroker()),
+    });
+    const result = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      goalBinding: { goalId: goal.goalId, contractVersion: goal.contractVersion },
+      trigger: "goal",
+      maxSteps: 1,
+    }));
+    assert.equal(result.status, "completed");
+    assert.equal(sawGoalBlock, true);
+    const run = result.view.runs[result.runId];
+    assert.deepEqual(run.goalBinding, { goalId: goal.goalId, contractVersion: goal.contractVersion });
+    assert.equal(run.trigger, "goal");
+    assert.equal(result.view.goals[goal.goalId].resources.attempts.consumed, 1);
+    assert.equal(result.view.goals[goal.goalId].state, "active");
+    assert.equal(run.terminal?.reason, "response");
+  });
 });

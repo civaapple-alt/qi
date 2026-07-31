@@ -109,7 +109,7 @@ export interface WebWorkPlanSnapshot {
 
 export interface WebRunProjection {
   runId: string;
-  trigger: "user" | "timer" | "event" | "resume";
+  trigger: "user" | "goal" | "timer" | "event" | "resume";
   input: string | undefined;
   /** Short label for sidebar / narrative title (Formal Plan aware). */
   displayTitle: string;

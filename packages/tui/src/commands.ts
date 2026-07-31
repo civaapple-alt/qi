@@ -49,6 +49,13 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
     category: "manage",
     visibility: "primary",
   },
+  {
+    name: "goal",
+    descriptionKey: "cmd.goal",
+    argumentHint: "[prompt]",
+    category: "control",
+    visibility: "primary",
+  },
   { name: "mode", descriptionKey: "cmd.mode", argumentHint: "[ask|plan|agent]", category: "control", visibility: "primary" },
   {
     name: "ask",

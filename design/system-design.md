@@ -145,6 +145,12 @@ entries. Kernel completion policy distinguishes:
 - a completed bounded Run;
 - an evidence-backed verified result.
 
+Session-local 追寻 binds a Run to a Goal through optional `run.triggered.goalBinding`. TurnLoop still executes
+one bounded Run and may inject a least-information Goal ContextBlock; it does not complete the Goal because the
+model stopped. After the Run settles, GoalContinuation decides `complete` / `pause` / `block` / `await-continue`
+using evidence, budgets, stagnation, and indeterminate Effects ([ADR-0033](decisions.md#adr-0033-session-local-goal-continuation-for-追寻)).
+Cross-Session Goal ownership and background daemons remain deferred.
+
 Semantic judgment is trusted only after calibration. Otherwise it projects to `unknown`, even if the evaluator
 reported a confident answer. Repeated equivalent failures, resource exhaustion, or unresolved effects park work
 instead of manufacturing success.
@@ -167,8 +173,9 @@ approvals survive restart and cannot grant authority merely because a UI control
 它们不是 Session mode，也不直接授予 Action authority。四种激活与延续方式
 `Turn-based / Goal-based / Time-based / Proactive` 的产品含义与边界见
 [产品愿景 §6](product-vision.md#6-自治不是一个开关)。
-当前产品化入口以用户触发的同行为主；Goal 和 Scheduler 是 Runtime 基础，但追寻与守望尚未作为
-稳定的端到端用户入口交付。
+同行仍是默认入口。Session-local 追寻 now has a CLI `/goal` surface and Run binding / continuation path, but it
+is not yet product-validated with external users. 守望 remains Scheduler foundation without a stable end-to-end
+product entry.
 
 `apps/cli` owns provider login, policy resolution, stores, Tool construction, process ownership, and interactive
 control. `@civaapple/qi-tui` owns reusable projections and terminal components only.

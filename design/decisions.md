@@ -596,6 +596,33 @@ replaying tool transcripts or Runtime telemetry would violate ADR-0024/0026.
   double wrappers; omission hint without Run IDs; unfinished Work Plan block shape; `update_plan` continue-current
   when `workPlanId` is omitted but known `wit_*` values are supplied; Formal Plan executor history stays empty.
 
+## ADR-0033: Session-local Goal continuation for 追寻
+
+Pressure: Goal, Evidence, and control receipts already exist as Session facts, but Runs were not bound to a
+Goal contract. TurnLoop ended ordinary Runs as `completionKind: "response"`, so 追寻 could not continue across
+bounded Runs without inventing a second truth source or turning one Run into an unbounded loop.
+
+- A Goal remains a Session-owned completion contract (assertions, evidence requirements, budgets, stagnation,
+  control receipts). It is not a Run, Work Plan, Formal Plan, Memory claim, or Watcher.
+- `run.triggered` may freeze an optional `goalBinding: { goalId, contractVersion }`. Only an `active` Goal with a
+  matching `contractVersion` may be bound. Terminal Goals (`complete` / `cancelled`) reject new bindings.
+- `run.triggered.trigger` gains `"goal"` for explicit Goal continuation. `timer` / `event` remain Watcher
+  awakenings and may also carry a Goal binding; they do not complete a Goal by themselves.
+- TurnLoop still executes one bounded Run. A new portable GoalContinuation decision layer observes the settled
+  Goal-bound Run and decides `complete` / `pause` / `block` / `await-continue` / `cancel`. It never grants
+  Action authority.
+- Model stop or narrative “done” cannot complete a Goal. Verified Run completion and Goal `complete` require
+  matching evaluations and Evidence Ledger entries (existing Kernel gates).
+- Budget exhaustion and stagnation park the Run and pause the Goal; `action.indeterminate` blocks the Goal and
+  forbids automatic retry. Ordinary non-bound Turns may still run while a Goal is `paused`.
+- Archive and `/reset-workspace` fail closed while any Goal is `active`, `paused`, or `blocked`.
+- Compatibility is additive: older Sessions without `goalBinding` / `trigger: "goal"` replay unchanged.
+- Rejected for this stage: Project-scoped Goal-owning Sessions, `goals.sqlite` as truth, default unlimited
+  auto-continue, and a process daemon. Those remain explicit deferrals under ADR-0013 / the roadmap.
+- Required evidence: binding validation; GoalContinuation after park/continue; no evidence ⇒ no complete;
+  indeterminate ⇒ blocked; unfinished Goals block archive/reset; TurnLoop Goal ContextBlock without tool
+  transcripts.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

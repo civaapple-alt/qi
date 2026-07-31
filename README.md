@@ -69,9 +69,10 @@ Plans hand one immutable design to an implementation Run; Work Plans provide in-
 completion evidence. Memory, bounded Run history, Session archive/recovery, image input, ProcessTasks, and
 configurable shell profiles keep that work observable and recoverable.
 
-Goal, Evidence, and Scheduler foundations exist in the Runtime, but **追寻** and **守望** are not yet stable
-end-to-end product entries. They remain product directions until their continuation, attention, notification,
-stop, and recovery experiences have been validated with users.
+Session-local **追寻** is available through `/goal` with Goal-bound Runs and evidence-backed completion, but it
+is not yet product-validated with external users. **守望** still rests on Scheduler foundations without a stable
+end-to-end product entry. Both remain product directions until continuation, attention, notification, stop, and
+recovery experiences have been validated with users.
 
 ## Configuration
 

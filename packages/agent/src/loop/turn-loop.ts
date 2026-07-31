@@ -15,9 +15,11 @@ import {
   type ContextBlock,
   type TokenEstimator,
 } from "@civaapple/qi-ai/context";
+import { GoalEngine } from "@civaapple/qi-agent/eval";
 import {
   StateTransitionError,
   type EventStore,
+  type RunGoalBinding,
   type RunPlanBinding,
   type RunView,
   type SessionMode,
@@ -26,6 +28,7 @@ import {
 import type { ModelContentPart, ModelEvent, ModelMessage, ModelPort, ModelRef } from "@civaapple/qi-ai";
 import {
   createId,
+  type GoalId,
   type RunId,
   type RunInputPart,
   type SessionEvent,
@@ -43,6 +46,7 @@ import {
 } from "@civaapple/qi-agent/tools";
 import type { EffectJournal } from "@civaapple/qi-agent/effects";
 import { EventWriter } from "./event-writer.js";
+import { createGoalContextBlock } from "./goal-continuation.js";
 import { formatIndeterminateParkDetail } from "./indeterminate-detail.js";
 import type { RuntimeActivity } from "./runtime-activity.js";
 import { isToolAllowedInMode, toolsForMode } from "./session-mode.js";
@@ -92,6 +96,13 @@ export interface TurnRequest {
   /** Session mode frozen onto run.triggered when creating a new Run. */
   mode?: SessionMode;
   planBinding?: RunPlanBinding;
+  /** Optional Session-local Goal binding for 追寻 Runs. */
+  goalBinding?: RunGoalBinding;
+  /**
+   * How this Run was started. Defaults to `user` for new Runs and `goal` when
+   * `goalBinding` is set without an explicit trigger.
+   */
+  trigger?: "user" | "goal" | "timer" | "event" | "resume";
   /** Execute a Run that was already durably triggered (Plan accept / next-run answer). */
   existingRunId?: RunId;
   workspaceRoot: string;
@@ -266,21 +277,32 @@ export class TurnLoop {
       await assertImageCapability(this.#modelPort, request.model, runContent);
     } else {
       runId = createId("run") as RunId;
+      const goalBinding = resolveGoalBinding(writer.view, request.goalBinding);
+      const trigger = request.trigger
+        ?? (goalBinding === undefined ? "user" : "goal");
       writer.append(
         "run.triggered",
         {
           runId,
-          trigger: "user",
+          trigger,
           input: request.input,
           ...(runContent === undefined ? {} : { content: runContent }),
           mode: runMode,
           ...(request.planBinding === undefined ? {} : { planBinding: request.planBinding }),
+          ...(goalBinding === undefined ? {} : { goalBinding }),
         },
-        { kind: "user", id: request.subject },
+        { kind: trigger === "user" ? "user" : "runtime", id: request.subject },
       );
     }
     writer.append("run.started", { runId }, { kind: "runtime", id: "qi" });
     const frozenMode = writer.view?.runs[runId]?.mode ?? runMode;
+    const frozenGoalBinding = writer.view?.runs[runId]?.goalBinding;
+    const goalEngine = frozenGoalBinding
+      ? new GoalEngine(this.#eventStore, request.sessionId, {
+          clock: this.#clock,
+          ...(this.#onEvent === undefined ? {} : { onEvent: this.#onEvent }),
+        })
+      : undefined;
 
     const estimator = request.tokenEstimator ?? approximateTokenEstimator;
     const currentInputMessage: ModelMessage = {
@@ -325,14 +347,30 @@ export class TurnLoop {
     let finalText = "";
 
     for (let stepNumber = 1; stepNumber <= request.maxSteps; stepNumber += 1) {
+      if (goalEngine && frozenGoalBinding && writer.view?.goals[frozenGoalBinding.goalId]?.resources.attempts) {
+        const attemptBudget = goalEngine.consumeResource(
+          frozenGoalBinding.goalId,
+          "attempts",
+          1,
+          `Step ${stepNumber}`,
+          runId,
+        );
+        if (attemptBudget.exhausted) {
+          return this.#result(writer, request.sessionId, runId, "parked", finalText);
+        }
+      }
       const finalHandoffStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps;
       const budgetWarningStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps - 1;
       const workPlanBlock = createWorkPlanNavigationBlock(writer.view, frozenMode);
+      const goalBlock = frozenGoalBinding
+        ? createGoalContextBlockForView(writer.view, frozenGoalBinding.goalId)
+        : undefined;
       const stepContextBlocks = [
         ...request.contextBlocks,
         ...(history.factsBlock ? [history.factsBlock] : []),
         ...(history.omissionBlock ? [history.omissionBlock] : []),
         ...(workPlanBlock ? [workPlanBlock] : []),
+        ...(goalBlock ? [goalBlock] : []),
         ...(budgetWarningStep ? [createBudgetWarningBlock(stepNumber, request.maxSteps)] : []),
         ...(finalHandoffStep ? [createBudgetHandoffBlock(stepNumber, request.maxSteps)] : []),
       ];
@@ -632,6 +670,18 @@ export class TurnLoop {
           { runId, stepId, finishReason: completedTerminal.finishReason === "length" ? "error" : "response" },
           { kind: "runtime", id: "qi" },
         );
+      if (
+        consumeGoalTokens({
+          ...(goalEngine === undefined ? {} : { goalEngine }),
+          ...(frozenGoalBinding === undefined ? {} : { goalBinding: frozenGoalBinding }),
+          ...(writer.view === undefined ? {} : { view: writer.view }),
+          runId,
+          ...(modelResult.usage === undefined ? {} : { usage: modelResult.usage }),
+          reason: `model ${requestId}`,
+        })
+      ) {
+          return this.#result(writer, request.sessionId, runId, "parked", finalText);
+        }
         if (completedTerminal.finishReason === "length") {
           writer.append(
             "run.parked",
@@ -859,10 +909,32 @@ export class TurnLoop {
         { runId, stepId, finishReason: "action-requested" },
         { kind: "runtime", id: "qi" },
       );
+      if (
+        consumeGoalTokens({
+          ...(goalEngine === undefined ? {} : { goalEngine }),
+          ...(frozenGoalBinding === undefined ? {} : { goalBinding: frozenGoalBinding }),
+          ...(writer.view === undefined ? {} : { view: writer.view }),
+          runId,
+          ...(modelResult.usage === undefined ? {} : { usage: modelResult.usage }),
+          reason: `model ${requestId}`,
+        })
+      ) {
+        return this.#result(writer, request.sessionId, runId, "parked", finalText);
+      }
 
       const successfulWrites = new Map<string, SuccessfulStepWrite>();
       const lastMutationAttempts = new Map<string, StepMutationAttempt>();
-      const candidateExecutionArgs = { writer, runId, stepId, request, successfulWrites, lastMutationAttempts, toolResults };
+      const candidateExecutionArgs = {
+        writer,
+        runId,
+        stepId,
+        request,
+        successfulWrites,
+        lastMutationAttempts,
+        toolResults,
+        ...(goalEngine === undefined ? {} : { goalEngine }),
+        ...(frozenGoalBinding === undefined ? {} : { goalBinding: frozenGoalBinding }),
+      };
       let candidateIndex = 0;
       while (candidateIndex < candidates.length) {
         const candidate = candidates[candidateIndex];
@@ -905,6 +977,16 @@ export class TurnLoop {
                 detail: parkDetailForIndeterminate(writer.view?.runs[runId]),
               },
               { kind: "runtime", id: "qi" },
+            );
+            return this.#result(writer, request.sessionId, runId, "parked", finalText);
+          }
+          if (writer.view?.runs[runId]?.status === "parked") {
+            this.#denyUnstartedCandidates(
+              writer,
+              runId,
+              stepId,
+              candidates.slice(candidateIndex + 1),
+              "Batch stopped because Goal convergence parked the Run",
             );
             return this.#result(writer, request.sessionId, runId, "parked", finalText);
           }
@@ -961,6 +1043,16 @@ export class TurnLoop {
           );
           return this.#result(writer, request.sessionId, runId, "parked", finalText);
         }
+        if (writer.view?.runs[runId]?.status === "parked") {
+          this.#denyUnstartedCandidates(
+            writer,
+            runId,
+            stepId,
+            candidates.slice(readRunEnd),
+            "Batch stopped because Goal convergence parked the Run",
+          );
+          return this.#result(writer, request.sessionId, runId, "parked", finalText);
+        }
         candidateIndex = readRunEnd;
       }
       const exchangeMessages: ModelMessage[] = [assistantMessage];
@@ -1012,9 +1104,21 @@ export class TurnLoop {
       successfulWrites: Map<string, SuccessfulStepWrite>;
       lastMutationAttempts: Map<string, StepMutationAttempt>;
       toolResults: Map<string, ToolResultPart>;
+      goalEngine?: GoalEngine;
+      goalBinding?: RunGoalBinding;
     },
   ): Promise<"settled" | "denied" | "failed" | "cancelled" | "indeterminate"> {
-    const { writer, runId, stepId, request, successfulWrites, lastMutationAttempts, toolResults } = args;
+    const {
+      writer,
+      runId,
+      stepId,
+      request,
+      successfulWrites,
+      lastMutationAttempts,
+      toolResults,
+      goalEngine,
+      goalBinding,
+    } = args;
     let inspected = candidate.inspected;
     let context = candidate.context;
     let chainedEdit = false;
@@ -1234,6 +1338,24 @@ export class TurnLoop {
           { runId, stepId, actionId: candidate.actionId, errorCode: error.code, modelOutput },
           { kind: "runtime", id: "tool_runner" },
         );
+        if (goalEngine && goalBinding) {
+          const assertionId = primaryGoalAssertionId(writer.view, goalBinding.goalId);
+          if (assertionId) {
+            try {
+              goalEngine.recordFailure({
+                goalId: goalBinding.goalId,
+                runId,
+                stepId,
+                assertionId,
+                evaluatorIdentity: `tool:${inspected.name}`,
+                errorCode: error.code,
+                targetResources: [...inspected.resources],
+              });
+            } catch {
+              // Failure accounting must not override Action settlement; stagnation park is best-effort.
+            }
+          }
+        }
         toolResults.set(candidate.callId, {
           type: "tool-result",
           callId: candidate.callId,
@@ -2003,4 +2125,49 @@ function createWorkPlanNavigationBlock(
 function errorRef(error: unknown): string {
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   return `diagnostic:inline:${encodeURIComponent(message).slice(0, 400)}`;
+}
+
+function resolveGoalBinding(
+  view: SessionView | undefined,
+  requested: RunGoalBinding | undefined,
+): RunGoalBinding | undefined {
+  if (requested) return { ...requested };
+  return undefined;
+}
+
+function createGoalContextBlockForView(
+  view: SessionView | undefined,
+  goalId: GoalId,
+): ReturnType<typeof createGoalContextBlock> | undefined {
+  const goal = view?.goals[goalId];
+  return goal ? createGoalContextBlock(goal) : undefined;
+}
+
+function consumeGoalTokens(input: {
+  goalEngine?: GoalEngine;
+  goalBinding?: RunGoalBinding;
+  view?: SessionView;
+  runId: RunId;
+  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
+  reason: string;
+}): boolean {
+  if (!input.goalEngine || !input.goalBinding || !input.usage) return false;
+  if (!input.view?.goals[input.goalBinding.goalId]?.resources.token) return false;
+  const tokens = input.usage.inputTokens + input.usage.outputTokens;
+  if (tokens <= 0) return false;
+  const result = input.goalEngine.consumeResource(
+    input.goalBinding.goalId,
+    "token",
+    tokens,
+    input.reason,
+    input.runId,
+  );
+  return result.exhausted;
+}
+
+function primaryGoalAssertionId(view: SessionView | undefined, goalId: GoalId): string | undefined {
+  const goal = view?.goals[goalId];
+  if (!goal) return undefined;
+  return Object.values(goal.assertions).find((assertion) => assertion.required)?.assertionId
+    ?? Object.values(goal.assertions)[0]?.assertionId;
 }

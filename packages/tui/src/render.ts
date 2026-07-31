@@ -133,13 +133,15 @@ export function renderStatus(view: SessionView | undefined): string {
   return [
     `session ${short(view.sessionId)}`,
     ...(goal ? [`goal ${short(goal.goalId)} ${goal.state}${budget ? ` · ${budget}` : ""}`] : []),
-    `run ${short(run.runId)} ${runDisplayStatus(run)}`,
+    `run ${short(run.runId)} ${runDisplayStatus(run)}` +
+      (run.goalBinding ? ` · bound ${short(run.goalBinding.goalId)}` : ""),
     `${run.stepOrder.length} step${run.stepOrder.length === 1 ? "" : "s"}`,
     `${actions.length} action${actions.length === 1 ? "" : "s"}`,
   ].join(" · ");
 }
 
 function runDisplayStatus(run: SessionView["runs"][string]): string {
+  if (run.status === "completed" && run.terminal?.reason === "verified") return "verified";
   return run.status === "completed" && run.terminal?.reason === "response" ? "responded" : run.status;
 }
 

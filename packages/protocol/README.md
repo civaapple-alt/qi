@@ -40,8 +40,10 @@ for untrusted serialized input.
   Session event and cannot serve as settlement evidence.
 - `plan.revision.recorded` without `format` replays as `legacy_items`; `formal_markdown` revisions carry the
   complete document and do not require items.
-- `run.triggered` may freeze `mode` and a Plan binding. Formal Plan bindings omit `planItemId`; legacy bindings
-  retain it.
+- `run.triggered` may freeze `mode`, a Plan binding, and an optional Goal binding
+  (`goalBinding: { goalId, contractVersion }`). `trigger` may be `user`, `goal`, `timer`, `event`, or `resume`.
+  Formal Plan bindings omit `planItemId`; legacy bindings retain it. `trigger: "goal"` requires a Goal binding
+  ([ADR 0033](../../design/decisions.md#adr-0033-session-local-goal-continuation-for-追寻)).
 - `run.triggered.content` optionally records ordered `RunInputPart` text/image metadata. Images contain only
   source, dimensions, byte counts, media types, and original/prepared `artifact://` references; binary bytes and
   provider data URLs are forbidden. Older events without `content` remain text-only through `input`.

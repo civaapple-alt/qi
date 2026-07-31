@@ -261,6 +261,11 @@ export interface RunPlanBinding {
   continuationOf?: RunId;
 }
 
+export interface RunGoalBinding {
+  goalId: GoalId;
+  contractVersion: number;
+}
+
 export interface RunQuestionView {
   questionSetId: QuestionId;
   actionId: ActionId;
@@ -304,11 +309,12 @@ export interface WorkPlanView {
 
 export interface RunView {
   runId: RunId;
-  trigger: "user" | "timer" | "event" | "resume";
+  trigger: "user" | "goal" | "timer" | "event" | "resume";
   input?: string;
   content?: RunInputPart[];
   mode: SessionMode;
   planBinding?: RunPlanBinding;
+  goalBinding?: RunGoalBinding;
   status: RunStatus;
   steps: Record<string, StepView>;
   stepOrder: StepId[];
@@ -499,6 +505,13 @@ export function sessionArchiveBlockers(view: SessionView): string[] {
       blockers.push(`ProcessTask ${taskId} is ${task.status}`);
     }
   }
+  for (const goalId of view.goalOrder) {
+    const goal = view.goals[goalId];
+    if (!goal) continue;
+    if (goal.state === "active" || goal.state === "paused" || goal.state === "blocked") {
+      blockers.push(`Goal ${goalId} is ${goal.state}`);
+    }
+  }
   return blockers;
 }
 
@@ -556,6 +569,23 @@ function assertActionAllowedForMode(run: RunView, toolName: string, effect: Acti
   }
   if (effect !== "read") fail("MODE_EFFECT_DENIED", `Plan mode denies ${effect} effects for ${toolName}`);
   if (!askTools.has(toolName)) fail("MODE_TOOL_DENIED", `Plan mode denies tool ${toolName}`);
+}
+
+function assertGoalBindingLegal(view: SessionView, binding: RunGoalBinding): void {
+  const goal = view.goals[binding.goalId];
+  if (!goal) fail("GOAL_NOT_FOUND", `Goal ${binding.goalId} does not exist`);
+  if (goal.contractVersion !== binding.contractVersion) {
+    fail(
+      "GOAL_CONTRACT_MISMATCH",
+      `Goal ${binding.goalId} contractVersion ${goal.contractVersion} does not match binding ${binding.contractVersion}`,
+    );
+  }
+  if (goal.state === "complete" || goal.state === "cancelled") {
+    fail("GOAL_TERMINAL", `Goal ${binding.goalId} is ${goal.state} and cannot bind a Run`);
+  }
+  if (goal.state !== "active") {
+    fail("GOAL_NOT_ACTIVE", `Goal ${binding.goalId} is ${goal.state}; resume before binding a Run`);
+  }
 }
 
 function assertPlanBindingLegal(view: SessionView, binding: RunPlanBinding, mode: SessionMode): void {
@@ -1416,6 +1446,11 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       if (event.data.planBinding) {
         assertPlanBindingLegal(view, event.data.planBinding, mode);
       }
+      if (event.data.goalBinding) {
+        assertGoalBindingLegal(view, event.data.goalBinding);
+      } else if (event.data.trigger === "goal") {
+        fail("GOAL_BINDING_REQUIRED", "trigger=goal requires goalBinding");
+      }
       if (event.data.trigger === "user" && isBootstrapSessionTitle(view.title)) {
         const derived = sessionTitleFromUserInput(event.data.input ?? "");
         if (derived) view.title = derived;
@@ -1442,6 +1477,9 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
                   : { continuationOf: event.data.planBinding.continuationOf }),
               },
             }),
+        ...(event.data.goalBinding === undefined
+          ? {}
+          : { goalBinding: { ...event.data.goalBinding } }),
         status: "triggered",
         steps: {},
         stepOrder: [],
@@ -1912,6 +1950,21 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
           if (evaluation.evaluatorKind === "semantic" && evaluation.calibration !== "trusted") {
             fail("EVALUATOR_NOT_TRUSTED", `Evaluation ${evaluationId} is not calibrated`);
           }
+          if (run.goalBinding) {
+            if (evaluation.goalId !== run.goalBinding.goalId) {
+              fail(
+                "VERIFICATION_GOAL_MISMATCH",
+                `Evaluation ${evaluationId} is not bound to Goal ${run.goalBinding.goalId}`,
+              );
+            }
+          }
+        }
+        const indeterminate = Object.values(run.actions).find((action) => action.status === "indeterminate");
+        if (indeterminate) {
+          fail(
+            "VERIFICATION_INDETERMINATE",
+            `Action ${indeterminate.actionId} is indeterminate; verified completion is forbidden`,
+          );
         }
       }
       run.status = "completed";

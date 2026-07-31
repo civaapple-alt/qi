@@ -27,6 +27,9 @@ each Run, narrows the advertised tool catalog, and passes mode into Capability a
 Ask/Plan/Agent is the Session interaction dimension; Goal/time/event continuation policy and the
 同行/追寻/守望 product entrypoints remain separate and cannot grant authority
 ([ADR 0013](../../design/decisions.md#adr-0013-keep-interaction-activation-and-product-language-separate)).
+Session-local 追寻 uses optional `run.triggered.goalBinding` plus `decideGoalContinuation` after a bounded
+Goal-bound Run settles; TurnLoop never treats model stop as Goal completion
+([ADR 0033](../../design/decisions.md#adr-0033-session-local-goal-continuation-for-追寻)).
 `RuntimeActivity` carries bounded redacted model and process previews to interactive surfaces without entering
 Session truth. `EventWriter` refreshes an externally advanced stream before appending so independently owned
 runtime lifecycles such as ProcessTasks can interleave facts without stale sequence numbers.
@@ -93,7 +96,8 @@ const loop = new TurnLoop({
 ## Public API
 
 `TurnLoop`, request/result types, `RuntimeActivity`, `EventWriter`, `HumanControlService`, session-mode helpers,
-`SteeringMailbox`, and `SessionSupervisor`.
+`SteeringMailbox`, `SessionSupervisor`, and Goal continuation helpers
+(`decideGoalContinuation`, `applyGoalContinuationDecision`, `createGoalContextBlock`).
 
 ## Change guide
 
@@ -102,8 +106,8 @@ tool phase, and steering tests together. Treat every executor entry as a crash b
 
 ## Verification
 
-`tests/turn-loop.test.mjs`, `tests/session-mode.test.mjs`, and `tests/session-supervisor.test.mjs` are primary;
-`tests/tui-e2e.test.mjs` proves a
+`tests/turn-loop.test.mjs`, `tests/goal-continuation.test.mjs`, `tests/session-mode.test.mjs`, and
+`tests/session-supervisor.test.mjs` are primary; `tests/tui-e2e.test.mjs` proves a
 complete application path.
 
 ## Further reading

@@ -194,6 +194,15 @@ const PlanBindingSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/** Frozen Goal contract identity for a Goal-bound Run (Session-local 追寻). */
+export const GoalBindingSchema = Type.Object(
+  {
+    goalId: GoalIdSchema,
+    contractVersion: Type.Integer({ minimum: 1 }),
+  },
+  { additionalProperties: false },
+);
+
 const RunQuestionSchema = Type.Object(
   {
     id: Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }),
@@ -533,6 +542,7 @@ export const SessionEventSchema = Type.Union([
         runId: RunIdSchema,
         trigger: Type.Union([
           Type.Literal("user"),
+          Type.Literal("goal"),
           Type.Literal("timer"),
           Type.Literal("event"),
           Type.Literal("resume"),
@@ -541,6 +551,7 @@ export const SessionEventSchema = Type.Union([
         content: Type.Optional(Type.Array(RunInputPartSchema, { minItems: 1, maxItems: 64 })),
         mode: Type.Optional(SessionModeSchema),
         planBinding: Type.Optional(PlanBindingSchema),
+        goalBinding: Type.Optional(GoalBindingSchema),
       },
       { additionalProperties: false },
     ),

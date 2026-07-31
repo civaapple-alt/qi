@@ -5,7 +5,7 @@ Portable Qi Agent behavior and control boundaries.
 The package owns:
 
 - `./kernel`: Session transition validation, replay, projections, and EventStore port;
-- `./loop`: TurnLoop, EventWriter, safe boundaries, human control, and recovery;
+- `./loop`: TurnLoop, EventWriter, Goal continuation helpers, safe boundaries, human control, and recovery;
 - `./capability`: default-deny leases, delegation narrowing, credential handles, and redaction;
 - `./tools`: typed Tool registry, phase separation, errors, and execution context ports;
 - `./effects`: EffectJournal port and deterministic intent/idempotency identities;

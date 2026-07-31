@@ -63,6 +63,7 @@ projection and goal tests before exposing it to the loop or UI.
 ## Verification
 
 `tests/goal-eval.test.mjs` covers completion, calibration, pressure, and stagnation.
+`tests/goal-continuation.test.mjs` covers Session-local Run binding and post-Run continuation decisions.
 
 ## Further reading
 

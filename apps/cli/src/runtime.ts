@@ -14,9 +14,11 @@ import {
 } from "@civaapple/qi-agent/memory";
 import { probeContainerRuntime } from "@civaapple/qi-node/codeact";
 import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-agent/extensions";
+import { GoalEngine, type ControlGrant, type GoalContractInput } from "@civaapple/qi-agent/eval";
 import {
   sessionArchiveBlockers,
   type EventStore,
+  type GoalView,
   type SessionSummary,
   type SessionView,
 } from "@civaapple/qi-agent/kernel";
@@ -26,6 +28,9 @@ import {
   EventWriter,
   SessionSupervisor,
   TurnLoop,
+  applyGoalContinuationDecision,
+  decideGoalContinuation,
+  type GoalContinuationDecision,
   type RuntimeActivity,
   type RunQuestionAnswer,
   type SessionMode,
@@ -34,6 +39,7 @@ import {
 } from "@civaapple/qi-agent/loop";
 import {
   createId,
+  type GoalId,
   type QuestionId,
   type RunId,
   type RunImagePart,
@@ -1113,6 +1119,67 @@ export class TuiRuntime {
     });
   }
 
+  createGoal(contract: GoalContractInput, control?: Partial<ControlGrant>): GoalView {
+    if (this.active) throw new Error("Cannot create a Goal while a Run is active");
+    this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
+    const engine = new GoalEngine(this.#eventStore, this.sessionId);
+    return engine.create(contract, {
+      issuedTo: control?.issuedTo ?? "user",
+      startRight: control?.startRight ?? "user",
+      stopRight: control?.stopRight ?? "user",
+      acceptanceRight: control?.acceptanceRight ?? "human",
+      delegationRight: control?.delegationRight ?? false,
+      actionLeaseIds: control?.actionLeaseIds ?? [],
+    });
+  }
+
+  changeGoalState(state: "active" | "paused" | "blocked" | "cancelled", reason: string, goalId?: GoalId): GoalView {
+    if (this.active) throw new Error("Cannot change Goal state while a Run is active");
+    const goal = this.#requireCurrentGoal(goalId);
+    const engine = new GoalEngine(this.#eventStore, this.sessionId);
+    return engine.changeState(goal.goalId, state, reason);
+  }
+
+  async continueGoal(input?: string): Promise<TurnResult> {
+    if (this.active) throw new Error("A Run is already active");
+    let goal = this.#requireCurrentGoal();
+    if (goal.state === "paused" || goal.state === "blocked") {
+      goal = this.changeGoalState("active", input?.trim() ? `Resumed for continue: ${input.trim()}` : "Resumed for Goal continue");
+    }
+    if (goal.state !== "active") {
+      throw new Error(`Goal ${goal.goalId} is ${goal.state} and cannot continue`);
+    }
+    const prompt = input?.trim()
+      || `Continue the active Goal: ${goal.objective}`;
+    return this.#executeTurn({
+      input: prompt,
+      goalBinding: { goalId: goal.goalId, contractVersion: goal.contractVersion },
+      trigger: "goal",
+    });
+  }
+
+  settleGoalContinuation(runId: RunId): GoalContinuationDecision {
+    const view = this.view();
+    if (!view) return { kind: "noop", reason: "Session view missing" };
+    const decision = decideGoalContinuation({ view, runId });
+    const run = view.runs[runId];
+    const goalId = run?.goalBinding?.goalId;
+    if (!goalId || decision.kind === "noop" || decision.kind === "await-continue") {
+      return decision;
+    }
+    const engine = new GoalEngine(this.#eventStore, this.sessionId);
+    const control = this.#latestGoalControl(goalId);
+    applyGoalContinuationDecision(
+      {
+        complete: (id, evaluationIds) => engine.complete(id, evaluationIds, control),
+        changeState: (id, state, reason) => engine.changeState(id, state, reason),
+      },
+      goalId,
+      decision,
+    );
+    return decision;
+  }
+
   recordModelConfiguration(
     configuration: {
       provider: string;
@@ -1183,6 +1250,8 @@ export class TuiRuntime {
     existingRunId?: RunId;
     historyBudgetTokens?: number;
     requiredCompletionTool?: TurnRequest["requiredCompletionTool"];
+    goalBinding?: TurnRequest["goalBinding"];
+    trigger?: TurnRequest["trigger"];
   }): Promise<TurnResult> {
     if (!options.input.trim()) throw new TypeError("Input must not be empty");
     if (this.#activeController) throw new Error("A Run is already active");
@@ -1248,6 +1317,8 @@ export class TuiRuntime {
           : { requiredCompletionTool: options.requiredCompletionTool }),
         mode,
         ...(options.existingRunId === undefined ? {} : { existingRunId: options.existingRunId }),
+        ...(options.goalBinding === undefined ? {} : { goalBinding: options.goalBinding }),
+        ...(options.trigger === undefined ? {} : { trigger: options.trigger }),
         workspaceRoot: this.#workspaceRoot,
         artifactStore: this.#artifactStore,
         effectJournal: this.#effectJournal,
@@ -1256,11 +1327,37 @@ export class TuiRuntime {
         getSensitivePathGrants: this.getSensitivePathGrants,
         sensitivePathPolicy: this.#sensitivePathPolicy,
       }));
+      if (result.view.runs[result.runId]?.goalBinding) {
+        this.settleGoalContinuation(result.runId);
+      }
       this.#humanControl.askNextRunQuestion(this.sessionId, result.runId);
       return result;
     } finally {
       this.#activeController = undefined;
     }
+  }
+
+  #requireCurrentGoal(goalId?: GoalId): GoalView {
+    const view = this.view();
+    const id = goalId ?? view?.currentGoalId;
+    if (!view || !id) throw new Error("No Goal in this Session; create one with /goal <objective>");
+    const goal = view.goals[id];
+    if (!goal) throw new Error(`Goal ${id} does not exist`);
+    return goal;
+  }
+
+  #latestGoalControl(goalId: GoalId): ControlGrant {
+    const receipt = Object.values(this.view()?.controlReceipts ?? {})
+      .filter((item) => item.goalId === goalId)
+      .at(-1);
+    return {
+      issuedTo: receipt?.issuedTo ?? "user",
+      startRight: receipt?.startRight ?? "user",
+      stopRight: receipt?.stopRight ?? "user",
+      acceptanceRight: receipt?.acceptanceRight ?? "human",
+      delegationRight: receipt?.delegationRight ?? false,
+      actionLeaseIds: receipt?.actionLeaseIds ?? [],
+    };
   }
 
   steer(message: string): void {

@@ -48,6 +48,7 @@ const expectedRuntimeExports = {
   "@civaapple/qi-agent/loop": [
     "ASK_MODE_TOOLS", "EventWriter", "HumanControlService", "PLAN_MODE_EXTRA_TOOLS",
     "SESSION_MODES", "SessionSupervisor", "SteeringMailbox", "TurnLoop",
+    "applyGoalContinuationDecision", "createGoalContextBlock", "decideGoalContinuation",
     "firstIncompleteItem", "formatModeLabel", "formatPlanItemInput", "formatRunHistoryFacts", "isBatchWriteConflictResource", "isToolAllowedInMode",
     "latestTerminalPlanBoundRun", "nextSessionMode", "toolsForMode",
   ],
@@ -63,7 +64,7 @@ const expectedRuntimeExports = {
   ],
   "@civaapple/qi-protocol": [
     "ActionIdSchema", "EvaluationIdSchema", "EventIdSchema", "EvidenceIdSchema",
-    "GoalIdSchema", "LeaseIdSchema", "MemoryIdSchema", "MemoryScopeSchema", "PlanIdSchema",
+    "GoalBindingSchema", "GoalIdSchema", "LeaseIdSchema", "MemoryIdSchema", "MemoryScopeSchema", "PlanIdSchema",
     "PlanItemIdSchema", "QuestionIdSchema", "ReceiptIdSchema", "RunIdSchema",
     "RunImagePartSchema", "RunInputPartSchema", "SessionEventSchema", "SessionIdSchema", "SessionModeSchema", "StepIdSchema",
     "TaskIdSchema", "WorkItemIdSchema", "WorkPlanIdSchema", "assertSchema", "createId", "parseSessionEvent",

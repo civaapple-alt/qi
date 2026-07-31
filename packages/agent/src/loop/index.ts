@@ -1,4 +1,5 @@
 export * from "./event-writer.js";
+export * from "./goal-continuation.js";
 export * from "./human-control.js";
 export * from "./runtime-activity.js";
 export * from "./session-mode.js";

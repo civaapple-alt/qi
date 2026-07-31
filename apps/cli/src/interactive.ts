@@ -47,6 +47,12 @@ import { ComposerComponent } from "./composer.js";
 import { FollowUpQueue } from "./follow-ups.js";
 import { FollowUpsComponent } from "./follow-ups-view.js";
 import {
+  defaultGoalContract,
+  formatGoalStatus,
+  goalHubSummary,
+  parseGoalCommand,
+} from "./goal-command.js";
+import {
   formatMemoryClaims,
   memoryIdsUsedInLatestRun,
   memoryUsageInLatestRun,
@@ -1735,6 +1741,160 @@ export class InteractiveTui {
     }, "Memory");
   }
 
+  #handleGoalCommand(argument: string): void {
+    const parsed = parseGoalCommand(argument);
+    if (parsed.mode === "hub") {
+      this.#openGoalHub();
+      return;
+    }
+    this.#createAndStartGoal(parsed.objective);
+  }
+
+  #openGoalHub(): void {
+    const summary = goalHubSummary(this.#runtime.view());
+    const items: Array<{ id: string; label: string; description?: string }> = [
+      {
+        id: "status",
+        label: summary.title,
+        description: summary.detail,
+      },
+    ];
+    if (summary.state === "none" || summary.state === "complete" || summary.state === "cancelled") {
+      items.push({
+        id: "create",
+        label: "Create Goal…",
+        description: "Enter an objective, or use /goal <objective>",
+      });
+    }
+    if (summary.state === "active" || summary.state === "paused" || summary.state === "blocked") {
+      items.push({
+        id: "continue",
+        label: summary.state === "paused" ? "Resume & Continue" : "Continue",
+        description: "Start the next Goal-bound Run",
+      });
+    }
+    if (summary.state === "active") {
+      items.push({
+        id: "pause",
+        label: "Pause",
+        description: "Stop auto-continuation until Resume",
+      });
+    }
+    if (summary.state === "paused" || summary.state === "blocked") {
+      items.push({
+        id: "resume",
+        label: "Resume",
+        description: "Mark Goal active without starting a Run",
+      });
+    }
+    if (summary.state === "active" || summary.state === "paused" || summary.state === "blocked") {
+      items.push({
+        id: "cancel",
+        label: "Cancel Goal",
+        description: "Terminal cancel; does not complete with evidence",
+      });
+    }
+    this.#panels.push(new ListPanel({
+      title: "Goal / 追寻",
+      hints: "↑↓ select · Enter · Esc close",
+      items,
+      onClose: this.#panels.dismiss,
+      onSelect: (item) => {
+        if (item.id === "status") {
+          this.#openScrollPanel("/goal", formatGoalStatus(this.#runtime.view()));
+          return;
+        }
+        if (item.id === "create") {
+          this.#openCreateGoalForm();
+          return;
+        }
+        if (item.id === "continue") {
+          this.#panels.closeAll();
+          this.#continueGoal();
+          return;
+        }
+        if (item.id === "pause" || item.id === "resume" || item.id === "cancel") {
+          this.#panels.closeAll();
+          this.#changeGoalStateFromHub(item.id);
+          return;
+        }
+      },
+    }));
+    this.#render();
+  }
+
+  #openCreateGoalForm(): void {
+    this.#panels.push(new FormPanel({
+      title: "Create Goal",
+      description: "Session-local 追寻 · evidence still required for completion",
+      fields: [
+        {
+          id: "objective",
+          label: "Objective",
+          placeholder: "What should Qi pursue?",
+          required: true,
+        },
+      ],
+      submitLabel: "Create & Continue",
+      onClose: this.#panels.dismiss,
+      onSubmit: (values) => {
+        const objective = (values.objective ?? "").trim();
+        if (!objective) {
+          this.#presenter.setNotice("Objective is required.");
+          this.#render();
+          return;
+        }
+        this.#panels.closeAll();
+        this.#createAndStartGoal(objective);
+      },
+    }));
+    this.#render();
+  }
+
+  #createAndStartGoal(objective: string): void {
+    if (this.#runtime.active) {
+      this.#presenter.setNotice("A Run is active; wait or /cancel before /goal");
+      this.#render();
+      return;
+    }
+    try {
+      const goal = this.#runtime.createGoal(defaultGoalContract(objective));
+      this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+      this.#presenter.setNotice(`Goal created · ${goal.goalId} · starting 追寻…`);
+      this.#startTurn(() => this.#runtime.continueGoal());
+    } catch (error) {
+      this.#presenter.setNotice(error instanceof Error ? error.message : String(error));
+      this.#render();
+    }
+  }
+
+  #continueGoal(input?: string): void {
+    if (this.#runtime.active) {
+      this.#presenter.setNotice("A Run is active; wait or /cancel before Continue");
+      this.#render();
+      return;
+    }
+    this.#startTurn(() => this.#runtime.continueGoal(input));
+  }
+
+  #changeGoalStateFromHub(action: "pause" | "resume" | "cancel"): void {
+    try {
+      const state = action === "pause" ? "paused" : action === "resume" ? "active" : "cancelled";
+      const reason = action === "pause"
+        ? "Paused by user"
+        : action === "resume"
+          ? "Resumed by user"
+          : "Cancelled by user";
+      const goal = this.#runtime.changeGoalState(state, reason);
+      this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+      this.#presenter.setNotice(`Goal ${goal.state} · ${goal.goalId}`);
+      this.#render();
+    } catch (error) {
+      this.#presenter.setNotice(error instanceof Error ? error.message : String(error));
+      this.#render();
+    }
+  }
+
   #handleMemoryCommand(argument: string): void {
     const trimmed = argument.trim();
     if (!trimmed) {
@@ -1930,6 +2090,10 @@ export class InteractiveTui {
     }
     if (name === "memory") {
       this.#handleMemoryCommand(argument);
+      return;
+    }
+    if (name === "goal") {
+      this.#handleGoalCommand(argument);
       return;
     }
     if (name === "providers") {

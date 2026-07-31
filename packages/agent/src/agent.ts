@@ -7,6 +7,7 @@ import type { ContextBlock, TokenEstimator } from "@civaapple/qi-ai/context";
 import {
   InMemoryEventStore,
   type EventStore,
+  type RunGoalBinding,
   type RunPlanBinding,
   type SessionMode,
   type SessionView,
@@ -67,6 +68,8 @@ export interface QiPromptOptions {
   readonly toolAllowlist?: readonly string[];
   readonly mode?: SessionMode;
   readonly planBinding?: RunPlanBinding;
+  readonly goalBinding?: RunGoalBinding;
+  readonly trigger?: "user" | "goal" | "timer" | "event" | "resume";
   readonly existingRunId?: RunId;
   readonly workspaceRoot?: string;
   readonly signal?: AbortSignal;
@@ -272,6 +275,8 @@ export class QiAgent {
         : { toolAllowlist: [...options.toolAllowlist] }),
       mode: options.mode ?? this.#mode,
       ...(options.planBinding === undefined ? {} : { planBinding: options.planBinding }),
+      ...(options.goalBinding === undefined ? {} : { goalBinding: options.goalBinding }),
+      ...(options.trigger === undefined ? {} : { trigger: options.trigger }),
       ...(options.existingRunId === undefined ? {} : { existingRunId: options.existingRunId }),
       workspaceRoot: options.workspaceRoot ?? this.#workspaceRoot,
       artifactStore: this.artifactStore,

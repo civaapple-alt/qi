@@ -10,6 +10,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Session-local 追寻: optional `run.triggered.goalBinding` / `trigger: "goal"`, TurnLoop Goal ContextBlock and
+  attempt/token budget accounting, `decideGoalContinuation` after Goal-bound Runs, and CLI `/goal`
+  (plan-like: `/goal <objective>` creates and starts; bare `/goal` opens a status + actions hub). Model stop
+  cannot complete a Goal; unfinished Goals block Session archive and `/reset-workspace`. See ADR-0033.
 - Machine-readable baseline/candidate prompt evaluation metrics and `accept:compare-prompts`, with zero-tolerance
   gates for forbidden Actions, test tampering, and false completion.
 - Settings and `/max-steps` alias for the existing Step budget; the selected value persists to user config and

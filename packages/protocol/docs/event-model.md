@@ -14,7 +14,9 @@ Session
 ```
 
 Goals, evaluations, evidence, leases, receipts, and memory claims link into this hierarchy through explicit
-identifiers. An event may advance an existing entity but may not re-parent it.
+identifiers. An event may advance an existing entity but may not re-parent it. A Run may freeze an optional
+`goalBinding` at `run.triggered` so Session-local 追寻 can continue across bounded Runs without re-parenting the
+Goal.
 
 ## Producer contract
 
