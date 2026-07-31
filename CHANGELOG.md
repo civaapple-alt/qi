@@ -10,9 +10,14 @@ steps and investigation history belong in pull requests, not release notes.
 - Step budget via `/settings` and `/max-steps` alias; persists to user config; hot-applies next Run.
 - Read-only `git` tool operations: `log` (bounded oneline), `rev-parse`, `show` (metadata + stat), `branch`, and
   `remote`, still under read authority so Ask/Plan can inspect history without execute.
+- `qi_session_inspect` `operation=recovery` returns one bounded projection for the newest interrupted
+  (or fallback completed) user Run — status, terminal fields, `imageAttachments`, last Step, and problem
+  Action summaries — so continue-after-failure does not require chaining runs/steps/actions.
 
 ### Changed
 
+- `qi_session_inspect` guidance now treats restored conversation history as the default continue path and
+  reserves inspection for lifecycle diagnostics (`recovery` preferred over chained runs/steps/actions).
 - FormPanel dropdowns start collapsed (current value only); ↑↓ move between fields, ←→ cycle options while
   collapsed, Enter expands fixed-choice lists then advances/submits, and Esc collapses an open dropdown before
   closing the panel.
@@ -40,6 +45,16 @@ steps and investigation history belong in pull requests, not release notes.
 - Plan-mode Formal Plan guidance and `host:environment` now keep the argv-only `shell` tool separate from
   probed `script` profiles, so executor-background prose must not claim pwsh/cmd/bash are unavailable when
   those profiles are listed as available.
+- Parallel `read_image` (and other tool-result image) batches no longer insert synthetic user media
+  between `role=tool` responses on Chat Completions / Responses, which previously caused provider 400s
+  (`tool_calls` without a matching `tool_call_id`, e.g. `read_image:1`).
+- Follow-ups after an interrupted image Run (for example “继续”) restore the prior clipboard/path/URL
+  attachments in conversation history, and `qi_session_inspect` now surfaces `imageAttachments` /
+  `originalArtifactRef` so recovery uses `read_image` instead of searching mounts for the same screenshot.
+- Image-capable models now ingest local Workspace/mount image paths (and absolute paths under those roots)
+  as ordered `path` image parts instead of leaving a bare path for the model to mis-route through `fetch`.
+- Rich TTY image paste uses `Alt+V` on Windows (kimi-code parity) because terminals often own `Ctrl+V`, and
+  also accepts a clipboard file-path / `file://` URI that points at a PNG/JPEG/GIF/WebP file.
 
 ### Security
 
@@ -94,16 +109,6 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Fixed
 
-- Parallel `read_image` (and other tool-result image) batches no longer insert synthetic user media
-  between `role=tool` responses on Chat Completions / Responses, which previously caused provider 400s
-  (`tool_calls` without a matching `tool_call_id`, e.g. `read_image:1`).
-- Follow-ups after an interrupted image Run (for example “继续”) restore the prior clipboard/path/URL
-  attachments in conversation history, and `qi_session_inspect` now surfaces `imageAttachments` /
-  `originalArtifactRef` so recovery uses `read_image` instead of searching mounts for the same screenshot.
-- Image-capable models now ingest local Workspace/mount image paths (and absolute paths under those roots)
-  as ordered `path` image parts instead of leaving a bare path for the model to mis-route through `fetch`.
-- Rich TTY image paste uses `Alt+V` on Windows (kimi-code parity) because terminals often own `Ctrl+V`, and
-  also accepts a clipboard file-path / `file://` URI that points at a PNG/JPEG/GIF/WebP file.
 - Composer `@` mention validation no longer blocks submit when the token is an absent npm-style
   `@scope/package` (for example `@memo/shared-types`); real missing Workspace paths still fail closed.
 - Indeterminate-effect parking now carries tool name and Action evidence in `run.parked.detail`, and the TUI

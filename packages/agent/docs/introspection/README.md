@@ -43,12 +43,16 @@ Register `createQiIntrospectionTool()` through an ordinary `ToolRegistry`. Execu
 matching read lease for `qi:self-model:<section>`.
 
 `inspectQiSession(source, query)` lists project Sessions or narrows one Session to Runs, a selected/latest Run,
-problems, the last Step, or one Step/Action. Summary and detail projections retain IDs, event sequence bounds,
-status, error codes, and any durable edit freshness rebase while bounding text, results, and lists and reporting
-every omission.
+problems, recovery, the last Step, or one Step/Action. It is a lifecycle diagnostic probe, not a substitute for
+restored conversation history. Summary and detail projections retain IDs, event sequence bounds, status, error
+codes, and any durable edit freshness rebase while bounding text, results, and lists and reporting every omission.
 
 Diagnostic fields (not Evidence):
 
+- `recovery` selects the newest interrupted user Run (`failed` / `cancelled` / `parked`), else the newest
+  completed user Run, and returns one item with fixed `guidance`, run status/terminal fields,
+  `imageAttachments`, bounded `lastStep`, and problem Action summaries — prefer this over chaining
+  `runs` → `last-step` → `step` → `action` when continuing after an unclear terminal state.
 - Run `displayTitle`, `imageCount` / `imageAttachments` (source, dimensions, `originalArtifactRef` /
   `preparedArtifactRef` when the Run carried pasted/path/URL images), light `planBinding`, detail `formalPlan`
   (`title` / `revision` / `path`), and `actionFacts`. Legacy totals remain `writeCompleted` / `writeFailed` /

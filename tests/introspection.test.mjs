@@ -340,6 +340,119 @@ test("Session inspection projects imageAttachments for Runs with pasted media", 
   }]);
 });
 
+test("Session inspection recovery prefers interrupted image Runs and falls back to completed", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = createId("ses");
+  const completedRunId = createId("run");
+  const interruptedRunId = createId("run");
+  const control = new HumanControlService({ eventStore: store });
+  control.ensureSession(sessionId, "Inspect recovery");
+  const writer = new EventWriter(store, sessionId);
+  const actor = { kind: "user", id: "tester" };
+  const runtime = { kind: "runtime", id: "test" };
+  const originalArtifactRef = `artifact://${"c".repeat(64)}`;
+  const preparedArtifactRef = `artifact://${"d".repeat(64)}`;
+
+  const completedStepId = createId("stp");
+  writer.append("run.triggered", {
+    runId: completedRunId,
+    trigger: "user",
+    input: "earlier completed turn",
+  }, actor);
+  writer.append("run.started", { runId: completedRunId }, runtime);
+  writer.append("step.started", { runId: completedRunId, stepId: completedStepId }, runtime);
+  writer.append("model.completed", {
+    runId: completedRunId,
+    stepId: completedStepId,
+    requestId: "req_completed",
+    provider: "test",
+    model: "deterministic",
+    finishReason: "stop",
+    text: "Earlier answer.",
+    actionCalls: [],
+  }, runtime);
+  writer.append("step.completed", {
+    runId: completedRunId,
+    stepId: completedStepId,
+    finishReason: "response",
+  }, runtime);
+  writer.append("run.completed", {
+    runId: completedRunId,
+    completionKind: "response",
+    evaluationIds: [],
+  }, runtime);
+
+  const empty = inspectQiSession(store, {
+    operation: "recovery",
+    sessionId,
+    detail: "summary",
+  });
+  assert.equal(empty.items.length, 1);
+  assert.equal(empty.items[0].kind, "recovery");
+  assert.equal(empty.items[0].selection, "completed-fallback");
+  assert.equal(empty.items[0].run.runId, completedRunId);
+  assert.match(empty.items[0].guidance, /Prefer restored conversation history/);
+
+  writer.append("run.triggered", {
+    runId: interruptedRunId,
+    trigger: "user",
+    input: "[image #1 (1200×800)] 查看界面",
+    content: [
+      { type: "text", text: "[image #1 (1200×800)] 查看界面" },
+      {
+        type: "image",
+        source: "clipboard",
+        originalArtifactRef,
+        preparedArtifactRef,
+        originalMediaType: "image/png",
+        mediaType: "image/png",
+        originalByteLength: 1200,
+        byteLength: 800,
+        originalWidth: 1200,
+        originalHeight: 800,
+        width: 1200,
+        height: 800,
+        downsampled: false,
+        formatChanged: false,
+        orientationApplied: false,
+      },
+    ],
+  }, actor);
+  writer.append("run.started", { runId: interruptedRunId }, runtime);
+  const stepId = createId("stp");
+  writer.append("step.started", { runId: interruptedRunId, stepId }, runtime);
+  writer.append("model.completed", {
+    runId: interruptedRunId,
+    stepId,
+    requestId: "req_recovery",
+    provider: "test",
+    model: "deterministic",
+    finishReason: "actions",
+    text: "Looking at the screenshot.",
+    actionCalls: [],
+  }, runtime);
+  writer.append("step.completed", { runId: interruptedRunId, stepId, finishReason: "error" }, runtime);
+  writer.append("run.cancelled", {
+    runId: interruptedRunId,
+    reason: "transmission interrupted",
+  }, runtime);
+
+  const recovered = inspectQiSession(store, {
+    operation: "recovery",
+    sessionId,
+    detail: "summary",
+  });
+  assert.equal(recovered.items.length, 1);
+  assert.equal(recovered.items[0].selection, "interrupted");
+  assert.equal(recovered.items[0].run.runId, interruptedRunId);
+  assert.equal(recovered.items[0].run.status, "cancelled");
+  assert.equal(recovered.items[0].run.imageCount, 1);
+  assert.equal(recovered.items[0].run.imageAttachments[0].originalArtifactRef, originalArtifactRef);
+  assert.equal(recovered.items[0].lastStep.stepId, stepId);
+  assert.match(recovered.items[0].lastStep.modelText, /screenshot/);
+  assert.match(recovered.items[0].guidance, /operation=recovery|Do not chain runs/i);
+});
+
 test("Session inspection projects Formal Plan titles, reasoning, actionFacts, and tool summaries", () => {
   const store = new InMemoryEventStore();
   const sessionId = createId("ses");

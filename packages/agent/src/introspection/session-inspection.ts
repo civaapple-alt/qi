@@ -18,6 +18,7 @@ export type QiSessionInspectionOperation =
   | "runs"
   | "run"
   | "problems"
+  | "recovery"
   | "last-step"
   | "step"
   | "action";
@@ -103,6 +104,11 @@ export function inspectQiSession(
     const selected = runs.slice(-limit).reverse();
     omissions.runs = runs.length - selected.length;
     return finish(query.operation, detail, sessionId, session, selected, omissions);
+  }
+
+  if (query.operation === "recovery") {
+    const item = projectRecovery(view, stream.events, detail, omissions, limit);
+    return finish(query.operation, detail, sessionId, session, item ? [item] : [], omissions);
   }
 
   if (query.runId && query.runId !== "last" && !view.runs[query.runId]) {
@@ -224,6 +230,7 @@ const SessionInspectionInputSchema = Type.Object({
     Type.Literal("runs"),
     Type.Literal("run"),
     Type.Literal("problems"),
+    Type.Literal("recovery"),
     Type.Literal("last-step"),
     Type.Literal("step"),
     Type.Literal("action"),
@@ -236,13 +243,26 @@ const SessionInspectionInputSchema = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: maximumLimit })),
 }, { additionalProperties: false });
 
+const recoveryGuidance = [
+  "Prefer restored conversation history and already-attached images over this diagnostic projection.",
+  "Use recovery only when the prior Run terminal state is unclear (failed/cancelled/parked) or you need imageAttachments.originalArtifactRef.",
+  "Do not chain runs→last-step→step→action for ordinary continue.",
+  "For a closer crop call read_image with originalArtifactRef; do not search mounts or the Workspace for the same clipboard/path screenshot.",
+  "Fields here are diagnostic only — not Evidence of task completion.",
+].join(" ");
+
 export function createQiSessionInspectionTool(
   source: QiSessionInspectionSource,
   currentSessionId: SessionId,
 ) {
   return defineTool({
     description:
-      "Read a bounded projection of Sessions in the current Qi project. Start with runs (displayTitle, imageAttachments, Formal Plan binding, write/read Action facts), then inspect problems, the last Step (including modelReasoning), or one explicit Step/Action. imageAttachments list source/dimensions/originalArtifactRef for pasted or path/URL images — use read_image with that originalArtifactRef for a closer crop; do not search mounts for a clipboard screenshot. Formal Plan, Work Plan, and reasoning fields are diagnostic only — not Evidence. This tool cannot accept a database path or read another project.",
+      "Bounded Session lifecycle diagnostics for the current Qi project — not a substitute for restored conversation history. " +
+      "Prefer already-restored user/assistant messages and attached images when the user says continue. " +
+      "Use this tool for failed/cancelled/parked Runs, write-settlement disputes, Formal Plan binding, or when you need imageAttachments.originalArtifactRef. " +
+      "When the prior Run terminal state is unclear, call operation=recovery once (status, terminalReason, imageAttachments, lastStep, problem Action summaries) instead of chaining runs→last-step→step→action. " +
+      "For a closer crop use read_image with originalArtifactRef; do not search mounts for a clipboard/path screenshot. " +
+      "Formal Plan, Work Plan, and reasoning fields are diagnostic only — not Evidence. Cannot accept a database path or read another project.",
     input: SessionInspectionInputSchema,
     output: Type.Unknown(),
     effect: () => "read",
@@ -379,6 +399,86 @@ function projectImageAttachments(
       preparedArtifactRef: image.preparedArtifactRef,
       downsampled: image.downsampled,
     }));
+}
+
+function projectRecovery(
+  view: SessionView,
+  events: readonly SessionEvent[],
+  detail: "summary" | "detail",
+  omissions: QiSessionInspectionOmissions,
+  limit: number,
+): Record<string, unknown> | undefined {
+  const runId = selectRecoveryRunId(view);
+  if (!runId) return undefined;
+  const run = view.runs[runId];
+  if (!run) return undefined;
+  const projected = projectRun(view, events, runId, detail, omissions);
+  const imageAttachments = projectImageAttachments(run.content);
+  const problemActions = Object.values(run.actions)
+    .filter((action) => ["failed", "denied", "cancelled", "indeterminate"].includes(action.status))
+    .slice(0, Math.min(limit, listLimit));
+  omissions.listItems += Math.max(
+    0,
+    Object.values(run.actions).filter((action) =>
+      ["failed", "denied", "cancelled", "indeterminate"].includes(action.status)
+    ).length - problemActions.length,
+  );
+  const lastStepId = run.stepOrder.at(-1);
+  const lastStep = lastStepId === undefined
+    ? undefined
+    : projectStep(view, events, runId, lastStepId, detail === "detail" ? "detail" : "summary", omissions);
+  return {
+    kind: "recovery",
+    guidance: recoveryGuidance,
+    selection: interruptedRunStatuses.has(run.status) ? "interrupted" : "completed-fallback",
+    run: {
+      runId: projected.runId,
+      status: projected.status,
+      trigger: projected.trigger,
+      mode: projected.mode,
+      displayTitle: projected.displayTitle,
+      terminalReason: projected.terminalReason,
+      terminalDetail: projected.terminalDetail,
+      problemCount: projected.problemCount,
+      actionFacts: projected.actionFacts,
+      ...(imageAttachments.length > 0
+        ? { imageCount: imageAttachments.length, imageAttachments }
+        : {}),
+      ...(projected.planBinding === undefined ? {} : { planBinding: projected.planBinding }),
+      ...(detail === "detail" && projected.stepIds !== undefined ? { stepIds: projected.stepIds } : {}),
+    },
+    ...(lastStep === undefined ? {} : { lastStep }),
+    problemCount: problemActions.length,
+    problems: problemActions.map((action) => ({
+      actionId: action.actionId,
+      stepId: action.stepId,
+      toolName: action.toolName,
+      status: action.status,
+      effect: action.effect,
+      errorCode: actionErrorCode(action.status, undefined),
+      terminalDetail: boundedText(action.terminalDetail, summaryTextLimit, omissions, "textCharacters"),
+    })),
+  };
+}
+
+const interruptedRunStatuses = new Set(["failed", "cancelled", "parked"]);
+
+function selectRecoveryRunId(view: SessionView): RunId | undefined {
+  for (let index = view.runOrder.length - 1; index >= 0; index -= 1) {
+    const runId = view.runOrder[index];
+    if (!runId) continue;
+    const run = view.runs[runId];
+    if (!run || run.trigger !== "user") continue;
+    if (interruptedRunStatuses.has(run.status)) return runId;
+  }
+  for (let index = view.runOrder.length - 1; index >= 0; index -= 1) {
+    const runId = view.runOrder[index];
+    if (!runId) continue;
+    const run = view.runs[runId];
+    if (!run || run.trigger !== "user") continue;
+    if (run.status === "completed") return runId;
+  }
+  return undefined;
 }
 
 function projectFormalPlanMeta(
