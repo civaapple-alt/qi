@@ -28,6 +28,8 @@ export interface GoalContinuationController {
   changeState(goalId: GoalId, state: Exclude<GoalState, "complete">, reason: string): GoalView;
 }
 
+export const GOAL_RESUME_DEMOTE_REASON = "Paused after Session resume";
+
 /**
  * Pure decision for Session-local 追寻 after a Goal-bound Run settles.
  * Does not append events or grant authority; callers apply the decision via GoalEngine.
@@ -132,6 +134,95 @@ export function applyGoalContinuationDecision(
   }
 }
 
+/**
+ * Portable post-Run settlement: decide then apply. Hosts must call this after every
+ * Goal-bound Run settles; omitting it leaves pause/block/complete unenforced.
+ */
+export function settleGoalBoundTurn(input: {
+  readonly view: SessionView;
+  readonly runId: RunId;
+  readonly controller: GoalContinuationController;
+  readonly cancelGoalOnRunCancel?: boolean;
+}): {
+  readonly decision: GoalContinuationDecision;
+  readonly goal: GoalView | undefined;
+} {
+  const decision = decideGoalContinuation({
+    view: input.view,
+    runId: input.runId,
+    ...(input.cancelGoalOnRunCancel === undefined
+      ? {}
+      : { cancelGoalOnRunCancel: input.cancelGoalOnRunCancel }),
+  });
+  const goalId = input.view.runs[input.runId]?.goalBinding?.goalId;
+  if (!goalId) {
+    return { decision, goal: undefined };
+  }
+  return {
+    decision,
+    goal: applyGoalContinuationDecision(input.controller, goalId, decision),
+  };
+}
+
+/**
+ * Crash/resume safety: an `active` Goal must not keep chasing after Session reload.
+ * Explicit Continue / Resume is required (no stealth budget spend).
+ */
+export function demoteActiveGoalAfterResume(
+  view: SessionView | undefined,
+  controller: Pick<GoalContinuationController, "changeState">,
+  reason: string = GOAL_RESUME_DEMOTE_REASON,
+): GoalView | undefined {
+  if (!view?.currentGoalId) return undefined;
+  const goal = view.goals[view.currentGoalId];
+  if (!goal || goal.state !== "active") return undefined;
+  return controller.changeState(goal.goalId, "paused", reason);
+}
+
+/** Attempt Goal complete from the Evidence Ledger + evaluations (e.g. human accept). */
+export function tryCompleteGoalFromLedger(
+  view: SessionView,
+  goalId: GoalId,
+  controller: Pick<GoalContinuationController, "complete">,
+): {
+  readonly completed: boolean;
+  readonly evaluationIds: readonly EvaluationId[];
+  readonly goal: GoalView | undefined;
+} {
+  const goal = view.goals[goalId];
+  if (!goal || goal.state === "complete" || goal.state === "cancelled") {
+    return { completed: false, evaluationIds: [], goal: undefined };
+  }
+  const evaluationIds = collectPassingEvaluationsForGoal(goal);
+  if (!canCompleteGoal(view, goal, evaluationIds)) {
+    return { completed: false, evaluationIds, goal: undefined };
+  }
+  return {
+    completed: true,
+    evaluationIds,
+    goal: controller.complete(goalId, evaluationIds),
+  };
+}
+
+export function formatGoalContinuationNotice(decision: GoalContinuationDecision): string | undefined {
+  const shortReason = (reason: string) =>
+    reason.length <= 120 ? reason : `${reason.slice(0, 119)}…`;
+  switch (decision.kind) {
+    case "complete":
+      return "Goal complete · verified evidence";
+    case "pause":
+      return `Goal paused · ${shortReason(decision.reason)} · /goal to Continue`;
+    case "block":
+      return `Goal blocked · ${shortReason(decision.reason)} · /goal to inspect`;
+    case "await-continue":
+      return `Goal awaits continue · ${shortReason(decision.reason)} · /goal`;
+    case "cancel":
+      return `Goal cancelled · ${shortReason(decision.reason)}`;
+    case "noop":
+      return undefined;
+  }
+}
+
 /** Least-information Goal contract for model context (not completion evidence). */
 export function createGoalContextBlock(goal: GoalView): ContextBlock {
   const assertions = Object.values(goal.assertions).map((assertion) =>
@@ -156,7 +247,12 @@ export function createGoalContextBlock(goal: GoalView): ContextBlock {
     role: "system",
     content: [
       "Runtime-maintained Goal contract for this Session-local 追寻 Run.",
-      "It is a completion contract, not proof that work is done. Do not claim Goal complete without matching evidence.",
+      "This Run is one bounded slice of pursuit, not an unbounded loop.",
+      "It is a completion contract, not proof that work is done.",
+      "Narrative or model stop does not complete the Goal. Do not claim Goal complete without matching Evidence Ledger entries and trusted evaluations.",
+      "Advance verifiable work and leave artifacts that can be checked against open assertions.",
+      "Runtime owns pause/block/complete from budgets, stagnation, indeterminate Effects, and verified evidence. Do not end the Goal with natural language alone.",
+      "Work Plan todos and Formal Plan status are navigation/design only — never Goal completion evidence. Only Evidence Ledger entries plus trusted evaluations can complete the Goal.",
       `goalId=${goal.goalId}; state=${goal.state}; contractVersion=${goal.contractVersion}`,
       `objective=${goal.objective}`,
       "Assertions:",
@@ -174,24 +270,7 @@ export function createGoalContextBlock(goal: GoalView): ContextBlock {
   };
 }
 
-function collectPassingGoalEvaluations(goal: GoalView, run: RunView): EvaluationId[] {
-  const ids: EvaluationId[] = [];
-  for (const evaluation of Object.values(run.evaluations)) {
-    if (evaluation.goalId !== goal.goalId) continue;
-    if (evaluation.outcome !== "pass") continue;
-    if (evaluation.evaluatorKind === "semantic" && evaluation.calibration !== "trusted") continue;
-    ids.push(evaluation.evaluationId);
-  }
-  for (const evaluation of Object.values(goal.evaluations)) {
-    if (ids.includes(evaluation.evaluationId)) continue;
-    if (evaluation.outcome !== "pass") continue;
-    if (evaluation.evaluatorKind === "semantic" && evaluation.calibration !== "trusted") continue;
-    ids.push(evaluation.evaluationId);
-  }
-  return ids;
-}
-
-function canCompleteGoal(
+export function canCompleteGoal(
   view: SessionView,
   goal: GoalView,
   evaluationIds: readonly EvaluationId[],
@@ -221,4 +300,31 @@ function canCompleteGoal(
     }
   }
   return true;
+}
+
+function collectPassingGoalEvaluations(goal: GoalView, run: RunView): EvaluationId[] {
+  const ids: EvaluationId[] = [];
+  for (const evaluation of Object.values(run.evaluations)) {
+    if (evaluation.goalId !== goal.goalId) continue;
+    if (evaluation.outcome !== "pass") continue;
+    if (evaluation.evaluatorKind === "semantic" && evaluation.calibration !== "trusted") continue;
+    ids.push(evaluation.evaluationId);
+  }
+  for (const evaluation of Object.values(goal.evaluations)) {
+    if (ids.includes(evaluation.evaluationId)) continue;
+    if (evaluation.outcome !== "pass") continue;
+    if (evaluation.evaluatorKind === "semantic" && evaluation.calibration !== "trusted") continue;
+    ids.push(evaluation.evaluationId);
+  }
+  return ids;
+}
+
+function collectPassingEvaluationsForGoal(goal: GoalView): EvaluationId[] {
+  const ids: EvaluationId[] = [];
+  for (const evaluation of Object.values(goal.evaluations)) {
+    if (evaluation.outcome !== "pass") continue;
+    if (evaluation.evaluatorKind === "semantic" && evaluation.calibration !== "trusted") continue;
+    ids.push(evaluation.evaluationId);
+  }
+  return ids;
 }

@@ -14,7 +14,14 @@ import {
 } from "@civaapple/qi-agent/memory";
 import { probeContainerRuntime } from "@civaapple/qi-node/codeact";
 import { createQiIntrospectionTool, createQiSessionInspectionTool } from "@civaapple/qi-agent/extensions";
-import { GoalEngine, type ControlGrant, type GoalContractInput } from "@civaapple/qi-agent/eval";
+import {
+  GoalEngine,
+  HumanEvaluator,
+  type ControlGrant,
+  type EvalOutcome,
+  type GoalContractInput,
+  type HumanEvalInput,
+} from "@civaapple/qi-agent/eval";
 import {
   sessionArchiveBlockers,
   type EventStore,
@@ -28,8 +35,8 @@ import {
   EventWriter,
   SessionSupervisor,
   TurnLoop,
-  applyGoalContinuationDecision,
-  decideGoalContinuation,
+  demoteActiveGoalAfterResume,
+  settleGoalBoundTurn,
   type GoalContinuationDecision,
   type RuntimeActivity,
   type RunQuestionAnswer,
@@ -39,6 +46,7 @@ import {
 } from "@civaapple/qi-agent/loop";
 import {
   createId,
+  type EvaluationId,
   type GoalId,
   type QuestionId,
   type RunId,
@@ -247,7 +255,8 @@ export class TuiRuntime {
   #allowNetwork = false;
   #allowBackground = false;
   #allowDelegate = false;
-  readonly #optionalTools = new Map<string, RegistrationHandle>();
+  readonly   #optionalTools = new Map<string, RegistrationHandle>();
+  #lastGoalContinuation: GoalContinuationDecision | undefined;
 
   private constructor(
     options: TuiRuntimeOptions,
@@ -555,7 +564,15 @@ export class TuiRuntime {
     if ((options.mounts ?? []).some((mount) => mount.source === "cli")) {
       await runtime.flushMountsToProjectConfig();
     }
+    // Existing Session load: demote active Goals so resume never silently continues 追寻.
+    if (options.sessionId) {
+      runtime.demoteActiveGoalAfterResume();
+    }
     return runtime;
+  }
+
+  lastGoalContinuation(): GoalContinuationDecision | undefined {
+    return this.#lastGoalContinuation;
   }
 
   capabilityLabels(): string[] {
@@ -1160,24 +1177,146 @@ export class TuiRuntime {
 
   settleGoalContinuation(runId: RunId): GoalContinuationDecision {
     const view = this.view();
-    if (!view) return { kind: "noop", reason: "Session view missing" };
-    const decision = decideGoalContinuation({ view, runId });
-    const run = view.runs[runId];
-    const goalId = run?.goalBinding?.goalId;
-    if (!goalId || decision.kind === "noop" || decision.kind === "await-continue") {
-      return decision;
+    if (!view) {
+      this.#lastGoalContinuation = { kind: "noop", reason: "Session view missing" };
+      return this.#lastGoalContinuation;
+    }
+    const goalId = view.runs[runId]?.goalBinding?.goalId;
+    if (!goalId) {
+      this.#lastGoalContinuation = { kind: "noop", reason: "Run is not Goal-bound" };
+      return this.#lastGoalContinuation;
     }
     const engine = new GoalEngine(this.#eventStore, this.sessionId);
     const control = this.#latestGoalControl(goalId);
-    applyGoalContinuationDecision(
-      {
+    const { decision } = settleGoalBoundTurn({
+      view,
+      runId,
+      controller: {
         complete: (id, evaluationIds) => engine.complete(id, evaluationIds, control),
         changeState: (id, state, reason) => engine.changeState(id, state, reason),
       },
-      goalId,
-      decision,
-    );
+    });
+    this.#lastGoalContinuation = decision;
     return decision;
+  }
+
+  demoteActiveGoalAfterResume(): GoalView | undefined {
+    const view = this.view();
+    if (!view?.currentGoalId) return undefined;
+    const engine = new GoalEngine(this.#eventStore, this.sessionId);
+    return demoteActiveGoalAfterResume(view, {
+      changeState: (id, state, reason) => engine.changeState(id, state, reason),
+    });
+  }
+
+  /** Shortcut: human Accept = reassess with outcome pass. */
+  async acceptGoalEvidence(note?: string): Promise<{
+    readonly goal: GoalView;
+    readonly completed: boolean;
+    readonly evaluationIds: readonly EvaluationId[];
+    readonly outcome: EvalOutcome;
+  }> {
+    return this.reassessGoalEvidence({
+      outcome: "pass",
+      rationale: note?.trim() || "",
+    });
+  }
+
+  /**
+   * Open a short Goal-bound Run, record human evidence + HumanEvaluator evaluations (Kernel requires
+   * an active Run for `evaluation.completed`), then settle. Pass may complete; fail/unknown never do.
+   */
+  async reassessGoalEvidence(input: {
+    readonly outcome: EvalOutcome;
+    readonly rationale: string;
+  }): Promise<{
+    readonly goal: GoalView;
+    readonly completed: boolean;
+    readonly evaluationIds: readonly EvaluationId[];
+    readonly outcome: EvalOutcome;
+  }> {
+    if (this.active) throw new Error("Cannot reassess Goal evidence while a Run is active");
+    const outcome = input.outcome;
+    const rationale = input.rationale.trim();
+    if ((outcome === "fail" || outcome === "unknown") && !rationale) {
+      throw new Error("Rationale is required when outcome is fail or unknown");
+    }
+    let goal = this.#requireCurrentGoal();
+    if (goal.state === "complete" || goal.state === "cancelled") {
+      throw new Error(`Goal ${goal.goalId} is already ${goal.state}`);
+    }
+    if (goal.state === "paused" || goal.state === "blocked") {
+      goal = this.changeGoalState(
+        "active",
+        rationale ? `Resumed for human reassess: ${rationale}` : "Resumed for human reassess",
+      );
+    }
+    this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
+    const runId = createId("run") as RunId;
+    const stepId = createId("stp");
+    const writer = new EventWriter(this.#eventStore, this.sessionId);
+    const user = { kind: "user" as const, id: "tui-user" };
+    const runtime = { kind: "runtime" as const, id: "qi" };
+    const description = rationale
+      || (outcome === "pass"
+        ? `Human acceptance of Goal ${goal.goalId}`
+        : `Human reassess (${outcome}) of Goal ${goal.goalId}`);
+    writer.append(
+      "run.triggered",
+      {
+        runId,
+        trigger: "goal",
+        input: description,
+        mode: this.mode(),
+        goalBinding: { goalId: goal.goalId, contractVersion: goal.contractVersion },
+      },
+      user,
+    );
+    writer.append("run.started", { runId }, runtime);
+    writer.append("step.started", { runId, stepId }, runtime);
+    const engine = new GoalEngine(this.#eventStore, this.sessionId);
+    const evaluationIds: EvaluationId[] = [];
+    for (const assertion of Object.values(goal.assertions)) {
+      if (!assertion.required) continue;
+      const artifactRef = `human://goal/${goal.goalId}/${assertion.assertionId}/${createId("evi")}`;
+      engine.recordEvidence({
+        goalId: goal.goalId,
+        runId,
+        assertionId: assertion.assertionId,
+        kind: "human",
+        artifactRef,
+        description,
+        producer: "qi-tui-user",
+        reproducible: false,
+      });
+      const humanInput: HumanEvalInput = { rationale: description, outcome };
+      const evaluationId = await engine.evaluate({
+        goalId: goal.goalId,
+        runId,
+        assertionId: assertion.assertionId,
+        evaluator: new HumanEvaluator<HumanEvalInput>("human-reassess-v1", (evaluateInput) => ({
+          outcome: evaluateInput.outcome,
+          evidenceRefs: [artifactRef],
+          reproducible: false,
+        })),
+        input: humanInput,
+      });
+      evaluationIds.push(evaluationId);
+    }
+    writer.append("step.completed", { runId, stepId, finishReason: "response" }, runtime);
+    writer.append(
+      "run.completed",
+      { runId, completionKind: "response", evaluationIds: [...evaluationIds] },
+      runtime,
+    );
+    const decision = this.settleGoalContinuation(runId);
+    const completed = decision.kind === "complete";
+    return {
+      goal: this.#requireCurrentGoal(goal.goalId),
+      completed,
+      evaluationIds,
+      outcome,
+    };
   }
 
   recordModelConfiguration(
@@ -1329,6 +1468,8 @@ export class TuiRuntime {
       }));
       if (result.view.runs[result.runId]?.goalBinding) {
         this.settleGoalContinuation(result.runId);
+      } else {
+        this.#lastGoalContinuation = undefined;
       }
       this.#humanControl.askNextRunQuestion(this.sessionId, result.runId);
       return result;

@@ -52,8 +52,8 @@ const fingerprint = failureFingerprint({
 
 ## Public API
 
-`GoalEngine`, evaluator interfaces and implementations, `EvaluatorCalibrationRegistry`, and
-`failureFingerprint()`.
+`GoalEngine`, evaluator interfaces and implementations (`DeterministicEvaluator`, `SemanticEvaluator`,
+`HumanEvaluator` / `HumanEvalInput`), `EvaluatorCalibrationRegistry`, and `failureFingerprint()`.
 
 ## Change guide
 

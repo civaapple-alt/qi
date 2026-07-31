@@ -608,20 +608,30 @@ bounded Runs without inventing a second truth source or turning one Run into an 
   matching `contractVersion` may be bound. Terminal Goals (`complete` / `cancelled`) reject new bindings.
 - `run.triggered.trigger` gains `"goal"` for explicit Goal continuation. `timer` / `event` remain Watcher
   awakenings and may also carry a Goal binding; they do not complete a Goal by themselves.
-- TurnLoop still executes one bounded Run. A new portable GoalContinuation decision layer observes the settled
-  Goal-bound Run and decides `complete` / `pause` / `block` / `await-continue` / `cancel`. It never grants
-  Action authority.
+- TurnLoop still executes one bounded Run. A portable `settleGoalBoundTurn` helper (decide + apply) observes the
+  settled Goal-bound Run and decides `complete` / `pause` / `block` / `await-continue` / `cancel`. Hosts must
+  call it after every Goal-bound Run; omitting settlement leaves pause/block/complete unenforced. It never
+  grants Action authority.
 - Model stop or narrative “done” cannot complete a Goal. Verified Run completion and Goal `complete` require
-  matching evaluations and Evidence Ledger entries (existing Kernel gates).
+  matching evaluations and Evidence Ledger entries (existing Kernel gates). Human Accept / Re-evaluate may
+  record `human` evidence and `HumanEvaluator` outcomes (`pass` / `fail` / `unknown`) through the same ledger
+  path; only `pass` with satisfied requirements can complete. Tool diffs, stdout, thinking, and Work Plan todos
+  are diagnostic/navigation and never Evidence Ledger records. Formal Plan remains a separate `/plan` path and
+  is never auto-created by Goal Continue.
 - Budget exhaustion and stagnation park the Run and pause the Goal; `action.indeterminate` blocks the Goal and
   forbids automatic retry. Ordinary non-bound Turns may still run while a Goal is `paused`.
+- Goal `attempts` default to the Session `maxSteps` value frozen at Goal creation. TurnLoop charges one attempt
+  only after a Goal-bound Step that proposed a non-`read` Action; text-only and pure-read Steps are free.
+  `maxSteps` remains the per-Run Step cap (every Step). Attempts are the cross-Continue Goal envelope.
+- Loading or resuming an existing Session demotes an `active` Goal to `paused` (`Paused after Session resume`)
+  so restart never silently continues 追寻; explicit Continue / Resume is required.
 - Archive and `/reset-workspace` fail closed while any Goal is `active`, `paused`, or `blocked`.
 - Compatibility is additive: older Sessions without `goalBinding` / `trigger: "goal"` replay unchanged.
 - Rejected for this stage: Project-scoped Goal-owning Sessions, `goals.sqlite` as truth, default unlimited
   auto-continue, and a process daemon. Those remain explicit deferrals under ADR-0013 / the roadmap.
 - Required evidence: binding validation; GoalContinuation after park/continue; no evidence ⇒ no complete;
   indeterminate ⇒ blocked; unfinished Goals block archive/reset; TurnLoop Goal ContextBlock without tool
-  transcripts.
+  transcripts; resume demote; portable settle helper.
 
 ## Changing a decision
 

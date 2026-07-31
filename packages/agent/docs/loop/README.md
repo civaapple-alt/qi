@@ -27,9 +27,17 @@ each Run, narrows the advertised tool catalog, and passes mode into Capability a
 Ask/Plan/Agent is the Session interaction dimension; Goal/time/event continuation policy and the
 同行/追寻/守望 product entrypoints remain separate and cannot grant authority
 ([ADR 0013](../../design/decisions.md#adr-0013-keep-interaction-activation-and-product-language-separate)).
-Session-local 追寻 uses optional `run.triggered.goalBinding` plus `decideGoalContinuation` after a bounded
-Goal-bound Run settles; TurnLoop never treats model stop as Goal completion
+Session-local 追寻 uses optional `run.triggered.goalBinding` plus portable `settleGoalBoundTurn` after a
+bounded Goal-bound Run settles; TurnLoop never treats model stop as Goal completion
 ([ADR 0033](../../design/decisions.md#adr-0033-session-local-goal-continuation-for-追寻)).
+Hosts must call `settleGoalBoundTurn` (or an equivalent that uses `decideGoalContinuation` +
+`applyGoalContinuationDecision`); CLI composition does this inside `TuiRuntime`. When GoalEngine already
+paused the Goal for budget/stagnation, the decision is usually `await-continue` (idempotent), not a second
+`pause`. Session resume demotes `active` → `paused` via `demoteActiveGoalAfterResume`. Goal ContextBlock
+states that Work Plan / Formal Plan status is not completion evidence. Goal `attempts` charge only after a
+Goal-bound Step that proposed a non-`read` Action (text-only / pure-read Steps are free). CLI `/goal`
+surfaces Evidence Ledger gaps for observation; human Accept / Re-evaluate write ledger entries via
+`HumanEvaluator`.
 `RuntimeActivity` carries bounded redacted model and process previews to interactive surfaces without entering
 Session truth. `EventWriter` refreshes an externally advanced stream before appending so independently owned
 runtime lifecycles such as ProcessTasks can interleave facts without stale sequence numbers.
@@ -97,7 +105,8 @@ const loop = new TurnLoop({
 
 `TurnLoop`, request/result types, `RuntimeActivity`, `EventWriter`, `HumanControlService`, session-mode helpers,
 `SteeringMailbox`, `SessionSupervisor`, and Goal continuation helpers
-(`decideGoalContinuation`, `applyGoalContinuationDecision`, `createGoalContextBlock`).
+(`settleGoalBoundTurn`, `decideGoalContinuation`, `applyGoalContinuationDecision`, `demoteActiveGoalAfterResume`,
+`tryCompleteGoalFromLedger`, `createGoalContextBlock`, `formatGoalContinuationNotice`).
 
 ## Change guide
 

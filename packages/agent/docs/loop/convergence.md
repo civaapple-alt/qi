@@ -22,6 +22,10 @@ Tokens, wall time, money, attempts, concurrency, context, risk, and attention ar
 limit stops new work even if other dimensions remain. Approaching a limit should favor evidence synthesis and a
 safe handoff rather than one more speculative call.
 
+For Session-local Goals, `attempts` are charged per Goal-bound Step that proposed a non-`read` Action (not per
+model Step and not for pure research). The CLI freezes `attempts.limit` to the then-current Session `maxSteps`
+when the Goal is created; `maxSteps` itself still caps every Step inside a single Run.
+
 The model window, output reserve, and prompt working budget are separate values. A larger model window raises the
 ceiling but does not authorize unbounded transcript retention; consumed tool exchanges still compact before the
 hard boundary.

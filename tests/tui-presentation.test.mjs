@@ -2702,6 +2702,83 @@ test("parked budget handoff shows reason and continue guidance", () => {
   assert.equal(presenter.selectedRunFailureDetail(), "budget: Reached maxSteps=20");
 });
 
+test("parked Goal attempts handoff points to /goal Continue", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "park-goal-v1",
+    capabilities: ["write"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  const actor = { kind: "runtime", id: "qi" };
+  presenter.update([
+    {
+      eventId: "evt_1",
+      sessionId: "ses_park_goal",
+      sequence: 1,
+      type: "run.parked",
+      occurredAt,
+      actor,
+      data: {
+        runId: "run_1",
+        reason: "budget",
+        detail: "attempts budget exhausted at 20/20",
+      },
+    },
+  ], {
+    sessionId: "ses_park_goal",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "goal",
+        mode: "agent",
+        status: "parked",
+        input: "continue goal",
+        goalBinding: { goalId: "gol_1", contractVersion: 1 },
+        stepOrder: [],
+        steps: {},
+        actions: {},
+        actionOrder: [],
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: {
+          type: "parked",
+          reason: "budget",
+          detail: "attempts budget exhausted at 20/20",
+        },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "waiting", reason: "Run parked" },
+  });
+  const rendered = presenter.render().join("\n");
+  assert.match(rendered, /Goal attempts exhausted|Goal attempts 已用尽/);
+  assert.match(rendered, /\/goal → Continue/);
+  assert.doesNotMatch(rendered, /Step budget exhausted|Step 预算已用尽/);
+});
+
 test("parked indeterminate handoff surfaces Action evidence and no-retry guidance", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",

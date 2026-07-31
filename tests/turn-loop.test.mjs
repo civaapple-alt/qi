@@ -1784,7 +1784,7 @@ test("HumanControlService continues current Work Plan when workPlanId is omitted
   );
 });
 
-test("TurnLoop binds a Goal, injects Goal ContextBlock, and consumes attempt budget", async () => {
+test("TurnLoop binds a Goal, injects Goal ContextBlock, and skips attempts for text-only Steps", async () => {
   await withRuntime(async ({ root, artifactStore }) => {
     const store = new InMemoryEventStore();
     const sessionId = "ses_turn_goal_bind";
@@ -1832,8 +1832,152 @@ test("TurnLoop binds a Goal, injects Goal ContextBlock, and consumes attempt bud
     const run = result.view.runs[result.runId];
     assert.deepEqual(run.goalBinding, { goalId: goal.goalId, contractVersion: goal.contractVersion });
     assert.equal(run.trigger, "goal");
-    assert.equal(result.view.goals[goal.goalId].resources.attempts.consumed, 1);
+    assert.equal(result.view.goals[goal.goalId].resources.attempts.consumed, 0);
     assert.equal(result.view.goals[goal.goalId].state, "active");
     assert.equal(run.terminal?.reason, "response");
+  });
+});
+
+test("TurnLoop charges Goal attempts only for Steps with non-read Actions", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const sessionId = "ses_turn_goal_attempts";
+    new EventWriter(store, sessionId).append("session.created", { title: "Goal attempts" }, { kind: "runtime", id: "test" });
+    const goals = new GoalEngine(store, sessionId);
+    const goal = goals.create(
+      {
+        objective: "Inspect then write",
+        assertions: [{ assertionId: "done", description: "Done" }],
+        resources: [{ resource: "attempts", limit: 2, unit: "attempt" }],
+      },
+      {
+        issuedTo: "user",
+        startRight: "user",
+        stopRight: "user",
+        acceptanceRight: "human",
+        delegationRight: false,
+        actionLeaseIds: [],
+      },
+    );
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_goal_attempts",
+      subject: "agent_main",
+      tools: ["read", "write"],
+      effects: ["read", "write"],
+      resources: ["file:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("read", readTool);
+    registry.register("write", writeTool);
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call-goal-read",
+          name: "read",
+          input: { path: "missing.txt" },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [
+        {
+          type: "action.requested",
+          callId: "call-goal-write",
+          name: "write",
+          input: { path: "out.txt", content: "hi", expectedSha256: null },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [
+        { type: "text.delta", delta: "Wrote after reading." },
+        { type: "completed", finishReason: "stop" },
+      ],
+    ]);
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: model,
+      toolRegistry: registry,
+    });
+    const result = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      goalBinding: { goalId: goal.goalId, contractVersion: goal.contractVersion },
+      trigger: "goal",
+      maxSteps: 3,
+    }));
+    assert.equal(result.status, "completed");
+    assert.equal(result.view.goals[goal.goalId].resources.attempts.consumed, 1);
+    assert.equal(result.view.goals[goal.goalId].state, "active");
+  });
+});
+
+test("TurnLoop parks when Goal attempts are exhausted by non-read Steps", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const sessionId = "ses_turn_goal_attempts_exhaust";
+    new EventWriter(store, sessionId).append("session.created", { title: "Goal exhaust" }, { kind: "runtime", id: "test" });
+    const goals = new GoalEngine(store, sessionId);
+    const goal = goals.create(
+      {
+        objective: "Write twice",
+        assertions: [{ assertionId: "done", description: "Done" }],
+        resources: [{ resource: "attempts", limit: 1, unit: "attempt" }],
+      },
+      {
+        issuedTo: "user",
+        startRight: "user",
+        stopRight: "user",
+        acceptanceRight: "human",
+        delegationRight: false,
+        actionLeaseIds: [],
+      },
+    );
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_goal_exhaust",
+      subject: "agent_main",
+      tools: ["write"],
+      effects: ["write"],
+      resources: ["file:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("write", writeTool);
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call-goal-write-1",
+          name: "write",
+          input: { path: "a.txt", content: "one", expectedSha256: null },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [
+        {
+          type: "action.requested",
+          callId: "call-goal-write-2",
+          name: "write",
+          input: { path: "b.txt", content: "two", expectedSha256: null },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+    ]);
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: model,
+      toolRegistry: registry,
+    });
+    const result = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      goalBinding: { goalId: goal.goalId, contractVersion: goal.contractVersion },
+      trigger: "goal",
+      maxSteps: 3,
+    }));
+    assert.equal(result.status, "parked");
+    assert.equal(result.view.goals[goal.goalId].resources.attempts.consumed, 1);
+    assert.equal(result.view.goals[goal.goalId].state, "paused");
+    assert.match(result.view.runs[result.runId].terminal?.detail ?? "", /attempts budget exhausted/);
   });
 });

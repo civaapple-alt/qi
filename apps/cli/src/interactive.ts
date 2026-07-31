@@ -17,7 +17,13 @@ import type {
   SessionEvent,
   SessionId,
 } from "@civaapple/qi-protocol";
-import { nextSessionMode, type RuntimeActivity, type SessionMode } from "@civaapple/qi-agent/loop";
+import type { EvalOutcome } from "@civaapple/qi-agent/eval";
+import {
+  formatGoalContinuationNotice,
+  nextSessionMode,
+  type RuntimeActivity,
+  type SessionMode,
+} from "@civaapple/qi-agent/loop";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import { findTrustedExecutable } from "@civaapple/qi-node/tools";
 import type { AuthSession, AuthSessionStatus } from "./auth.js";
@@ -609,7 +615,15 @@ export class InteractiveTui {
     this.#terminal.setProgress(true);
     const task = operation()
       .then((result) => {
+        const goalNotice = (() => {
+          const decision = this.#runtime.lastGoalContinuation();
+          return decision ? formatGoalContinuationNotice(decision) : undefined;
+        })();
         if (result.status === "completed") {
+          if (goalNotice) {
+            this.#presenter.setNotice(goalNotice, "run");
+            return;
+          }
           const pendingMemories = this.#runtime.pendingMemoryCountForLatestRun();
           if (pendingMemories > 0) {
             this.#presenter.setNotice(
@@ -623,6 +637,10 @@ export class InteractiveTui {
           return;
         }
         this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+        if (goalNotice) {
+          this.#presenter.setNotice(goalNotice, "run");
+          return;
+        }
         const guidance = this.#presenter.selectedRunFailureGuidance();
         if (guidance) {
           this.#presenter.setNotice(guidance, "run");
@@ -1767,17 +1785,23 @@ export class InteractiveTui {
       });
     }
     if (summary.state === "active" || summary.state === "paused" || summary.state === "blocked") {
+      const resuming = summary.state === "paused" || summary.state === "blocked";
       items.push({
         id: "continue",
-        label: summary.state === "paused" ? "Resume & Continue" : "Continue",
-        description: "Start the next Goal-bound Run",
+        label: resuming ? "Resume & Continue" : "Continue",
+        description: "Start the next Goal-bound Run from the objective (no prompt)",
+      });
+      items.push({
+        id: "continue_guidance",
+        label: resuming ? "Resume & Continue with guidance…" : "Continue with guidance…",
+        description: "Optional corrections become the next Run input",
       });
     }
     if (summary.state === "active") {
       items.push({
         id: "pause",
         label: "Pause",
-        description: "Stop auto-continuation until Resume",
+        description: "Pause 追寻; Continue is required to resume",
       });
     }
     if (summary.state === "paused" || summary.state === "blocked") {
@@ -1788,6 +1812,16 @@ export class InteractiveTui {
       });
     }
     if (summary.state === "active" || summary.state === "paused" || summary.state === "blocked") {
+      items.push({
+        id: "accept",
+        label: "Accept with evidence…",
+        description: "Human pass into Evidence Ledger; may complete the Goal",
+      });
+      items.push({
+        id: "reassess",
+        label: "Re-evaluate…",
+        description: "Human pass/fail/unknown with rationale → Evidence Ledger",
+      });
       items.push({
         id: "cancel",
         label: "Cancel Goal",
@@ -1813,6 +1847,18 @@ export class InteractiveTui {
           this.#continueGoal();
           return;
         }
+        if (item.id === "continue_guidance") {
+          this.#openContinueGoalForm(summary.state === "paused" || summary.state === "blocked");
+          return;
+        }
+        if (item.id === "accept") {
+          this.#openAcceptGoalForm();
+          return;
+        }
+        if (item.id === "reassess") {
+          this.#openReassessGoalForm();
+          return;
+        }
         if (item.id === "pause" || item.id === "resume" || item.id === "cancel") {
           this.#panels.closeAll();
           this.#changeGoalStateFromHub(item.id);
@@ -1821,6 +1867,128 @@ export class InteractiveTui {
       },
     }));
     this.#render();
+  }
+
+  #openContinueGoalForm(resuming: boolean): void {
+    this.#panels.push(new FormPanel({
+      title: resuming ? "Resume & Continue Goal" : "Continue Goal",
+      description:
+        "Optional guidance becomes the next Goal-bound Run input (corrections, constraints, next slice). " +
+        "Leave empty to continue from the Goal objective. Use /steer while a Run is active for in-Run course correction.",
+      fields: [
+        {
+          id: "guidance",
+          label: "Guidance",
+          placeholder: "What should the next slice focus on? (optional)",
+        },
+      ],
+      submitLabel: resuming ? "Resume & Continue" : "Continue",
+      onClose: this.#panels.dismiss,
+      onSubmit: (values) => {
+        const guidance = (values.guidance ?? "").trim();
+        this.#panels.closeAll();
+        this.#continueGoal(guidance || undefined);
+      },
+    }));
+    this.#render();
+  }
+
+  #openAcceptGoalForm(): void {
+    this.#panels.push(new FormPanel({
+      title: "Accept Goal evidence",
+      description:
+        "Records human evidence for each required assertion. Completes the Goal only when the ledger and evaluations satisfy the contract.",
+      fields: [
+        {
+          id: "note",
+          label: "Acceptance note",
+          placeholder: "Why this Goal is accepted (optional)",
+        },
+      ],
+      submitLabel: "Accept evidence",
+      onClose: this.#panels.dismiss,
+      onSubmit: (values) => {
+        this.#panels.closeAll();
+        this.#acceptGoalEvidence(values.note);
+      },
+    }));
+    this.#render();
+  }
+
+  #acceptGoalEvidence(note?: string): void {
+    this.#startManagementTask(async () => {
+      const result = await this.#runtime.acceptGoalEvidence(note);
+      this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+      this.#presenter.setNotice(
+        result.completed
+          ? `Goal complete · human evidence · ${result.goal.goalId}`
+          : `Human evidence recorded · Goal ${result.goal.state} · ledger may still have gaps · ${result.goal.goalId}`,
+      );
+    }, "Goal");
+  }
+
+  #openReassessGoalForm(): void {
+    this.#panels.push(new FormPanel({
+      title: "Re-evaluate Goal",
+      description:
+        "Writes human Evidence Ledger entries and evaluations. Pass may complete; fail/unknown keep the Goal open for Continue",
+      fields: [
+        {
+          id: "outcome",
+          label: "Outcome",
+          required: true,
+          options: [
+            { value: "pass", label: "pass", description: "Assertions met; may complete Goal" },
+            { value: "fail", label: "fail", description: "Not met; Continue or add guidance" },
+            { value: "unknown", label: "unknown", description: "Cannot judge yet" },
+          ],
+        },
+        {
+          id: "rationale",
+          label: "Rationale",
+          placeholder: "Required for fail/unknown; optional for pass",
+        },
+      ],
+      submitLabel: "Record evaluation",
+      onClose: this.#panels.dismiss,
+      onSubmit: (values) => {
+        const outcome = (values.outcome ?? "").trim() as EvalOutcome;
+        if (outcome !== "pass" && outcome !== "fail" && outcome !== "unknown") {
+          this.#presenter.setNotice("Outcome must be pass, fail, or unknown.");
+          this.#render();
+          return;
+        }
+        const rationale = (values.rationale ?? "").trim();
+        if ((outcome === "fail" || outcome === "unknown") && !rationale) {
+          this.#presenter.setNotice("Rationale is required for fail or unknown.");
+          this.#render();
+          return;
+        }
+        this.#panels.closeAll();
+        this.#reassessGoalEvidence(outcome, rationale);
+      },
+    }));
+    this.#render();
+  }
+
+  #reassessGoalEvidence(outcome: EvalOutcome, rationale: string): void {
+    this.#startManagementTask(async () => {
+      const result = await this.#runtime.reassessGoalEvidence({ outcome, rationale });
+      this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+      if (result.completed) {
+        this.#presenter.setNotice(`Goal complete · human ${outcome} · ${result.goal.goalId}`);
+        return;
+      }
+      if (outcome === "pass") {
+        this.#presenter.setNotice(
+          `Human pass recorded · Goal ${result.goal.state} · check Evidence Ledger gaps · ${result.goal.goalId}`,
+        );
+        return;
+      }
+      this.#presenter.setNotice(
+        `Human ${outcome} recorded · Goal ${result.goal.state} · Continue or Continue with guidance… · ${result.goal.goalId}`,
+      );
+    }, "Goal");
   }
 
   #openCreateGoalForm(): void {
@@ -1858,7 +2026,7 @@ export class InteractiveTui {
       return;
     }
     try {
-      const goal = this.#runtime.createGoal(defaultGoalContract(objective));
+      const goal = this.#runtime.createGoal(defaultGoalContract(objective, this.#runtime.maxSteps()));
       this.#presenter.update(this.#runtime.events(), this.#runtime.view());
       this.#presenter.setNotice(`Goal created · ${goal.goalId} · starting 追寻…`);
       this.#startTurn(() => this.#runtime.continueGoal());

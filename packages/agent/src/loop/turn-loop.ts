@@ -347,17 +347,22 @@ export class TurnLoop {
     let finalText = "";
 
     for (let stepNumber = 1; stepNumber <= request.maxSteps; stepNumber += 1) {
-      if (goalEngine && frozenGoalBinding && writer.view?.goals[frozenGoalBinding.goalId]?.resources.attempts) {
-        const attemptBudget = goalEngine.consumeResource(
-          frozenGoalBinding.goalId,
-          "attempts",
-          1,
-          `Step ${stepNumber}`,
-          runId,
+      if (
+        goalEngine
+        && frozenGoalBinding
+        && goalAttemptsAlreadyExhausted(writer.view, frozenGoalBinding.goalId)
+      ) {
+        const attempts = writer.view?.goals[frozenGoalBinding.goalId]?.resources.attempts;
+        writer.append(
+          "run.parked",
+          {
+            runId,
+            reason: "budget",
+            detail: `attempts budget exhausted at ${attempts?.consumed ?? 0}/${attempts?.limit ?? 0}`,
+          },
+          { kind: "runtime", id: "qi" },
         );
-        if (attemptBudget.exhausted) {
-          return this.#result(writer, request.sessionId, runId, "parked", finalText);
-        }
+        return this.#result(writer, request.sessionId, runId, "parked", finalText);
       }
       const finalHandoffStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps;
       const budgetWarningStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps - 1;
@@ -919,6 +924,14 @@ export class TurnLoop {
           reason: `model ${requestId}`,
         })
       ) {
+        consumeGoalAttemptForNonReadStep({
+          ...(goalEngine === undefined ? {} : { goalEngine }),
+          ...(frozenGoalBinding === undefined ? {} : { goalBinding: frozenGoalBinding }),
+          ...(writer.view === undefined ? {} : { view: writer.view }),
+          runId,
+          stepId,
+          stepNumber,
+        });
         return this.#result(writer, request.sessionId, runId, "parked", finalText);
       }
 
@@ -934,6 +947,16 @@ export class TurnLoop {
         toolResults,
         ...(goalEngine === undefined ? {} : { goalEngine }),
         ...(frozenGoalBinding === undefined ? {} : { goalBinding: frozenGoalBinding }),
+      };
+      const chargeAttemptAfterTerminal = (): void => {
+        consumeGoalAttemptForNonReadStep({
+          ...(goalEngine === undefined ? {} : { goalEngine }),
+          ...(frozenGoalBinding === undefined ? {} : { goalBinding: frozenGoalBinding }),
+          ...(writer.view === undefined ? {} : { view: writer.view }),
+          runId,
+          stepId,
+          stepNumber,
+        });
       };
       let candidateIndex = 0;
       while (candidateIndex < candidates.length) {
@@ -959,6 +982,7 @@ export class TurnLoop {
               { runId, reason: "User interrupted the active tool" },
               { kind: "runtime", id: "qi" },
             );
+            chargeAttemptAfterTerminal();
             return this.#result(writer, request.sessionId, runId, "cancelled", finalText);
           }
           if (outcome === "indeterminate") {
@@ -978,6 +1002,7 @@ export class TurnLoop {
               },
               { kind: "runtime", id: "qi" },
             );
+            chargeAttemptAfterTerminal();
             return this.#result(writer, request.sessionId, runId, "parked", finalText);
           }
           if (writer.view?.runs[runId]?.status === "parked") {
@@ -988,6 +1013,7 @@ export class TurnLoop {
               candidates.slice(candidateIndex + 1),
               "Batch stopped because Goal convergence parked the Run",
             );
+            chargeAttemptAfterTerminal();
             return this.#result(writer, request.sessionId, runId, "parked", finalText);
           }
           candidateIndex += 1;
@@ -1022,6 +1048,7 @@ export class TurnLoop {
             { runId, reason: "User interrupted the active tool" },
             { kind: "runtime", id: "qi" },
           );
+          chargeAttemptAfterTerminal();
           return this.#result(writer, request.sessionId, runId, "cancelled", finalText);
         }
         if (outcomes.includes("indeterminate")) {
@@ -1041,6 +1068,7 @@ export class TurnLoop {
             },
             { kind: "runtime", id: "qi" },
           );
+          chargeAttemptAfterTerminal();
           return this.#result(writer, request.sessionId, runId, "parked", finalText);
         }
         if (writer.view?.runs[runId]?.status === "parked") {
@@ -1051,6 +1079,7 @@ export class TurnLoop {
             candidates.slice(readRunEnd),
             "Batch stopped because Goal convergence parked the Run",
           );
+          chargeAttemptAfterTerminal();
           return this.#result(writer, request.sessionId, runId, "parked", finalText);
         }
         candidateIndex = readRunEnd;
@@ -1066,6 +1095,18 @@ export class TurnLoop {
       }
       settledExchanges.push({ sourceStepId: stepId, messages: exchangeMessages, consumed: false, compacted: false });
       this.#consumeSteering(writer, request.sessionId, runId, conversation);
+      if (
+        consumeGoalAttemptForNonReadStep({
+          ...(goalEngine === undefined ? {} : { goalEngine }),
+          ...(frozenGoalBinding === undefined ? {} : { goalBinding: frozenGoalBinding }),
+          ...(writer.view === undefined ? {} : { view: writer.view }),
+          runId,
+          stepId,
+          stepNumber,
+        })
+      ) {
+        return this.#result(writer, request.sessionId, runId, "parked", finalText);
+      }
     }
 
     writer.append(
@@ -1083,7 +1124,9 @@ export class TurnLoop {
     status: TurnResult["status"],
     text: string,
   ): TurnResult {
-    const view = writer.view;
+    // GoalEngine appends resource/park events on the same store without going through EventWriter;
+    // reload so callers see attempts consumption and Goal-paused parks.
+    const view = this.#eventStore.load(sessionId) ?? writer.view;
     if (!view) throw new Error("TurnLoop ended without a Session view");
     return { sessionId, runId, status, text, view };
   }
@@ -2160,6 +2203,43 @@ function consumeGoalTokens(input: {
     "token",
     tokens,
     input.reason,
+    input.runId,
+  );
+  return result.exhausted;
+}
+
+function goalAttemptsAlreadyExhausted(view: SessionView | undefined, goalId: GoalId): boolean {
+  const attempts = view?.goals[goalId]?.resources.attempts;
+  return attempts !== undefined && attempts.consumed >= attempts.limit;
+}
+
+function stepHadNonReadEffect(
+  view: SessionView | undefined,
+  runId: RunId,
+  stepId: StepId,
+): boolean {
+  return Object.values(view?.runs[runId]?.actions ?? {}).some(
+    (action) => action.stepId === stepId && action.effect !== "read",
+  );
+}
+
+/** Charge one Goal attempt after a Step that proposed a non-read Action. Returns true when exhausted. */
+function consumeGoalAttemptForNonReadStep(input: {
+  goalEngine?: GoalEngine;
+  goalBinding?: RunGoalBinding;
+  view?: SessionView;
+  runId: RunId;
+  stepId: StepId;
+  stepNumber: number;
+}): boolean {
+  if (!input.goalEngine || !input.goalBinding || !input.view) return false;
+  if (!input.view.goals[input.goalBinding.goalId]?.resources.attempts) return false;
+  if (!stepHadNonReadEffect(input.view, input.runId, input.stepId)) return false;
+  const result = input.goalEngine.consumeResource(
+    input.goalBinding.goalId,
+    "attempts",
+    1,
+    `Step ${input.stepNumber} non-read effect`,
     input.runId,
   );
   return result.exhausted;

@@ -11,9 +11,10 @@ backup plus reset or a new data root rather than an automatic migration.
 ### Added
 
 - Session-local 追寻: optional `run.triggered.goalBinding` / `trigger: "goal"`, TurnLoop Goal ContextBlock and
-  attempt/token budget accounting, `decideGoalContinuation` after Goal-bound Runs, and CLI `/goal`
-  (plan-like: `/goal <objective>` creates and starts; bare `/goal` opens a status + actions hub). Model stop
-  cannot complete a Goal; unfinished Goals block Session archive and `/reset-workspace`. See ADR-0033.
+  attempt/token budget accounting, portable `settleGoalBoundTurn` after Goal-bound Runs, and CLI `/goal`
+  (plan-like: `/goal <objective>` creates and starts; bare `/goal` opens a status + actions hub including
+  human Accept). Model stop cannot complete a Goal; unfinished Goals block Session archive and
+  `/reset-workspace`. See ADR-0033.
 - Machine-readable baseline/candidate prompt evaluation metrics and `accept:compare-prompts`, with zero-tolerance
   gates for forbidden Actions, test tampering, and false completion.
 - Settings and `/max-steps` alias for the existing Step budget; the selected value persists to user config and
@@ -26,6 +27,17 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- Goal `attempts` default to the Session `maxSteps` at create time; TurnLoop charges an attempt only for
+  Goal-bound Steps that propose a non-`read` Action (research/read Steps no longer burn the envelope). TUI
+  handoff distinguishes Goal attempts exhaustion (`/goal` Continue) from Session Step budget parks.
+- `/goal` hub adds Re-evaluate… (human pass/fail/unknown → Evidence Ledger), richer Goal/Ledger observation in
+  hub status and TUI status tags, and Web Contract/Knowledge read-only Ledger gap projection; Formal Plan and
+  Work Plan remain orthogonal and are never auto-created by Goal.
+- `/goal` hub **Continue** starts the next Goal-bound Run immediately; **Continue with guidance…** is a separate
+  optional form when corrections should become the next Run input (`continueGoal(guidance)`).
+- Session-local 追寻 settlement is portable (`settleGoalBoundTurn`); CLI surfaces post-Run Goal notices; Session
+  resume demotes `active` Goals to `paused`; `/goal` hub Accept records human evidence toward verified complete;
+  Goal ContextBlock states bounded-slice / non-narrative completion discipline.
 - CLI model context is now assembled as deterministic policy, mode, capability, host, Workspace, Memory, and
   per-Skill blocks. Required policy and advertised Tool schemas reserve budget before whole restored turns;
   one conservative Unicode-aware estimator accounts for blocks, messages, framing, and schemas.

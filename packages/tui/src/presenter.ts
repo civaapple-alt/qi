@@ -1802,7 +1802,10 @@ export class TuiPresenter {
     }
     const capabilityNext = unadvertisedCapabilityNext(failure, this.launch.capabilities, locale);
     const budgetNext = run.status === "parked" && run.terminal?.reason === "budget"
-      ? t(locale, "handoff.next.budget")
+      ? t(
+        locale,
+        isGoalAttemptsBudgetPark(run) ? "handoff.next.goal_attempts" : "handoff.next.budget",
+      )
       : undefined;
     const indeterminateNext = run.status === "parked" && run.terminal?.reason === "indeterminate-effect"
       ? t(locale, "handoff.next.indeterminate")
@@ -2096,6 +2099,12 @@ function handoffStatusKey(
   if (run.terminal?.reason === "verified") return "handoff.status.verified";
   if (run.terminal?.reason === "response") return "handoff.status.responded";
   return "handoff.status.completed";
+}
+
+/** Goal attempt envelope (cross-Continue) vs Session maxSteps — both park with reason budget. */
+function isGoalAttemptsBudgetPark(run: RunView): boolean {
+  if (!run.goalBinding) return false;
+  return /\battempts budget exhausted\b/i.test(run.terminal?.detail ?? "");
 }
 
 function isPlainShortText(text: string): boolean {

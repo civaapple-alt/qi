@@ -130,14 +130,44 @@ export function renderStatus(view: SessionView | undefined): string {
         .map(([name, value]) => `${name} ${value?.consumed ?? 0}/${value?.limit ?? 0}`)
         .join(", ")
     : undefined;
+  const goalTag = goal ? goalStatusTag(view, goal.goalId) : undefined;
   return [
     `session ${short(view.sessionId)}`,
-    ...(goal ? [`goal ${short(goal.goalId)} ${goal.state}${budget ? ` · ${budget}` : ""}`] : []),
+    ...(goal
+      ? [
+          `goal ${short(goal.goalId)} ${goal.state}` +
+            (goalTag ? ` · ${goalTag}` : "") +
+            (budget ? ` · ${budget}` : ""),
+        ]
+      : []),
     `run ${short(run.runId)} ${runDisplayStatus(run)}` +
       (run.goalBinding ? ` · bound ${short(run.goalBinding.goalId)}` : ""),
     `${run.stepOrder.length} step${run.stepOrder.length === 1 ? "" : "s"}`,
     `${actions.length} action${actions.length === 1 ? "" : "s"}`,
   ].join(" · ");
+}
+
+/** Compact attention tag for status line (mirrors CLI goalObservationProjection priorities). */
+function goalStatusTag(view: SessionView, goalId: string): string | undefined {
+  const goal = view.goals[goalId];
+  if (!goal) return undefined;
+  if (goal.state === "blocked") return "blocked";
+  if (goal.state === "complete") return "complete";
+  if (goal.state === "paused") return "paused";
+  const evidence = Object.values(view.evidence).filter((item) => item.goalId === goalId);
+  const openRequired = Object.values(goal.assertions).filter((assertion) => {
+    if (!assertion.required) return false;
+    return !Object.values(goal.evaluations).some(
+      (evaluation) =>
+        evaluation.assertionId === assertion.assertionId
+        && evaluation.outcome === "pass"
+        && !(evaluation.evaluatorKind === "semantic" && evaluation.calibration !== "trusted"),
+    );
+  }).length;
+  if (evidence.length === 0 && Object.keys(goal.evaluations).length === 0) return "ledger-empty";
+  if (openRequired > 0) return `ledger-gap:${openRequired}`;
+  if (Object.values(goal.resources).some((value) => value?.converging)) return "converging";
+  return undefined;
 }
 
 function runDisplayStatus(run: SessionView["runs"][string]): string {

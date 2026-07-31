@@ -34,6 +34,32 @@ export class DeterministicEvaluator<Input> implements Evaluator<Input> {
   }
 }
 
+/** Input conventionally passed to Goal human accept / re-evaluate paths. */
+export interface HumanEvalInput {
+  readonly rationale: string;
+  readonly outcome: EvalOutcome;
+}
+
+/** Explicit human acceptance / review; not model-judged completion. */
+export class HumanEvaluator<Input> implements Evaluator<Input> {
+  readonly kind = "human" as const;
+  readonly version: string;
+  readonly #evaluate: (input: Input, signal?: AbortSignal) => EvalDraft | Promise<EvalDraft>;
+
+  constructor(version: string, evaluate: (input: Input, signal?: AbortSignal) => EvalDraft | Promise<EvalDraft>) {
+    if (!version) throw new TypeError("Evaluator version is required");
+    this.version = version;
+    this.#evaluate = evaluate;
+  }
+
+  async evaluate(input: Input, signal?: AbortSignal): Promise<EvalDraft> {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Evaluation aborted", "AbortError");
+    const result = await this.#evaluate(input, signal);
+    validateDraft(result);
+    return structuredClone(result);
+  }
+}
+
 export class SemanticEvaluator<Input> implements Evaluator<Input> {
   readonly kind = "semantic" as const;
   readonly identity: SemanticEvaluatorIdentity;

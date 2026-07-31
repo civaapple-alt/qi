@@ -57,7 +57,9 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
   running servers and watchers therefore remain visible after their originating Run completes.
 - Missing Goal, control receipt, evidence, or accepted memory is an explicit, explanatory empty state. When a
   Formal Plan or Work Plan is bound, the Contract pane surfaces that binding instead of leading with “No formal
-  Goal”. The Web surface never fabricates those contracts from conversational behavior.
+  Goal”. The Web surface never fabricates those contracts from conversational behavior. Goal Contract cards
+  show Evidence Ledger gap tags (`ledger-empty` / `ledger-gap`, per-assertion satisfied/partial/open); Knowledge
+  separates Evidence Ledger cards from diagnostic Action results. Web remains read-only for Goal control.
 - Projects mode reads the project Memory projection plus `$QI_HOME/state/memory.sqlite` read-only and shows
   Session/Project/User scope, provenance links, lifecycle, activation, and the exact `memory:<id>` blocks included
   or omitted by each committed `context.compiled`. Single-database mode reports that the User index is

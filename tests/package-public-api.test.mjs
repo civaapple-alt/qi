@@ -26,8 +26,8 @@ const expectedRuntimeExports = {
     "parseQiSelfModel", "qiSelfModel", "queryQiSelfModel", "runDelegatedTurn", "validateGraph",
   ],
   "@civaapple/qi-agent/eval": [
-    "DeterministicEvaluator", "EvaluatorCalibrationRegistry", "GoalEngine", "SemanticEvaluator",
-    "evaluatorIdentity", "failureFingerprint",
+    "DeterministicEvaluator", "EvaluatorCalibrationRegistry", "GoalEngine", "HumanEvaluator",
+    "SemanticEvaluator", "evaluatorIdentity", "failureFingerprint",
   ],
   "@civaapple/qi-agent/kernel": [
     "ConcurrencyError", "InMemoryEventStore", "KERNEL_ASK_MODE_TOOLS",
@@ -46,11 +46,13 @@ const expectedRuntimeExports = {
     "providerModelContextTokens",
   ],
   "@civaapple/qi-agent/loop": [
-    "ASK_MODE_TOOLS", "EventWriter", "HumanControlService", "PLAN_MODE_EXTRA_TOOLS",
-    "SESSION_MODES", "SessionSupervisor", "SteeringMailbox", "TurnLoop",
-    "applyGoalContinuationDecision", "createGoalContextBlock", "decideGoalContinuation",
-    "firstIncompleteItem", "formatModeLabel", "formatPlanItemInput", "formatRunHistoryFacts", "isBatchWriteConflictResource", "isToolAllowedInMode",
-    "latestTerminalPlanBoundRun", "nextSessionMode", "toolsForMode",
+    "ASK_MODE_TOOLS", "EventWriter", "GOAL_RESUME_DEMOTE_REASON", "HumanControlService",
+    "PLAN_MODE_EXTRA_TOOLS", "SESSION_MODES", "SessionSupervisor", "SteeringMailbox", "TurnLoop",
+    "applyGoalContinuationDecision", "canCompleteGoal", "createGoalContextBlock",
+    "decideGoalContinuation", "demoteActiveGoalAfterResume", "firstIncompleteItem",
+    "formatGoalContinuationNotice", "formatModeLabel", "formatPlanItemInput", "formatRunHistoryFacts",
+    "isBatchWriteConflictResource", "isToolAllowedInMode", "latestTerminalPlanBoundRun",
+    "nextSessionMode", "settleGoalBoundTurn", "toolsForMode", "tryCompleteGoalFromLedger",
   ],
   "@civaapple/qi-agent/tools": [
     "AuthorityDeniedError", "EffectReplayBlockedError", "StaleToolError", "ToolFailure",
