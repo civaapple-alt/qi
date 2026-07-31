@@ -106,7 +106,9 @@ metacharacters. Direct executables retain normal argument-vector spawning on eve
 requires the `shell-profile:direct` resource in addition to host-process/workspace resources.
 
 Callers pass the target directory through `workdir` and invoke package managers directly, for example
-`command: "npm", args: ["run", "build"]`. Wrapping that operation in `bash -c`, `cmd /c`, or
+`command: "npm", args: ["run", "build"]`. Absolute `workdir` values under the Workspace root are rewritten to
+Workspace-relative form before spawn; absolute paths outside the Workspace still fail closed with
+`PATH_OUTSIDE_WORKSPACE`. Wrapping that operation in `bash -c`, `cmd /c`, or
 `PowerShell -Command` adds a second platform-specific parser, can select the wrong subsystem or script shim, and
 is not portable. Programs that explicitly discard output use the host null device (`NUL` on Windows,
 `/dev/null` on POSIX); an HTTP response does not turn a later write failure into a successful command.

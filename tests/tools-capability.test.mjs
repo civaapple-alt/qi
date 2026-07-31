@@ -1035,6 +1035,62 @@ test("shell command-line strings fail deterministically instead of becoming inde
   });
 });
 
+test("shell accepts absolute workdir under the Workspace by rewriting it relative", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    await mkdir(join(root, "apps"), { recursive: true });
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("shell", shellTool);
+
+    const result = await registry.execute(
+      "shell",
+      identity(registry, "shell"),
+      {
+        command: process.execPath,
+        args: ["-e", "process.stdout.write('ok')"],
+        workdir: join(root, "apps"),
+      },
+      context(root, artifactStore, "act_shell_absolute_workdir"),
+    );
+    assert.equal(result.output.exitCode, 0);
+    assert.equal(result.output.stdout, "ok");
+  });
+});
+
+test("shell rejects absolute workdir outside the Workspace before spawn", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("shell", shellTool);
+    const outside = await mkdtemp(join(tmpdir(), "qi-shell-outside-"));
+
+    try {
+      await assert.rejects(
+        registry.execute(
+          "shell",
+          identity(registry, "shell"),
+          {
+            command: process.execPath,
+            args: ["-e", "process.stdout.write('should-not-run')"],
+            workdir: outside,
+          },
+          context(root, artifactStore, "act_shell_outside_workdir"),
+        ),
+        (error) => {
+          assert.ok(error instanceof ToolFailure);
+          assert.equal(error.code, "PATH_OUTSIDE_WORKSPACE");
+          assert.match(error.message, /Path must be relative to the Workspace root/);
+          return true;
+        },
+      );
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+});
+
 test("shell missing workdir fails deterministically instead of becoming indeterminate effects", async () => {
   await withWorkspace(async ({ root, artifactStore }) => {
     const broker = new InMemoryCapabilityBroker();

@@ -56,10 +56,15 @@ test("read-only mounts resolve via mount:<id>/ and reject mutation", async () =>
     assert.equal(resolved.mountId, "other");
     assert.equal(resolved.absolute, resolve(other, "remote.txt"));
 
-    await assert.rejects(
-      () => resolveAccessiblePath(workspace, resolve(other, "remote.txt"), mounts),
-      (error) => error instanceof ToolFailure && error.code === "PATH_OUTSIDE_WORKSPACE",
-    );
+    const fromAbsoluteMount = await resolveAccessiblePath(workspace, resolve(other, "remote.txt"), mounts);
+    assert.equal(fromAbsoluteMount.rootKind, "mount");
+    assert.equal(fromAbsoluteMount.mountId, "other");
+    assert.equal(fromAbsoluteMount.absolute, resolve(other, "remote.txt"));
+
+    const fromAbsoluteWorkspace = await resolveAccessiblePath(workspace, resolve(workspace, "local.txt"), mounts);
+    assert.equal(fromAbsoluteWorkspace.rootKind, "workspace");
+    assert.equal(fromAbsoluteWorkspace.absolute, resolve(workspace, "local.txt"));
+
     await assert.rejects(
       () => resolveAccessiblePath(workspace, resolve(root, "nowhere", "file.txt"), mounts),
       (error) => error instanceof ToolFailure && error.code === "PATH_GRANT_REQUIRED",

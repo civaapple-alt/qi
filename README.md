@@ -4,7 +4,8 @@ Qi is a local-first, event-driven, evidence-first Agent Runtime. It keeps model 
 authority, world effects, recovery, and completion evidence inside one observable Session.
 
 The project is currently preparing its first public source and npm release. Package APIs should be treated as
-experimental until they are published and marked stable.
+experimental until they are published and marked stable. Dated 0.7.x changelog sections are source milestones;
+they do not by themselves mean that packages were published or that a stable compatibility baseline exists.
 
 ## Why Qi
 
@@ -61,6 +62,17 @@ qi --help
 Modes only narrow authority. Optional write, verification, network, host execution, background, and delegation
 capabilities must be granted separately. `--safe` disables all optional capabilities.
 
+## Current product surface
+
+The primary productized relationship today is user-triggered **同行** through Ask, Plan, and Agent Runs. Formal
+Plans hand one immutable design to an implementation Run; Work Plans provide in-Run navigation without becoming
+completion evidence. Memory, bounded Run history, Session archive/recovery, image input, ProcessTasks, and
+configurable shell profiles keep that work observable and recoverable.
+
+Goal, Evidence, and Scheduler foundations exist in the Runtime, but **追寻** and **守望** are not yet stable
+end-to-end product entries. They remain product directions until their continuation, attention, notification,
+stop, and recovery experiences have been validated with users.
+
 ## Configuration
 
 Qi reads `%USERPROFILE%\.qi\config.toml` on Windows and `~/.qi/config.toml` elsewhere.
@@ -100,8 +112,8 @@ User Memory is stored in `$QI_HOME/state` and retrieved across projects.
 
 For Kimi Code, `model = "k3"` automatically selects a 1,048,576-token window; `k3-256k`,
 `kimi-for-coding`, and `kimi-for-coding-highspeed` select 262,144 unless `context_window_tokens` overrides it.
-Optional `reasoning_effort` accepts K3's `low`, `high`, `max`, or `none` modes (plus documented aliases);
-the default is `high`.
+K3 supports and defaults to `reasoning_effort = "max"`; legacy K3 `low` / `high` values normalize to `max`.
+Other model profiles expose only the effort values they explicitly declare.
 The Kimi `/login` form exposes the four known models as a dropdown with a final custom-ID input, shows the
 effective effort/context defaults, and persists edits without placing the API key in TOML.
 
@@ -116,6 +128,9 @@ Read-only external directories can be added with `--add-dir PATH` or `/mounts`. 
 
 Provider credentials may come from environment variables or `/login`. Credentials are sealed behind
 execution-side handles and are not persisted in Session events, Artifacts, or TOML.
+Sensitive Workspace paths require a human content grant before their bodies reach the model. Once authorized,
+ordinary Tool reads preserve exact file content—including source examples containing authorization-header
+syntax—rather than rewriting strings that precise edits need to round-trip.
 
 ## Packages
 
@@ -130,9 +145,15 @@ execution-side handles and are not persisted in Session events, Artifacts, or TO
 
 `apps/cli` is the interactive execution composition. `apps/web` is a read-only local history workbench.
 
-Qi 0.6 uses `$QI_HOME/layout.json` generation 2. Runtime databases and machine policy live under
-`$QI_HOME/projects/<workspace-name>-<path-hash>/`; Workspace `.qi` contains only versionable declarations and
-package locks. Existing non-empty 0.5 data roots are not migrated or deleted automatically.
+The 0.7.0 source milestone introduced `$QI_HOME/layout.json` generation 2. Project-level indexes and machine
+policy live under `$QI_HOME/projects/<workspace-name>-<path-hash>/`, while each Session owns a self-contained
+active or archived directory for its event database, Effect Journal, Artifacts, Plans, and Tasks. Home layout
+generation, project layout version, and database schema versions are separate boundaries. Workspace `.qi`
+contains only versionable declarations and package locks.
+
+During pre-stable development, unsupported Session or private-layout generations may be rejected without
+automatic migration. Qi leaves such data unchanged and asks the operator to back it up, reset it, or select a new
+`QI_HOME` / data root before continuing.
 
 Declaration-only packages install with `qi install npm:<name>@<exact-version>`, `qi install
 git:<url>#<commit>`, or `qi install local:<path>`. Use `--scope project` to write the exact lock to Workspace

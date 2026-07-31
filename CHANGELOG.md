@@ -2,12 +2,16 @@
 
 Notable user-visible, compatibility, security, and packaging changes are recorded here. Internal implementation
 steps and investigation history belong in pull requests, not release notes.
+Dated 0.7.x sections are source milestones during active development; they do not by themselves indicate npm
+publication or a stable compatibility baseline. Unsupported pre-stable persistence generations may require a
+backup plus reset or a new data root rather than an automatic migration.
 
 ## [Unreleased]
 
 ### Added
 
-- Step budget via `/settings` and `/max-steps` alias; persists to user config; hot-applies next Run.
+- Settings and `/max-steps` alias for the existing Step budget; the selected value persists to user config and
+  hot-applies to the next Run.
 - Read-only `git` tool operations: `log` (bounded oneline), `rev-parse`, `show` (metadata + stat), `branch`, and
   `remote`, still under read authority so Ask/Plan can inspect history without execute.
 - `qi_session_inspect` `operation=recovery` returns one bounded projection for the newest interrupted
@@ -27,8 +31,9 @@ steps and investigation history belong in pull requests, not release notes.
 - FormPanel dropdowns start collapsed (current value only); ↑↓ move between fields, ←→ cycle options while
   collapsed, Enter expands fixed-choice lists then advances/submits, and Esc collapses an open dropdown before
   closing the panel.
-- `/model` is panel-only (no slash args / `--session`); thinking effort is configured in the same panel.
-  `/status` promoted to primary and removed from settings hub.
+- `/model` is panel-only: invoke it without slash arguments and configure model/thinking effort in the form
+  instead of using the removed argument / `--session` path. `/status` is promoted to primary and removed from
+  the settings hub.
 - `/settings` hub item labels use the English slash/command names (`/mode`, `/permissions`, `/shell`, …);
   Chinese remains only in descriptions.
 - `/settings` no longer links to Session runs history; use `/runs`, `/sessions`, or `/status` instead.
@@ -41,10 +46,13 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Removed
 
-- Standalone `/effort` command; configure thinking effort via `/model` (or login forms).
+- Standalone `/effort` command; open `/model` (or a login form) to configure thinking effort.
 
 ### Fixed
 
+- Absolute paths under the Workspace (and authorized read mounts) are rewritten onto the authorized root for
+  shell/script `workdir` and ordinary file Tools, so model-supplied `D:\\…` / `/…` workdirs no longer fail with
+  `PATH_OUTSIDE_WORKSPACE` before spawn; paths outside those roots still deny.
 - Windows `cmd` script-profile temp `.cmd` files re-encode non-ASCII script text to the process ANSI code page
   before cmd.exe runs them, so Chinese `git commit -m` messages are no longer mojibaked; `host:environment` on
   Windows also steers agents to prefer argv `shell` or `git commit -F` for non-ASCII commit messages.
@@ -66,6 +74,10 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Documentation
 
+- Aligned the public README and design contracts on the 0.7.0 layout boundary, pre-stable persistence policy,
+  exact authorized Tool reads versus sealed Qi-managed credentials, K3 `max` effort, and the not-yet-productized
+  追寻 / 守望 experiences.
+
 ## [0.7.2] - 2026-07-30
 
 ### Added
@@ -79,10 +91,10 @@ steps and investigation history belong in pull requests, not release notes.
 - Added end-to-end image input for Kimi K3 and other image-capable models: rich-TTY clipboard paste, safe image
   URL ingestion, bounded preprocessing, content-addressed original/prepared Artifacts, ordered Session replay,
   and an authorized `read_image` crop/detail Tool.
-- Project layout version 2 stores each Session as a self-contained directory under `sessions/<session-id>/`
-  (event DB, Effect Journal, Artifacts, Plans, Tasks) with recoverable hard archive under `archives/`, plus
-  `/sessions` Active/Archived views, `/reset-workspace`, and Kernel lifecycle events
-  (`session.archive.*` / `session.restore.*`).
+- Project layout version 2 is a pre-stable development clean break that stores each Session as a self-contained
+  directory under `sessions/<session-id>/` (event DB, Effect Journal, Artifacts, Plans, Tasks) with recoverable
+  hard archive under `archives/`, plus `/sessions` Active/Archived views, `/reset-workspace`, and Kernel lifecycle
+  events (`session.archive.*` / `session.restore.*`).
 - Workspace `@path` autocomplete validates mentions before submit; slash commands may preserve a multi-line draft
   on the first editor line (`draftPolicy`), and `/model` / `/effort` reconfigure routing without re-entering secrets.
 
@@ -102,8 +114,9 @@ steps and investigation history belong in pull requests, not release notes.
   provider data URLs. Image context cost uses dimensions rather than base64 length.
 - Agent Runs now receive an explicit Workspace Write permission fact. When Write is disabled, the model is told
   to request `/permissions` instead of using machine-private Artifacts as a substitute for project files.
-- Legacy shared project `state/qi.sqlite` / root-level artifacts layouts are rejected without migration; Web and
-  session analysis resolve Session databases under `sessions/` then `archives/`.
+- Legacy shared project `state/qi.sqlite` / root-level artifacts layouts are left unchanged and rejected without
+  automatic migration. Back up and reset that private data or select a new data root; Web and session analysis
+  resolve supported Session databases under `sessions/` then `archives/`.
 - Rich TUI welcome and line-mode startup headers show the complete complementary `Permissions enabled` /
   `Permissions disabled` partition after `--safe`, config, and CLI overrides.
 - ADR-0001 now gates sensitive Workspace paths with human content grants instead of rewriting source-code
@@ -111,7 +124,7 @@ steps and investigation history belong in pull requests, not release notes.
 - Host-execute guidance prefers one `script` Action for builtins/pipes/multi-statement logic, while allowing
   multiple sequential `shell`/`script` Actions that share a workdir in one Step.
 - Shell profiles are user-global only under `$QI_HOME/config.toml`; project `policy.toml` `[shell]` is no longer
-  merged into launch authority (ADR-0015).
+  merged into launch authority (ADR-0015). Move project profile selections to `/shell` or the user config.
 
 ### Fixed
 
@@ -136,10 +149,11 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Security
 
-- Last-resort literal redaction no longer rewrites `Authorization: Bearer` values in Session events, tool
-  feedback, or model context, so agents can reuse tokens while debugging services they create. Provider tokens,
-  PEM private-key blocks, and URL userinfo remain redacted. Historical `safety.redaction.applied` facts with
-  kind `authorization` stay valid.
+- Authorized ordinary Tool content no longer applies a shape-based rewrite to `Authorization: Bearer` strings in
+  Session events, Tool feedback, or model context, so source and request examples round-trip exactly. Qi-managed
+  provider/OAuth credentials remain sealed and never enter those surfaces; provider tokens, PEM private-key
+  blocks, and URL userinfo remain redacted. Historical `safety.redaction.applied` facts with kind
+  `authorization` stay valid.
 - Sensitive Workspace paths (for example `.env`) now require an explicit human grant before file bodies reach the
   model. Project `sensitive_path_grants` / `[sensitive_paths]` load at CLI startup, rehydrate as Session audit
   facts, and drive a Ctrl+G allow/deny panel on `SENSITIVE_PATH_GRANT_REQUIRED` without collapsing into mount
@@ -252,8 +266,8 @@ steps and investigation history belong in pull requests, not release notes.
 - Added declaration-only plugin contracts and `qi install/update/remove/list` for exact npm, pinned Git, and
   digest-pinned local sources. Installation never runs npm lifecycle scripts and publishes validated content to
   the shared content-addressed package store.
-- Added the generation-2 `$QI_HOME` layout, canonical realpath-hash project IDs, private `state/` databases,
-  project descriptors, Web discovery, and strict private-root safety checks.
+- Introduced `$QI_HOME` layout generation 2 for the 0.7.0 source milestone, with canonical realpath-hash project
+  IDs, private `state/` databases, project descriptors, Web discovery, and strict private-root safety checks.
 - Added `prewarmTrustedExecutables()` to `@civaapple/qi-node/tools`, priming common PATH-resolved executables for the
   detected language stack (Node.js, Maven) at CLI startup so the first `search`/`find`/`shell`/`script`/`verify`
   call does not pay PATH-walk latency.

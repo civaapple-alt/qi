@@ -72,7 +72,9 @@ Important rules:
 - `failed`, `cancelled`, `parked`, `denied`, and `indeterminate` remain distinct;
 - steering applies at a safe Step boundary;
 - committed events are durable truth; UI animation and streaming previews are provisional;
-- compatible schema changes are additive; incompatible storage changes require explicit migration evidence.
+- additive persistence changes are preferred, but the current pre-stable product may introduce an explicit
+  generation clean break. Unsupported generations fail before writable startup and remain unchanged; automatic
+  migration and indefinite historical replay are not yet compatibility promises (ADR-0014).
 
 SQLite stores event streams atomically. The in-memory store is useful for embedding and deterministic tests.
 Neither store invents domain transitions.
@@ -112,10 +114,11 @@ and recovery semantics.
 `@civaapple/qi-ai` defines a portable streaming model protocol. Provider profiles explicitly declare wire API,
 auth schemes, model window, and supported capabilities. Provider-specific details do not enter Session truth.
 
-Credential values remain behind execution-side handles. Sensitive Workspace paths require a human content grant
-before file bodies reach the model; ordinary authorized reads round-trip as raw text for precise edits. Narrow
-last-resort literal redaction (provider tokens, PEM blocks) may still run at provider and durable-event
-boundaries, and must not rewrite source-code forms.
+Qi-managed provider/OAuth credential values remain behind execution-side handles and never enter Session truth,
+Artifacts, or model context. Sensitive Workspace paths require a human content grant before file bodies reach
+the model; ordinary authorized Tool reads round-trip exactly, including source or request examples containing
+authorization-header syntax. Narrow last-resort literal redaction (provider tokens, PEM blocks) may still run at
+provider and durable-event boundaries, and must not rewrite ordinary source-code forms.
 
 The Context Compiler selects source-aware blocks under a working budget. Model window, output reserve, and prompt
 budget are distinct. Settled exchanges may compact into causal summaries plus Artifact references; complete
@@ -164,6 +167,8 @@ approvals survive restart and cannot grant authority merely because a UI control
 它们不是 Session mode，也不直接授予 Action authority。四种激活与延续方式
 `Turn-based / Goal-based / Time-based / Proactive` 的产品含义与边界见
 [产品愿景 §6](product-vision.md#6-自治不是一个开关)。
+当前产品化入口以用户触发的同行为主；Goal 和 Scheduler 是 Runtime 基础，但追寻与守望尚未作为
+稳定的端到端用户入口交付。
 
 `apps/cli` owns provider login, policy resolution, stores, Tool construction, process ownership, and interactive
 control. `@civaapple/qi-tui` owns reusable projections and terminal components only.
@@ -185,7 +190,8 @@ Extensions attach through existing boundaries:
 - **Introspection** exposes versioned, read-only knowledge about packages, invariants, decisions, and gaps.
 
 None of these mechanisms is a privileged execution path. Multi-Agent stays opt-in and must not expand the parent
-Session's authority.
+Session's authority. A Runtime foundation such as Goal or Scheduler does not by itself make the corresponding
+追寻 or 守望 product experience complete.
 
 ## 9. Package boundaries
 
@@ -207,10 +213,17 @@ produces; Node storage persists; Node stream transports committed events.
 
 ### Private and shared data
 
-`@civaapple/qi-node/paths` is the only path resolver. `$QI_HOME/layout.json` identifies layout generation 2
-(Qi 0.6). Machine-private credentials, user resources, the content-addressed package store, and project-private
-state live under `$QI_HOME`. Each project directory is `<basename>-<canonical-realpath-sha256-prefix>` and keeps
-SQLite databases in `state/`, plus Artifacts, Plans, Tasks, activation, cache, and temporary data.
+`@civaapple/qi-node/paths` is the only path resolver. `$QI_HOME/layout.json` identifies home layout generation 2,
+introduced in the 0.7.0 source milestone. Machine-private credentials, user resources, the content-addressed
+package store, and project-private state live under `$QI_HOME`. Each project directory is
+`<basename>-<canonical-realpath-sha256-prefix>`: project-level indexes live in its `state/`, while each active or
+archived Session owns a self-contained directory containing its event database, Effect Journal, Artifacts, Plans,
+and Tasks. Home layout generation, project layout version, and individual database schema versions are separate
+compatibility boundaries.
+
+During pre-stable development, any of those boundaries may advance independently under ADR-0014. Unsupported
+data is rejected before writable startup and left untouched; operators may need to back up, reset, or select a
+new `QI_HOME` / data root rather than receive an automatic migration.
 
 Workspace `.qi` is an allowlisted declaration surface only: package request/lock files, frozen verify profiles,
 Skills, prompts, themes, Agent/workflow declarations, and secret-free MCP declarations. It contains no runtime
@@ -232,7 +245,7 @@ Tests are part of the public design evidence, especially for:
 - distinct failure/settlement outcomes;
 - secret redaction;
 - Effect Journal idempotency;
-- old-history compatibility;
+- supported-generation replay and crash recovery;
 - package export and isolated consumer behavior;
 - bounded TUI projection;
 - read-only Web behavior.

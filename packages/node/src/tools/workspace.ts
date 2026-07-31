@@ -20,10 +20,11 @@ export async function resolveWorkspacePath(
   allowMissing = false,
   allowProtected = false,
 ): Promise<string> {
-  if (!requested || isAbsolute(requested) || mountPathPattern.test(requested)) {
+  if (!requested || mountPathPattern.test(requested)) {
     throw new ToolFailure("PATH_OUTSIDE_WORKSPACE", "Path must be relative to the Workspace root");
   }
-  return resolveUnderRoot(root, requested, allowMissing, allowProtected);
+  const relativePath = await coerceWorkspaceRelativePath(root, requested);
+  return resolveUnderRoot(root, relativePath, allowMissing, allowProtected);
 }
 
 export async function resolveWorkspaceEntry(
@@ -31,15 +32,16 @@ export async function resolveWorkspaceEntry(
   requested: string,
   allowProtected = false,
 ): Promise<string> {
-  if (!requested || isAbsolute(requested) || mountPathPattern.test(requested)) {
+  if (!requested || mountPathPattern.test(requested)) {
     throw new ToolFailure("PATH_OUTSIDE_WORKSPACE", "Path must be relative to the Workspace root");
   }
+  const relativePath = await coerceWorkspaceRelativePath(root, requested);
   const rootReal = await realpath(root);
-  const lexical = resolve(rootReal, requested);
+  const lexical = resolve(rootReal, relativePath);
   assertWithin(rootReal, lexical);
   assertNotProtected(rootReal, lexical, allowProtected);
   const info = await lstat(lexical);
-  if (info.isSymbolicLink()) throw new ToolFailure("SYMLINK_NOT_ALLOWED", `${requested} must not be a symbolic link`);
+  if (info.isSymbolicLink()) throw new ToolFailure("SYMLINK_NOT_ALLOWED", `${relativePath} must not be a symbolic link`);
   const targetReal = await realpath(lexical);
   assertWithin(rootReal, targetReal);
   assertNotProtected(rootReal, targetReal, allowProtected);
@@ -48,7 +50,8 @@ export async function resolveWorkspaceEntry(
 
 /**
  * Resolve a path for read/discovery tools against the primary Workspace and read-only mounts.
- * Mount paths use `mount:<id>/relative…`. Absolute paths outside authorized roots request a human grant.
+ * Mount paths use `mount:<id>/relative…`. Absolute paths under the Workspace or an authorized mount are
+ * rewritten onto that root; absolute paths outside authorized roots request a human grant.
  */
 export async function resolveAccessiblePath(
   root: string,
@@ -79,21 +82,21 @@ export async function resolveAccessiblePath(
 
   if (isAbsolute(requested)) {
     const absolute = resolve(requested);
-    const underWorkspace = await tryContainment(root, absolute);
-    if (underWorkspace) {
-      throw new ToolFailure(
-        "PATH_OUTSIDE_WORKSPACE",
-        "Use a path relative to the Workspace root instead of an absolute Workspace path",
-      );
+    const underWorkspace = await relativeUnderRoot(root, absolute);
+    if (underWorkspace !== undefined) {
+      const rootAbsolute = await realpath(root);
+      const resolved = await resolveUnderRoot(root, underWorkspace, allowMissing, allowProtected);
+      return { absolute: resolved, rootAbsolute, rootKind: "workspace" };
     }
     for (const mount of mounts) {
-      if (await tryContainment(mount.path, absolute)) {
-        throw new ToolFailure(
-          "PATH_OUTSIDE_WORKSPACE",
-          `Use mount:${mount.id}/… instead of an absolute path under that mount`,
-          { mountId: mount.id },
-        );
+      const underMount = await relativeUnderRoot(mount.path, absolute);
+      if (underMount === undefined) continue;
+      if (mount.mode !== "read") {
+        throw new ToolFailure("MOUNT_READ_ONLY", `Mount ${mount.id} is read-only`);
       }
+      const rootAbsolute = await realpath(mount.path);
+      const resolved = await resolveUnderRoot(mount.path, underMount, allowMissing, allowProtected);
+      return { absolute: resolved, rootAbsolute, rootKind: "mount", mountId: mount.id };
     }
     throw new ToolFailure(
       "PATH_GRANT_REQUIRED",
@@ -151,6 +154,35 @@ export function formatAccessiblePath(
   return relativePath || ".";
 }
 
+/**
+ * Accept Workspace-relative paths as-is. Absolute paths under `root` are rewritten to a portable
+ * relative form (forward slashes); absolute paths outside `root` stay rejected so authority cannot widen.
+ */
+async function coerceWorkspaceRelativePath(root: string, requested: string): Promise<string> {
+  if (!isAbsolute(requested)) return requested;
+  const rewritten = await relativeUnderRoot(root, requested);
+  if (rewritten === undefined) {
+    throw new ToolFailure("PATH_OUTSIDE_WORKSPACE", "Path must be relative to the Workspace root");
+  }
+  return rewritten;
+}
+
+/** Return a forward-slash relative path when `absolute` is under `root`; otherwise `undefined`. */
+async function relativeUnderRoot(root: string, absolute: string): Promise<string | undefined> {
+  try {
+    const rootReal = await realpath(root);
+    const target = resolve(absolute);
+    const targetReal = await realpath(target).catch(() => target);
+    const path = relative(rootReal, targetReal);
+    if (path === "" || (!path.startsWith("..") && !isAbsolute(path))) {
+      return path.replaceAll("\\", "/") || ".";
+    }
+  } catch {
+    // Missing/unreadable root → treat as outside.
+  }
+  return undefined;
+}
+
 async function resolveUnderRoot(
   root: string,
   requested: string,
@@ -185,17 +217,6 @@ async function resolveUnderRoot(
       }
     }
     throw mapPathResolutionError(error, requested);
-  }
-}
-
-async function tryContainment(root: string, absolute: string): Promise<boolean> {
-  try {
-    const rootReal = await realpath(root);
-    const targetReal = await realpath(absolute).catch(async () => absolute);
-    const path = relative(rootReal, targetReal);
-    return path === "" || (!path.startsWith("..") && !isAbsolute(path));
-  } catch {
-    return false;
   }
 }
 

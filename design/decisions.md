@@ -112,8 +112,13 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 - Responses and Chat Completions adapters remain thin implementations of one portable model protocol.
 - Provider-specific thinking fields are derived deterministically from the selected model profile and explicit
   operator configuration; unknown effort values fail before network execution.
-- Credentials are sealed and resolved through a broker only at the provider boundary.
-- Tokens, authorization headers, OAuth codes, and PKCE material never enter TOML, Session events, or Artifacts.
+- Qi-managed provider credentials are sealed and resolved through a broker only at the provider boundary.
+- Provider tokens, provider authorization headers, OAuth codes, PKCE material, and other Qi-managed authentication
+  secrets never enter TOML, Session events, Artifacts, or model context.
+- Ordinary Tool content that has passed capability, path, and sensitive-path authorization round-trips exactly,
+  including source, configuration, or request examples containing `Authorization: Bearer`. A matching string
+  shape does not make Workspace content a Qi-managed credential; ADR-0001 controls whether sensitive file bodies
+  may be read at all.
 - `/login` owns interactive authentication and may atomically update non-secret provider routing, model effort,
   and context-window defaults; credentials remain sealed separately. Unauthenticated startup is allowed, but
   Runs fail closed.
@@ -160,15 +165,21 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 - Effective authority is always the intersection of the launch lease and every applicable narrowing policy.
 - Questions explicitly belong either to an active Run or to Session control between Runs.
 
-## ADR-0014: preserve Session compatibility through explicit migrations
+## ADR-0014: version pre-stable persistence boundaries explicitly
 
-- Existing event types, ordering, identity links, and terminal outcomes keep their original meaning.
-- Current SQLite databases are format generation 1; missing format metadata means generation 1.
-- Additive event variants or optional fields with deterministic replay defaults are preferred.
-- An incompatible change requires a new decision, explicit generation, preflight, restart-safe migration or
-  side-by-side conversion, old-history/crash tests, backup instructions, and downgrade policy.
-- Unsupported future generations or failed preflight leave the source unchanged and block writable startup.
-- Migrations never manufacture evidence or semantically rewrite old facts.
+- Qi is still in active development. Before a stable compatibility baseline is declared, source milestones do
+  not promise automatic migration or indefinite replay of Sessions and private layouts from earlier milestones.
+- Additive changes remain preferable when they are simple, but preserving every historical development format is
+  not a release gate.
+- Persisted layers version their own boundaries explicitly: Session events/databases, rebuildable indexes,
+  `$QI_HOME`, and project/Session directory layouts do not share one ambiguous generation number.
+- An incompatible change increments the affected generation or version and preflights it before writable startup.
+  Unsupported data fails closed before mutation.
+- Rejection leaves the source unchanged: Qi does not delete, partially convert, manufacture evidence, or
+  reinterpret old facts. Operator guidance may require backup, reset, or a new `QI_HOME` / data root; it does not
+  imply automatic migration or downgrade support.
+- Before the first stable compatibility commitment, a new ADR must define which generations become a long-term
+  replay baseline and what migration and downgrade policy they receive.
 
 ## ADR-0015: separate project policy from Session mount facts
 
@@ -249,10 +260,11 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 - Runtime actor IDs, resource names, MIME vendor identifiers, introspection tools, and machine-readable evidence
   use the `qi` namespace.
 - The private monorepo package is `qi-monorepo`; application scripts use the `qi:*` prefix.
-- Qi 0.6 uses layout generation 2 and provides no automatic 0.5 data migration. Unsupported non-empty layouts
-  fail without deletion and instruct the user to back up/clear the directory or choose a new `QI_HOME`.
-- Event schema generation remains unchanged. Previously written actor/source strings are historical data and are
-  never rewritten during replay; all new facts use the Qi identity.
+- Layout generation 2 was introduced in the 0.7.0 source milestone as a clean development boundary from 0.5 data.
+  Unsupported non-empty layouts fail without deletion and instruct the user to back up, reset, or choose a new
+  `QI_HOME`.
+- Product or layout version changes do not rewrite actor/source strings inside a supported Session generation;
+  new facts use the Qi identity.
 
 ## ADR-0021: bind a codeact tool and a guided verify setup without widening authority
 
@@ -284,9 +296,12 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
   Workspace creates a new identity unless `--data` explicitly redirects its private root.
 - `$QI_HOME` and project-private roots cannot be filesystem roots, Workspace descendants, symlinks, junction
   traversals, or path-traversal targets.
-- Project databases live in `state/`; credentials live only in `credentials/`; package content is immutable and
-  content-addressed. Cache, staging, and tmp are rebuildable and never truth.
-- Layout generation 2 is a clean 0.6 boundary. Qi neither migrates nor deletes a non-empty older layout.
+- Project-level indexes live in project `state/`; Session-owned event databases, Effect Journals, Artifacts,
+  Plans, and Tasks live under the self-contained Session directories defined by ADR-0030. Credentials live only
+  in `credentials/`; package content is immutable and content-addressed. Cache, staging, and tmp are rebuildable
+  and never truth.
+- Layout generation 2 was introduced in 0.7.0 as a development clean break. Under ADR-0014, Qi neither migrates
+  nor deletes an unsupported non-empty older layout.
 
 ## ADR-0023: allow declaration-only packages without granting authority
 
@@ -300,8 +315,8 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
   `(kind,id)` values in one layer fail instead of relying on directory order.
 - Package registration never grants authority, accepts MCP bindings, expands a parent lease, bypasses Coordinator
   depth, or treats catalog metadata as trust.
-- Qi 0.6 supports declaration-only packages. Executable plugins require a separate ADR for process isolation,
-  restricted Host API, lifecycle, and crash settlement.
+- The 0.7.0 source milestone introduced declaration-only packages. Executable plugins require a separate ADR for
+  process isolation, restricted Host API, lifecycle, and crash settlement.
 
 ## ADR-0024: annotate restored Run history with projection facts, not tool transcripts
 
@@ -443,6 +458,9 @@ event stream and can leak binary content into logs, redaction, and context accou
 - Text and image parts share one context budget. Image cost uses a conservative dimension/tile estimate rather
   than the serialized base64 length. Tool-result images remain associated with their tool call while adapters may
   emit a synthetic user media message when required by a provider wire format.
+- Rejected alternatives are provider-side URL fetching, persisting image bytes or data URLs in Session events,
+  treating model modality support as read authority, and adding video before its protocol and budget boundaries
+  are defined.
 - Compatibility is additive: old `run.triggered` events synthesize one text part from `input`, string prompt APIs
   remain valid, and the SQLite generation does not change. Version one exposes images only; video stays a future
   protocol extension even when a provider advertises video support.
@@ -472,6 +490,9 @@ content-addressed puts conflict inside one Step.
 - Work Plan state remains model-authored navigation, not a completion gate. A surface may warn when completed
   implementation Todos have no completed Workspace mutation or verification in the Run, but it does not rewrite
   the durable Work Plan.
+- Rejected alternatives are counting every Artifact as a Workspace mutation, denying private diagnostic
+  persistence whenever Workspace Write is disabled, and serializing all content-addressed puts through one
+  coarse resource.
 - Compatibility is additive: Session event schemas, effect names, database layout, and existing aggregate
   inspection fields remain valid. Artifact capability resources become digest-scoped, so application leases use
   the corresponding bounded wildcard.
@@ -497,8 +518,9 @@ remain visible after an operator asks to reset a Workspace's conversational stat
   continuity, policy, installed packages, credentials, and caches are project- or user-owned and do not move.
 - `/reset-workspace` archives the complete preflighted active set and creates a new Session. It is recoverable and
   reversible; it is not deletion.
-- Project layout compatibility is intentionally broken. A versioned legacy project layout is rejected with a
-  backup/new-data-root instruction; Qi neither guesses ownership in shared stores nor deletes old data.
+- Project layout version 2 is an intentional development clean break under ADR-0014. A legacy shared-store layout
+  is rejected before writable startup with backup, reset, or new-data-root guidance. Qi neither guesses ownership,
+  migrates or downgrades that layout automatically, nor deletes old data.
 - Rejected alternatives are an `archived` flag in one shared database, best-effort file copying, automatic
   cancellation of unsettled effects, and treating a rebuildable catalog as the lifecycle authority.
 - Required evidence covers isolation, lifecycle denial, manifest validation, move interruption recovery,
@@ -506,8 +528,8 @@ remain visible after an operator asks to reset a Workspace's conversational stat
 
 ## ADR-0031: preserve composer drafts across local slash controls
 
-Pressure: invoking a local control such as model selection currently clears an already-written prompt, while
-`@` completion is wired without a usable discovery executable and has machine-dependent fallback behavior.
+Pressure: invoking a local control such as model selection cleared an already-written prompt, while `@`
+completion lacked a consistently usable discovery path and had machine-dependent fallback behavior.
 
 - A recognized slash command occupies the first logical editor line. Commands declare whether following text is
   preserved, consumed, or rejected. Completing a draft-preserving command at the start of existing text inserts
@@ -520,6 +542,10 @@ Pressure: invoking a local control such as model selection currently clears an a
   still require credential rebinding.
 - Startup surfaces disclose the complete effective capability partition as enabled and disabled; the compact
   status line remains unchanged.
+- Compatibility: these are local interaction and profile-routing changes; Session event and database generations
+  do not change. Existing non-secret configuration remains valid subject to the selected model profile.
+- Rejected alternatives are clearing the entire draft for every local command, submitting unvalidated mention
+  paths, exposing or re-entering sealed credentials for a model-only change, and showing only enabled permissions.
 - Required evidence covers draft/cursor preservation, mention validation and fallback parity, profile-bounded
   model changes without secret access, and capability display after all configuration precedence is applied.
 
@@ -547,6 +573,8 @@ replaying tool transcripts or Runtime telemetry would violate ADR-0024/0026.
   envelope only. Planning conversation remains isolated (ADR-0011).
 - Host environment, mode, skills, AGENTS.md, and memory ContextBlocks continue to regenerate each Run; prior
   system blocks and compacted within-Run tool exchanges are not copied forward.
+- Compatibility is additive and changes only bounded context selection and projection. Existing Session event and
+  database generations remain valid; absent interruption or Work Plan facts simply produce no new block.
 - Rejected alternatives: auto-injecting full `recovery` projections; forging budget-handoff Steps on provider
   failure; restoring Plan-mode chat into Executors; replaying Action/tool transcripts; ranking image retention
   ahead of text inside a turn budget (deferred).
