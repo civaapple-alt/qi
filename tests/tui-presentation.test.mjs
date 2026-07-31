@@ -3528,9 +3528,9 @@ test("Agent update_plan records a stable Work Plan snapshot and renders it in th
           input: {
             explanation: "Track the cross-package change.",
             plan: [
-              { workItemId: "wit_model_protocol", step: "Extend protocol", status: "completed" },
-              { workItemId: "wit_model_runtime", step: "Wire runtime", status: "in_progress" },
-              { workItemId: "wit_model_verify", step: "Verify behavior", status: "pending" },
+              { step: "Extend protocol", status: "completed" },
+              { step: "Wire runtime", status: "in_progress" },
+              { step: "Verify behavior", status: "pending" },
             ],
           },
         },

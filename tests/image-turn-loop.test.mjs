@@ -229,6 +229,14 @@ test("interrupted image Runs restore visual attachments for a follow-up continue
           part.type === "text" && part.text.includes("qi-interrupted-media-run"))),
       true,
     );
+    assert.equal(
+      continueRequest.messages.some((message) =>
+        message.role === "assistant"
+        && message.content.some((part) =>
+          part.type === "text" && part.text.includes("qi-interrupted-run>"))),
+      false,
+      "image-interrupted Runs must use the media wrapper, not the text-only interrupted wrapper",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

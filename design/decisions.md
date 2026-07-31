@@ -144,8 +144,10 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
   completion gate or creates a new review.
 - Complex Agent work may create a separate Work Plan through `update_plan`. Work Plan status is navigation only,
   never completion evidence, and does not schedule Runs.
-- Qi assigns Work Plan and Work item IDs on first creation. Model-supplied item IDs are discarded on create;
-  later updates may use only IDs returned by a successful prior `update_plan` result.
+- Qi assigns Work Plan and Work item IDs on first creation. Omitting `workPlanId` with no `workItemId` values
+  creates a new plan. Omitting `workPlanId` while supplying only `workItemId` values that belong to
+  `currentWorkPlanId` continues that plan. Later updates may use only IDs returned by a successful prior
+  `update_plan` result (or the Runtime Work Plan navigation ContextBlock from ADR-0032).
 - Pre-Formal-Plan item revisions retain their historical item-per-Run behavior: later items require a durable
   `continue | stop | return_to_plan` choice. Terminal Runs are never resumed.
 - At most one top-level Run is non-terminal.
@@ -303,12 +305,15 @@ authentication, credentials, backpressure, upgrades, and orphaned-effect recover
 
 ## ADR-0024: annotate restored Run history with projection facts, not tool transcripts
 
-- Cross-Run conversation history still restores only the final assistant text of completed (or budget-handoff)
-  Runs; tool transcripts remain durable Session evidence and do not masquerade as dialogue.
+- Cross-Run conversation history restores only the final assistant text of completed, budget-handoff, and
+  interrupted (`failed` / `cancelled` / non-budget `parked`) user Runs when a restorable narrative or image
+  exception applies; tool transcripts remain durable Session evidence and do not masquerade as dialogue.
+  See ADR-0032 for the interrupted-run and omission-hint allowlist.
 - Restored assistant messages remain only assistant-authored narrative. A separate Runtime-owned system
   ContextBlock may label each selected restored turn with only a coarse write-settlement class:
   `none | completed | unsuccessful | mixed`. It exposes no durable Run/Action IDs, read counts, write counts,
-  timestamps, paths, terminal reasons, or tool payloads.
+  timestamps, paths, or tool payloads. Coarse terminal status/reason may appear only inside the interrupted-run
+  wrappers defined by ADR-0032.
 - The minimal disclosure lets later Runs distinguish verbal “already fixed” narration from the existence of a
   settled write Action. It is not verification evidence and does not describe what changed. Reserved legacy
   `<qi-run-facts>` tags are removed from restored narrative and committed model responses so model imitation
@@ -357,7 +362,8 @@ improving the requested task.
   necessary for the stated purpose.
 - Prefer coarse predicates or enums over telemetry. Correlate disclosure to the model's already-visible material
   with local ordinals, not durable Session/Run/Step/Action IDs. For restored history, ADR-0024's write-settlement
-  class is the entire automatic disclosure contract.
+  class plus the ADR-0032 allowlist (interrupted wrappers, omission count, Work Plan navigation handles) are the
+  entire automatic disclosure contract.
 - Runtime disclosure never grants capability, proves task completion, enters the Evidence Ledger, or makes model
   narration authoritative. Detailed Runtime facts require an explicit bounded read/introspection Action and its
   ordinary capability decision; metadata already present in model context cannot widen that query.
@@ -516,6 +522,37 @@ Pressure: invoking a local control such as model selection currently clears an a
   status line remains unchanged.
 - Required evidence covers draft/cursor preservation, mention validation and fallback parity, profile-bounded
   model changes without secret access, and capability display after all configuration precedence is applied.
+
+## ADR-0032: bound automatic disclosure for consecutive Session Runs
+
+Pressure: each continue is a new Run. Session truth retains Work Plans, Formal Plans, images, and Action
+settlements, but automatic model context previously restored only completed/budget-handoff narrative (plus an
+image-interrupted exception). Failed or parked continuations and unfinished Work Plans were easy to lose, while
+replaying tool transcripts or Runtime telemetry would violate ADR-0024/0026.
+
+- Automatic cross-Run dialogue still never includes tool transcripts, Action payloads, or Run/Step/Action IDs in
+  model-visible prose.
+- Restored history may include, in addition to completed and budget-handoff turns:
+  - interrupted Runs with images (`<qi-interrupted-media-run>`), preserving Artifact-backed visual continuity;
+  - interrupted Runs without images when a non-empty final assistant narrative exists (`<qi-interrupted-run>`),
+    stating only coarse status/reason plus that narrative.
+- When the history budget drops whole earlier turns, a Runtime ContextBlock may state only
+  `olderTurnsOmitted=<N>` and point to explicit `qi_session_inspect` (`recovery` preferred). It must not list
+  omitted Run IDs in model text; compile metadata may still record `history:omitted:<runId>` for operators.
+- Agent Runs may receive a Runtime Work Plan navigation ContextBlock when `currentWorkPlanId` has unfinished
+  items: allowlisted `workPlanId`, `revision`, and per-item `workItemId` / `step` / `status`, with an explicit
+  navigation-not-evidence disclaimer. Work Plan IDs are model-authored handles required to continue `update_plan`,
+  not Runtime lifecycle telemetry.
+- Formal Plan acceptance still starts an Executor with `historyBudgetTokens: 0` and the accepted Markdown
+  envelope only. Planning conversation remains isolated (ADR-0011).
+- Host environment, mode, skills, AGENTS.md, and memory ContextBlocks continue to regenerate each Run; prior
+  system blocks and compacted within-Run tool exchanges are not copied forward.
+- Rejected alternatives: auto-injecting full `recovery` projections; forging budget-handoff Steps on provider
+  failure; restoring Plan-mode chat into Executors; replaying Action/tool transcripts; ranking image retention
+  ahead of text inside a turn budget (deferred).
+- Required evidence: interrupted narrative restoration without tool roles; media-interrupted preference over
+  double wrappers; omission hint without Run IDs; unfinished Work Plan block shape; `update_plan` continue-current
+  when `workPlanId` is omitted but known `wit_*` values are supplied; Formal Plan executor history stays empty.
 
 ## Changing a decision
 

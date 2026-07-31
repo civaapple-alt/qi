@@ -44,8 +44,11 @@ matching read lease for `qi:self-model:<section>`.
 
 `inspectQiSession(source, query)` lists project Sessions or narrows one Session to Runs, a selected/latest Run,
 problems, recovery, the last Step, or one Step/Action. It is a lifecycle diagnostic probe, not a substitute for
-restored conversation history. Summary and detail projections retain IDs, event sequence bounds, status, error
-codes, and any durable edit freshness rebase while bounding text, results, and lists and reporting every omission.
+restored conversation history (including interrupted-run narrative wrappers and Work Plan navigation ContextBlocks
+from ADR 0032). Prefer restored history for ordinary continue; use `operation=recovery` when the prior terminal
+state, settlement, or `imageAttachments.originalArtifactRef` is unclear. Summary and detail projections retain
+IDs, event sequence bounds, status, error codes, and any durable edit freshness rebase while bounding text,
+results, and lists and reporting every omission.
 
 Diagnostic fields (not Evidence):
 
@@ -59,9 +62,9 @@ Diagnostic fields (not Evidence):
   `readCompleted`; scoped fields separate `workspaceWriteCompleted` / `workspaceWriteFailed`,
   `artifactWriteCompleted` / `artifactWriteFailed`, and `otherWriteCompleted` / `otherWriteFailed`. Use the
   Workspace fields for project-mutation claims. These detailed diagnostic counts are available only through
-  explicit bounded inspection; automatic restored-history context exposes only the coarse write settlement class
-  defined by ADR 0024/0026. For clipboard screenshots, prefer `read_image` with `originalArtifactRef` over
-  searching mounts.
+  explicit bounded inspection; automatic restored-history context stays on the ADR 0024/0026/0032 allowlist
+  (coarse write settlement, interrupted wrappers, omission count, Work Plan navigation) and never includes tool
+  transcripts. For clipboard screenshots, prefer `read_image` with `originalArtifactRef` over searching mounts.
 - Session header `currentWorkPlanId` and compact `workPlan` snapshot when present.
 - Step `modelReasoning` beside `modelText`.
 - Action detail summaries for `update_plan` (`workPlanItems`), process tools (`process`), and

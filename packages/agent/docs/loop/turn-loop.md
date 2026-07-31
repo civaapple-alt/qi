@@ -93,17 +93,25 @@ settled writes without teaching the model to echo or fabricate internal markup. 
 `<qi-run-facts … />` tags are removed from restored narrative and committed model responses. A budget-parked Run is
 restored only when a Step explicitly completed with `finishReason: handoff`; the injected wrapper states that the
 prior Run was paused, not completed. If the model produced no usable handoff, the Loop derives a deterministic
-summary from durable Step/Action/Plan facts. Failed, cancelled, or otherwise parked Runs that carried image
-attachments are an exception: their user media (and a short interruption wrapper) are restored so a follow-up
-such as “继续” still has visual continuity instead of hunting mounts for the same screenshot. Tool transcripts,
-other failed partial responses, and active Runs otherwise remain durable evidence but do not masquerade as
-conversation. The newest complete turns are retained under `historyBudgetTokens`; when the budget is exhausted,
-older turns are omitted as whole pairs so role ordering and causal meaning remain intact. Every omitted Run is exposed in the next
-`context.compiled.omittedBlockIds` as `history:omitted:<runId>` so control surfaces can show when compaction
-actually occurred instead of inferring it from token use.
+summary from durable Step/Action/Plan facts. Failed, cancelled, or otherwise parked Runs restore their final
+assistant narrative inside `<qi-interrupted-run>` when one exists. Interrupted Runs that carried image
+attachments prefer `<qi-interrupted-media-run>` so a follow-up such as “继续” keeps visual continuity instead of
+hunting mounts for the same screenshot. Tool transcripts and active Runs remain durable evidence but do not
+masquerade as conversation. The newest complete turns are retained under `historyBudgetTokens`; when the budget
+is exhausted, older turns are omitted as whole pairs so role ordering and causal meaning remain intact. Every
+omitted Run is exposed in the next `context.compiled.omittedBlockIds` as `history:omitted:<runId>` for operators,
+and the model receives a separate Runtime block with only `olderTurnsOmitted=<N>` (no Run IDs). Agent Runs with
+an unfinished Session Work Plan also receive an optional navigation ContextBlock listing `workPlanId`,
+`revision`, and item `workItemId` / `step` / `status` — navigation handles, not completion evidence.
+
+Formal Plan acceptance still starts the Executor with `historyBudgetTokens: 0` and the accepted Markdown
+envelope only; planning conversation is never restored into that Run
+([ADR 0011](../../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)).
 
 This is an instance of the Runtime-to-model least-information boundary in
-[ADR 0026](../../../design/decisions.md#adr-0026-treat-runtime-to-model-disclosure-as-a-least-information-boundary).
+[ADR 0026](../../../design/decisions.md#adr-0026-treat-runtime-to-model-disclosure-as-a-least-information-boundary)
+and the consecutive-Run allowlist in
+[ADR 0032](../../../design/decisions.md#adr-0032-bound-automatic-disclosure-for-consecutive-session-runs).
 Complete lifecycle facts remain in the Session event stream and are available to explicitly authorized, bounded
 introspection rather than being injected into every model request.
 

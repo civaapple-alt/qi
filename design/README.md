@@ -72,8 +72,9 @@ then `packages/node/README.md` (`./media`) and the provider adapter tests.
 3. [decisions: human control](decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)
 4. [decisions: bounded interaction timeline](decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention)
 5. [ADR-0031: drafts, `@` mentions, model reconfigure, permission display](decisions.md#adr-0031-preserve-composer-drafts-across-local-slash-controls)
-6. `packages/tui/README.md`
-7. `apps/cli/README.md`
+6. [ADR-0032: consecutive Session Run disclosure](decisions.md#adr-0032-bound-automatic-disclosure-for-consecutive-session-runs)
+7. `packages/tui/README.md`
+8. `apps/cli/README.md`
 
 ### Extensions
 

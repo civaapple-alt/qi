@@ -16,6 +16,12 @@ steps and investigation history belong in pull requests, not release notes.
 
 ### Changed
 
+- Consecutive Session Runs restore interrupted (`failed` / `cancelled` / non-budget `parked`) final assistant
+  narrative in `<qi-interrupted-run>` (media still prefers `<qi-interrupted-media-run>`), surface
+  `olderTurnsOmitted=<N>` when history budget drops earlier turns, and inject an unfinished Work Plan
+  navigation ContextBlock for Agent Runs. `update_plan` omitting `workPlanId` while supplying known
+  `workItemId` values continues `currentWorkPlanId`. Formal Plan executors remain `historyBudgetTokens: 0`.
+  See ADR-0032.
 - `qi_session_inspect` guidance now treats restored conversation history as the default continue path and
   reserves inspection for lifecycle diagnostics (`recovery` preferred over chained runs/steps/actions).
 - FormPanel dropdowns start collapsed (current value only); ↑↓ move between fields, ←→ cycle options while

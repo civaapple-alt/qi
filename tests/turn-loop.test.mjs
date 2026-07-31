@@ -18,7 +18,14 @@ import {
   shellTool,
   writeTool,
 } from "@civaapple/qi-node/tools";
-import { TurnLoop, formatRunHistoryFacts, isBatchWriteConflictResource } from "@civaapple/qi-agent/loop";
+import {
+  EventWriter,
+  HumanControlService,
+  TurnLoop,
+  formatRunHistoryFacts,
+  isBatchWriteConflictResource,
+} from "@civaapple/qi-agent/loop";
+import { createId } from "@civaapple/qi-protocol";
 import { effectIdempotencyKey } from "@civaapple/qi-node/workspace";
 
 function delayedReadTool(activity) {
@@ -251,7 +258,14 @@ test("TurnLoop restores bounded completed conversation history across Runs", asy
         ];
       },
       (request) => {
-        assert.deepEqual(request.messages.map((message) => message.role), ["system", "user"]);
+        assert.deepEqual(request.messages.map((message) => message.role), ["system", "system", "user"]);
+        const omission = request.messages
+          .filter((message) => message.role === "system")
+          .flatMap((message) => message.content)
+          .find((part) => part.type === "text" && part.text.includes("olderTurnsOmitted="))
+          ?.text;
+        assert.match(omission, /olderTurnsOmitted=2/);
+        assert.doesNotMatch(omission, /run_|runId=/);
         return [
           { type: "text.delta", delta: "History was intentionally omitted." },
           { type: "completed", finishReason: "stop" },
@@ -278,6 +292,10 @@ test("TurnLoop restores bounded completed conversation history across Runs", asy
       historyBudgetTokens: 0,
     }));
     const omittedRun = omitted.view.runs[omitted.runId];
+    assert.equal(
+      omittedRun.steps[omittedRun.stepOrder[0]].context.includedBlockIds.includes("history:omission"),
+      true,
+    );
     assert.deepEqual(
       omittedRun.steps[omittedRun.stepOrder[0]].context.omittedBlockIds
         .filter((id) => id.startsWith("history:omitted:")),
@@ -1432,4 +1450,280 @@ test("TurnLoop applies steering at the next safe Step boundary", async () => {
     assert.ok(types.indexOf("step.completed") < types.indexOf("steering.received"));
     assert.ok(types.indexOf("steering.received") < types.lastIndexOf("step.started"));
   });
+});
+
+test("TurnLoop restores interrupted Run narrative without tool roles", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const sessionId = "ses_interrupted_narrative";
+    const priorRunId = "run_failed_prior01";
+    const stepId = "stp_failed_prior01";
+    const writer = new EventWriter(store, sessionId);
+    const actor = { kind: "runtime", id: "test" };
+    writer.append("session.created", { title: "Interrupted narrative", mode: "agent" }, actor);
+    writer.append("run.triggered", {
+      runId: priorRunId,
+      trigger: "user",
+      input: "Do the multi-step work",
+      mode: "agent",
+    }, { kind: "user", id: "tester" });
+    writer.append("run.started", { runId: priorRunId }, actor);
+    writer.append("step.started", { runId: priorRunId, stepId }, actor);
+    writer.append("model.completed", {
+      runId: priorRunId,
+      stepId,
+      requestId: "req_failed_prior",
+      provider: "test",
+      model: "deterministic",
+      finishReason: "stop",
+      text: "Finished step one; step two still open.",
+      actionCalls: [],
+    }, actor);
+    writer.append("step.completed", { runId: priorRunId, stepId, finishReason: "response" }, actor);
+    writer.append("run.failed", { runId: priorRunId, code: "PROVIDER_OVERLOAD" }, actor);
+
+    const model = new ScriptedModelPort([
+      (request) => {
+        const history = request.messages
+          .filter((message) => message.role === "assistant")
+          .flatMap((message) => message.content)
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("\n");
+        assert.match(history, /<qi-interrupted-run>/);
+        assert.match(history, /ended as failed \(PROVIDER_OVERLOAD\)/);
+        assert.match(history, /Finished step one; step two still open/);
+        assert.equal(request.messages.some((message) => message.role === "tool"), false);
+        return [
+          { type: "text.delta", delta: "Continuing after interrupt." },
+          { type: "completed", finishReason: "stop" },
+        ];
+      },
+    ]);
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: model,
+      toolRegistry: new ToolRegistry(new InMemoryCapabilityBroker()),
+    });
+    const continued = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      input: "Continue",
+    }));
+    assert.equal(continued.status, "completed");
+    assert.equal(continued.text, "Continuing after interrupt.");
+  });
+});
+
+test("TurnLoop injects unfinished Work Plan navigation and continues current plan without workPlanId", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const sessionId = "ses_work_plan_nav";
+    const control = new HumanControlService({ eventStore: store });
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_work_plan_nav",
+      subject: "agent_main",
+      tools: ["update_plan"],
+      effects: ["read"],
+      resources: ["work-plan:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("update_plan", defineTool({
+      description: "test work plan",
+      input: Type.Object({
+        workPlanId: Type.Optional(Type.String()),
+        plan: Type.Array(Type.Object({
+          workItemId: Type.Optional(Type.String()),
+          step: Type.String(),
+          status: Type.Union([
+            Type.Literal("pending"),
+            Type.Literal("in_progress"),
+            Type.Literal("completed"),
+          ]),
+        }, { additionalProperties: false }), { minItems: 1 }),
+      }, { additionalProperties: false }),
+      output: Type.Object({
+        workPlanId: Type.String(),
+        revision: Type.Integer(),
+        plan: Type.Array(Type.Object({
+          workItemId: Type.String(),
+          step: Type.String(),
+          status: Type.String(),
+        }, { additionalProperties: false })),
+      }, { additionalProperties: false }),
+      effect: () => "read",
+      resources: (input) => [`work-plan:${input.workPlanId ?? "new"}`],
+      execute: async (input, context) => {
+        const view = control.recordWorkPlanUpdate(
+          context.sessionId,
+          {
+            runId: context.runId,
+            stepId: context.stepId,
+            actionId: context.actionId,
+          },
+          {
+            ...(input.workPlanId === undefined ? {} : { workPlanId: input.workPlanId }),
+            plan: input.plan.map((item) => ({
+              ...(item.workItemId === undefined ? {} : { workItemId: item.workItemId }),
+              step: item.step,
+              status: item.status,
+            })),
+          },
+        );
+        const workPlanId = input.workPlanId ?? view.currentWorkPlanId;
+        const workPlan = workPlanId ? view.workPlans[workPlanId] : undefined;
+        const revision = workPlan?.latestRevision;
+        const snapshot = revision === undefined ? undefined : workPlan?.revisions[revision];
+        if (!workPlanId || !revision || !snapshot) throw new Error("missing work plan");
+        return { workPlanId, revision, plan: snapshot.items };
+      },
+    }));
+
+    let createdItems;
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call_create_plan",
+          name: "update_plan",
+          input: {
+            plan: [
+              { step: "Extend protocol", status: "completed" },
+              { step: "Wire runtime", status: "in_progress" },
+              { step: "Verify behavior", status: "pending" },
+            ],
+          },
+        },
+        { type: "completed", finishReason: "actions" },
+      ],
+      [{ type: "text.delta", delta: "Plan recorded." }, { type: "completed", finishReason: "stop" }],
+      (request) => {
+        const nav = request.messages
+          .filter((message) => message.role === "system")
+          .flatMap((message) => message.content)
+          .find((part) => part.type === "text" && part.text.includes("Work Plan navigation"))
+          ?.text;
+        assert.ok(nav);
+        assert.match(nav, /workPlanId=wpl_/);
+        assert.match(nav, /Wire runtime/);
+        assert.match(nav, /navigation only, not completion evidence/i);
+        createdItems = store.read(sessionId).events
+          .find((event) => event.type === "work.plan.updated")
+          ?.data.items;
+        assert.ok(createdItems);
+        return [
+          {
+            type: "action.requested",
+            callId: "call_continue_plan",
+            name: "update_plan",
+            input: {
+              plan: createdItems.map((item) => ({
+                workItemId: item.workItemId,
+                step: item.step,
+                status: item.status === "in_progress" ? "completed" : item.status,
+              })),
+            },
+          },
+          { type: "completed", finishReason: "actions" },
+        ];
+      },
+      [{ type: "text.delta", delta: "Continued the same Work Plan." }, { type: "completed", finishReason: "stop" }],
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+    const first = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      input: "Start complex work",
+      maxSteps: 4,
+    }));
+    assert.equal(first.status, "completed");
+    const workPlanId = first.view.currentWorkPlanId;
+    assert.ok(workPlanId);
+    assert.equal(first.view.workPlans[workPlanId].latestRevision, 1);
+
+    const second = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      input: "Continue the Work Plan",
+      maxSteps: 4,
+    }));
+    assert.equal(second.status, "completed");
+    assert.equal(second.view.currentWorkPlanId, workPlanId);
+    assert.equal(second.view.workPlans[workPlanId].latestRevision, 2);
+    assert.equal(
+      second.view.workPlans[workPlanId].revisions[2].items.filter((item) => item.status === "completed").length,
+      2,
+    );
+    const secondStep = second.view.runs[second.runId].steps[second.view.runs[second.runId].stepOrder[0]];
+    assert.equal(secondStep.context.includedBlockIds.includes("work-plan:current"), true);
+  });
+});
+
+test("HumanControlService continues current Work Plan when workPlanId is omitted with known workItemIds", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = createId("ses");
+  const control = new HumanControlService({ eventStore: store });
+  control.ensureSession(sessionId, "Work plan continue", "agent");
+  const writer = new EventWriter(store, sessionId);
+  const actor = { kind: "runtime", id: "test" };
+  const runId = createId("run");
+  const stepId = createId("stp");
+  const actionId = createId("act");
+  writer.append("run.triggered", {
+    runId,
+    trigger: "user",
+    input: "work",
+    mode: "agent",
+  }, { kind: "user", id: "tester" });
+  writer.append("run.started", { runId }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("model.completed", {
+    runId,
+    stepId,
+    requestId: "req_wp",
+    provider: "test",
+    model: "deterministic",
+    finishReason: "actions",
+    text: "",
+    actionCalls: [{ callId: "call_wp", name: "update_plan", input: { plan: [] } }],
+  }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId,
+    toolName: "update_plan",
+    input: { plan: [] },
+    resources: ["work-plan:new"],
+    effect: "read",
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+  writer.append("authority.requested", { runId, stepId, actionId }, actor);
+  writer.append("authority.granted", { runId, stepId, actionId, leaseId: "lea_wp_test" }, actor);
+  writer.append("action.started", { runId, stepId, actionId }, actor);
+
+  const created = control.recordWorkPlanUpdate(sessionId, { runId, stepId, actionId }, {
+    plan: [
+      { step: "One", status: "completed" },
+      { step: "Two", status: "in_progress" },
+    ],
+  });
+  const workPlanId = created.currentWorkPlanId;
+  const items = created.workPlans[workPlanId].revisions[1].items;
+  assert.ok(workPlanId);
+
+  const continued = control.recordWorkPlanUpdate(sessionId, { runId, stepId, actionId }, {
+    plan: items.map((item) => ({
+      workItemId: item.workItemId,
+      step: item.step,
+      status: "completed",
+    })),
+  });
+  assert.equal(continued.currentWorkPlanId, workPlanId);
+  assert.equal(continued.workPlans[workPlanId].latestRevision, 2);
+
+  assert.throws(
+    () => control.recordWorkPlanUpdate(sessionId, { runId, stepId, actionId }, {
+      plan: [{ workItemId: "wit_invented_xx", step: "Nope", status: "pending" }],
+    }),
+    /does not exist/,
+  );
 });

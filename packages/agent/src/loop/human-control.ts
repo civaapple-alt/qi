@@ -212,12 +212,35 @@ export class HumanControlService {
   ): SessionView {
     const writer = this.#writer(sessionId);
     const view = requireView(writer.view);
-    const prior = input.workPlanId === undefined ? undefined : view.workPlans[input.workPlanId];
-    if (input.workPlanId && !prior) throw new Error(`Work Plan ${input.workPlanId} does not exist`);
-    if (input.workPlanId === undefined && input.plan.some((item) => item.workItemId !== undefined)) {
-      throw new Error("A new Work Plan cannot supply workItemId; Qi assigns stable IDs on creation");
+    const suppliedItemIds = input.plan
+      .map((item) => item.workItemId)
+      .filter((id): id is WorkItemId => id !== undefined);
+    let workPlanId = input.workPlanId;
+    let prior = workPlanId === undefined ? undefined : view.workPlans[workPlanId];
+    if (workPlanId !== undefined && !prior) {
+      throw new Error(`Work Plan ${workPlanId} does not exist`);
     }
-    const workPlanId = input.workPlanId ?? (createId("wpl") as WorkPlanId);
+    if (workPlanId === undefined) {
+      if (suppliedItemIds.length > 0) {
+        const currentId = view.currentWorkPlanId;
+        const current = currentId === undefined ? undefined : view.workPlans[currentId];
+        if (!currentId || !current) {
+          throw new Error("A new Work Plan cannot supply workItemId; Qi assigns stable IDs on creation");
+        }
+        const currentIds = new Set(
+          current.revisions[current.latestRevision]?.items.map((item) => item.workItemId) ?? [],
+        );
+        for (const workItemId of suppliedItemIds) {
+          if (!currentIds.has(workItemId)) {
+            throw new Error(`Work item ${workItemId} does not exist in ${currentId}`);
+          }
+        }
+        workPlanId = currentId;
+        prior = current;
+      } else {
+        workPlanId = createId("wpl") as WorkPlanId;
+      }
+    }
     const priorIds = new Set(
       prior?.revisions[prior.latestRevision]?.items.map((item) => item.workItemId) ?? [],
     );

@@ -119,7 +119,8 @@ Session mode is durable (`ask` / `plan` / `agent`). Plan mode records managed Fo
 `plan_document` revisions; a Formal Plan is not a Todo. Review offers `开始实现` / `修改计划` / `拒绝计划`.
 Accept settles review, switches to Agent, and starts one whole-plan Run
 ([ADR 0011](../../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)). The
-Executor receives the accepted document plus ID/revision/SHA but none of the planning conversation.
+Executor receives the accepted document plus ID/revision/SHA with `historyBudgetTokens: 0` — none of the
+planning conversation is restored into that Run.
 Formal Plan executor background may note the host platform, but must not collapse the argv-only `shell` tool
 into a claim that probed `script` profiles (`pwsh` / `cmd` / `bash`) are unavailable; the Executor still
 receives that Run's `host:environment` probe facts and advertised tool schemas as authority.

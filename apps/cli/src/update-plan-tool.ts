@@ -38,8 +38,9 @@ export function createUpdatePlanTool(humanControl: HumanControlService) {
       "Create or update the implementation Work Plan/Todo for a complex Agent task. Use it for cross-package, " +
       "three-or-more-step, phased migration, or multi-round verification work; skip it for simple tasks. " +
       "On the first call omit workPlanId and every workItemId; Qi assigns and returns stable IDs. On later calls " +
-      "use only IDs from the last successful output. Keep at most one item in_progress. This is navigation, not " +
-      "completion evidence.",
+      "use only IDs from the last successful output or the Runtime Work Plan navigation context. Omitting " +
+      "workPlanId while supplying known workItemId values continues the Session's current Work Plan. Keep at " +
+      "most one item in_progress. This is navigation, not completion evidence.",
     input: WorkPlanInputSchema,
     output: Type.Object({
       workPlanId: Type.String(),
@@ -64,7 +65,6 @@ export function createUpdatePlanTool(humanControl: HumanControlService) {
         throw new ToolFailure("WORK_PLAN_IN_PROGRESS", "At most one Work Plan item may be in_progress");
       }
       try {
-        const creating = input.workPlanId === undefined;
         const view = humanControl.recordWorkPlanUpdate(
           context.sessionId as SessionId,
           {
@@ -76,9 +76,7 @@ export function createUpdatePlanTool(humanControl: HumanControlService) {
             ...(input.workPlanId === undefined ? {} : { workPlanId: input.workPlanId as WorkPlanId }),
             ...(input.explanation === undefined ? {} : { explanation: input.explanation }),
             plan: input.plan.map((item) => ({
-              ...(!creating && item.workItemId !== undefined
-                ? { workItemId: item.workItemId as WorkItemId }
-                : {}),
+              ...(item.workItemId !== undefined ? { workItemId: item.workItemId as WorkItemId } : {}),
               step: item.step,
               status: item.status,
             })),
@@ -99,8 +97,10 @@ export function createUpdatePlanTool(humanControl: HumanControlService) {
         const detail = error instanceof Error ? error.message : "Work Plan update was rejected";
         throw new ToolFailure(
           "WORK_PLAN_REJECTED",
-          `${detail}. To create the first Work Plan, omit workPlanId and every workItemId. ` +
-          "To update one, use only IDs from the last successful update_plan output.",
+          `${detail}. To create a Work Plan, omit workPlanId and every workItemId. ` +
+          "To continue the current Work Plan, omit workPlanId and supply only workItemId values from the " +
+          "last successful snapshot (or Runtime Work Plan context). To update a named plan, pass its " +
+          "workPlanId with those same IDs.",
         );
       }
     },

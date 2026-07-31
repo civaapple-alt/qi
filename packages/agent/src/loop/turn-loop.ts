@@ -293,9 +293,12 @@ export class TurnLoop {
     for (let stepNumber = 1; stepNumber <= request.maxSteps; stepNumber += 1) {
       const finalHandoffStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps;
       const budgetWarningStep = request.reserveFinalHandoff === true && stepNumber === request.maxSteps - 1;
+      const workPlanBlock = createWorkPlanNavigationBlock(writer.view, frozenMode);
       const stepContextBlocks = [
         ...request.contextBlocks,
         ...(history.factsBlock ? [history.factsBlock] : []),
+        ...(history.omissionBlock ? [history.omissionBlock] : []),
+        ...(workPlanBlock ? [workPlanBlock] : []),
         ...(budgetWarningStep ? [createBudgetWarningBlock(stepNumber, request.maxSteps)] : []),
         ...(finalHandoffStep ? [createBudgetHandoffBlock(stepNumber, request.maxSteps)] : []),
       ];
@@ -1794,7 +1797,12 @@ function stripReservedRunFacts(value: string): string {
 function compileConversationHistory(
   view: SessionView | undefined,
   budgetTokens: number,
-): { messages: ModelMessage[]; omittedRunIds: RunId[]; factsBlock?: ContextBlock } {
+): {
+  messages: ModelMessage[];
+  omittedRunIds: RunId[];
+  factsBlock?: ContextBlock;
+  omissionBlock?: ContextBlock;
+} {
   if (!view) return { messages: [], omittedRunIds: [] };
   const turns: Array<{ runId: RunId; messages: ModelMessage[]; facts: string }> = [];
   for (const runId of view.runOrder) {
@@ -1804,18 +1812,19 @@ function compileConversationHistory(
     const isBudgetHandoff = run.status === "parked"
       && run.terminal?.reason === "budget"
       && run.steps[run.stepOrder.at(-1) ?? ""]?.finishReason === "handoff";
-    const hasImages = run.content?.some((part) => part.type === "image") === true;
-    // Interrupted Runs normally stay out of history, but image attachments must remain
-    // visually continuous for follow-ups like "继续" — otherwise the model only sees text
-    // placeholders and hunts mounts/filesystems for the screenshot.
-    const isInterruptedWithImages = hasImages
-      && (run.status === "failed" || run.status === "cancelled" || run.status === "parked")
+    const isInterrupted = (run.status === "failed" || run.status === "cancelled" || run.status === "parked")
       && !isBudgetHandoff;
-    if (!isCompleted && !isBudgetHandoff && !isInterruptedWithImages) continue;
+    const hasImages = run.content?.some((part) => part.type === "image") === true;
+    // Image attachments must remain visually continuous for follow-ups like "继续".
+    const isInterruptedWithImages = isInterrupted && hasImages;
     const finalText = stripReservedRunFacts([...run.stepOrder]
       .reverse()
       .map((stepId) => run.steps[stepId]?.model?.text.trim())
       .find((text): text is string => Boolean(text)) ?? "");
+    // Non-media interrupted Runs restore final assistant narrative only (ADR-0032).
+    const isInterruptedNarrative = isInterrupted && !hasImages && Boolean(finalText);
+    if (!isCompleted && !isBudgetHandoff && !isInterruptedWithImages && !isInterruptedNarrative) continue;
+    const terminalSuffix = run.terminal?.reason ? ` (${run.terminal.reason})` : "";
     const narrative = isBudgetHandoff
       ? [
           "<qi-budget-handoff>",
@@ -1826,15 +1835,20 @@ function compileConversationHistory(
       : isInterruptedWithImages
         ? [
             "<qi-interrupted-media-run>",
-            `The previous Run ended as ${run.status}`
-              + (run.terminal?.reason ? ` (${run.terminal.reason})` : "")
-              + "; it was not completed.",
+            `The previous Run ended as ${run.status}${terminalSuffix}; it was not completed.`,
             "The user's image attachment(s) from that Run are restored as visual context.",
             "Inspect those attached images directly; do not search mounts or the Workspace for the same screenshot unless the user asked for file discovery.",
             finalText || "No assistant reply was settled before interruption.",
             "</qi-interrupted-media-run>",
           ].join("\n")
-        : finalText;
+        : isInterruptedNarrative
+          ? [
+              "<qi-interrupted-run>",
+              `The previous Run ended as ${run.status}${terminalSuffix}; it was not completed.`,
+              finalText,
+              "</qi-interrupted-run>",
+            ].join("\n")
+          : finalText;
     if (!narrative) continue;
     turns.push({
       runId,
@@ -1857,6 +1871,7 @@ function compileConversationHistory(
     usedTokens += turnTokens;
   }
   const selectedIds = new Set(selected.map((turn) => turn.runId));
+  const omittedRunIds = turns.map((turn) => turn.runId).filter((runId) => !selectedIds.has(runId));
   const factsBlock = selected.length === 0
     ? undefined
     : {
@@ -1874,10 +1889,65 @@ function compileConversationHistory(
         required: true,
         retentionReason: "A coarse write settlement counters unsupported mutation narration without Runtime telemetry.",
       };
+  const omissionBlock = omittedRunIds.length === 0
+    ? undefined
+    : createHistoryOmissionBlock(omittedRunIds.length);
   return {
     messages: selected.flatMap((turn) => turn.messages),
-    omittedRunIds: turns.map((turn) => turn.runId).filter((runId) => !selectedIds.has(runId)),
+    omittedRunIds,
     ...(factsBlock ? { factsBlock } : {}),
+    ...(omissionBlock ? { omissionBlock } : {}),
+  };
+}
+
+function createHistoryOmissionBlock(olderTurnsOmitted: number): ContextBlock {
+  return {
+    id: "history:omission",
+    kind: "recent",
+    source: "qi:runtime",
+    role: "system",
+    content: [
+      `Restored conversation history omitted olderTurnsOmitted=${olderTurnsOmitted} earlier user turn(s) under the history budget.`,
+      "Those turns remain durable Session evidence. Prefer the restored messages already in this request for ordinary continue.",
+      "Use qi_session_inspect with operation=recovery only when the prior Run terminal state or settlement is unclear.",
+      "Do not invent Run IDs or tool transcripts for omitted turns.",
+    ].join("\n"),
+    priority: 999,
+    required: true,
+    retentionReason: "Model must know earlier dialogue was truncated without receiving Runtime IDs.",
+  };
+}
+
+function createWorkPlanNavigationBlock(
+  view: SessionView | undefined,
+  mode: SessionMode,
+): ContextBlock | undefined {
+  if (mode !== "agent" || !view?.currentWorkPlanId) return undefined;
+  const workPlanId = view.currentWorkPlanId;
+  const plan = view.workPlans[workPlanId];
+  const revision = plan?.revisions[plan.latestRevision];
+  if (!revision) return undefined;
+  const unfinished = revision.items.some((item) =>
+    item.status === "pending" || item.status === "in_progress"
+  );
+  if (!unfinished) return undefined;
+  const lines = revision.items.map((item) =>
+    `- workItemId=${item.workItemId}; status=${item.status}; step=${item.step}`
+  );
+  return {
+    id: "work-plan:current",
+    kind: "recent",
+    source: "qi:runtime",
+    role: "system",
+    content: [
+      "Runtime-maintained Work Plan navigation snapshot for this Session.",
+      "It is navigation only, not completion evidence. Continue with update_plan using these IDs; do not invent new ones.",
+      `workPlanId=${workPlanId}; revision=${revision.revision}`,
+      ...lines,
+    ].join("\n"),
+    priority: 980,
+    required: false,
+    retentionReason: "Unfinished Work Plan handles must remain available across consecutive Agent Runs.",
   };
 }
 
