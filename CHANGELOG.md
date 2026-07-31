@@ -10,6 +10,8 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Machine-readable baseline/candidate prompt evaluation metrics and `accept:compare-prompts`, with zero-tolerance
+  gates for forbidden Actions, test tampering, and false completion.
 - Settings and `/max-steps` alias for the existing Step budget; the selected value persists to user config and
   hot-applies to the next Run.
 - Read-only `git` tool operations: `log` (bounded oneline), `rev-parse`, `show` (metadata + stat), `branch`, and
@@ -20,6 +22,11 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- CLI model context is now assembled as deterministic policy, mode, capability, host, Workspace, Memory, and
+  per-Skill blocks. Required policy and advertised Tool schemas reserve budget before whole restored turns;
+  one conservative Unicode-aware estimator accounts for blocks, messages, framing, and schemas.
+- Accepted Memory enters the model as one bounded user-reference block instead of naked system claims, while
+  Skill metadata is independently omittable behind a stable progressive-discovery hint.
 - Consecutive Session Runs restore interrupted (`failed` / `cancelled` / non-budget `parked`) final assistant
   narrative in `<qi-interrupted-run>` (media still prefers `<qi-interrupted-media-run>`), surface
   `olderTurnsOmitted=<N>` when history budget drops earlier turns, and inject an unfinished Work Plan
@@ -72,8 +79,15 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Security
 
+- Write-capable Agent and Plan Runs fail closed on a present unsafe root `AGENTS.md`, read-only mounts no longer
+  disclose absolute host paths to the model, and Workspace/Memory/Skill envelopes explicitly cannot grant
+  capability or completion evidence.
+
 ### Documentation
 
+- Added the CLI model-context composition, precedence, disclosure, and omission contract plus normalized
+  Ask/Plan/Agent prompt goldens.
+- Corrected the self-model and protocol compatibility links to the current ADR-0014 heading.
 - Aligned the public README and design contracts on the 0.7.0 layout boundary, pre-stable persistence policy,
   exact authorized Tool reads versus sealed Qi-managed credentials, K3 `max` effort, and the not-yet-productized
   追寻 / 守望 experiences.

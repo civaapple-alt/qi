@@ -7,6 +7,11 @@ Context compilation is a deterministic allocation problem, not arbitrary message
 Every `ContextBlock` has stable identity, kind, priority, required status, and content. A caller supplies an
 explicit token budget and estimator.
 
+The default estimator is deterministic and conservative: ASCII is estimated near four characters per token,
+while every non-ASCII code point reserves two tokens. Serialized message and Tool callers also add framing.
+`ModelCapabilities.tokenEstimator` may provide a provider/model-calibrated implementation without changing
+selection semantics.
+
 ## Algorithm
 
 1. Reject duplicate block IDs.
@@ -23,6 +28,9 @@ explicit token budget and estimator.
 - Memory retrieval supplies candidate blocks but does not mark them required without policy.
 - Skill and MCP details remain progressively disclosed.
 - Provider-specific token counting can implement `TokenEstimator` without changing selection semantics.
+- A Turn integration must use the same estimator for ContextBlocks, portable messages, and advertised Tool
+  schemas. It reserves current input, required control/policy, and Tool schemas before selecting whole restored
+  turns and optional blocks.
 - Runtime-owned blocks are allowlisted disclosure views, not serialized projections. Their caller must define the
   model decision being supported, use the least precise bounded value sufficient for it, and omit internal
   Session/Run/Step/Action IDs and unrelated telemetry unless the owning ADR explicitly requires one.

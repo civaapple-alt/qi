@@ -13,6 +13,7 @@
   "scripts": {
     "accept:preview": "node scripts/preview-acceptance.mjs",
     "accept:coding-agent": "node scripts/real-provider-coding-acceptance.mjs",
+    "accept:compare-prompts": "node scripts/compare-prompt-evaluations.mjs",
     "build": "tsc -b",
     "build:cli": "node scripts/build-cli-package.mjs",
     "clean": "tsc -b --clean",

@@ -16,10 +16,17 @@ if (process.env.QI_REAL_PROVIDER_ACCEPT !== "1") {
 }
 
 const provider = resolveProviderConfig();
+const promptVariant = process.env.QI_ACCEPT_PROMPT_VARIANT ?? "candidate";
+if (!["baseline", "candidate"].includes(promptVariant)) {
+  throw new Error("QI_ACCEPT_PROMPT_VARIANT must be baseline or candidate");
+}
+const trial = Number.parseInt(process.env.QI_ACCEPT_TRIAL ?? "1", 10);
+if (!Number.isInteger(trial) || trial <= 0) throw new Error("QI_ACCEPT_TRIAL must be a positive integer");
 const root = await mkdtemp(join(tmpdir(), "qi-real-coding-acceptance-"));
 const keepWorkspace = process.env.QI_KEEP_ACCEPTANCE_WORKSPACE === "1";
 const committed = [];
 let runtime;
+const startedAt = performance.now();
 
 try {
   await writeWorkspaceFile("AGENTS.md", [
@@ -99,16 +106,21 @@ try {
 
   process.stdout.write(`${JSON.stringify({
     outcome: "accepted",
+    promptVariant,
+    trial,
+    scenario: "coupled-regression",
     provider: provider.provider,
     model: provider.model,
     sessionId: runtime.sessionId,
     actions: acceptance.actionNames,
     verificationDefinitionSha256: acceptance.verificationDefinitionSha256,
     independentTestPassed: true,
+    durationMs: Math.round(performance.now() - startedAt),
+    metrics: acceptance.metrics,
     workspace: keepWorkspace ? root : "cleaned",
   }, null, 2)}\n`);
 } finally {
-  runtime?.close();
+  await runtime?.close();
   if (!keepWorkspace) await rm(root, { recursive: true, force: true });
   else process.stderr.write(`Acceptance Workspace preserved at ${root}\n`);
 }

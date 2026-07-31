@@ -61,9 +61,33 @@ export class ContextBudgetError extends Error {
 
 export const approximateTokenEstimator: TokenEstimator = {
   estimate(text: string): number {
-    return Math.max(1, Math.ceil([...text].length / 4));
+    let ascii = 0;
+    let nonAscii = 0;
+    for (const character of text) {
+      if (character.codePointAt(0)! <= 0x7f) ascii += 1;
+      else nonAscii += 1;
+    }
+    // Provider tokenizers vary. ASCII prose/code commonly averages near four
+    // characters per token, while CJK and other Unicode may consume one or
+    // more tokens per code point. Two tokens is intentionally conservative.
+    return Math.max(1, Math.ceil(ascii / 4) + nonAscii * 2);
   },
 };
+
+export function estimateSerializedTokens(
+  value: unknown,
+  estimator: TokenEstimator = approximateTokenEstimator,
+  framingTokens = 0,
+): number {
+  if (!Number.isInteger(framingTokens) || framingTokens < 0) {
+    throw new RangeError("framingTokens must be a non-negative integer");
+  }
+  const estimated = estimator.estimate(JSON.stringify(value));
+  if (!Number.isSafeInteger(estimated) || estimated <= 0) {
+    throw new TypeError("Token estimator returned an invalid serialized value");
+  }
+  return estimated + framingTokens;
+}
 
 export interface CompileContextInput {
   blocks: readonly ContextBlock[];
@@ -82,7 +106,11 @@ export function compileContext(input: CompileContextInput): CompiledContext {
     if (ids.has(block.id)) throw new TypeError(`Duplicate context block id: ${block.id}`);
     if (!Number.isFinite(block.priority)) throw new TypeError(`Context block ${block.id} has invalid priority`);
     ids.add(block.id);
-    return { ...block, estimatedTokens: estimator.estimate(block.content), index };
+    const estimatedTokens = estimator.estimate(block.content);
+    if (!Number.isSafeInteger(estimatedTokens) || estimatedTokens <= 0) {
+      throw new TypeError(`Token estimator returned an invalid value for Context block ${block.id}`);
+    }
+    return { ...block, estimatedTokens, index };
   });
 
   const requiredTokens = estimated

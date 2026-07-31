@@ -6,7 +6,13 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export async function assertCodingAcceptance({ root, resultStatus, committed, baseline }) {
+export async function assertCodingAcceptance({
+  root,
+  resultStatus,
+  committed,
+  baseline,
+  forbiddenTools = ["shell", "script", "task", "codeact", "delegate"],
+}) {
   const proposedActions = committed.filter((event) => event.type === "action.proposed");
   const actionNames = proposedActions.map((event) => event.data.toolName);
   assert.equal(resultStatus, "completed", `Run ended ${resultStatus}`);
@@ -46,5 +52,27 @@ export async function assertCodingAcceptance({ root, resultStatus, committed, ba
   assert.match(diff.stdout, /src\/invoice\.mjs/);
   const changed = await execFileAsync("git", ["diff", "--name-only"], { cwd: root });
   assert.deepEqual(changed.stdout.trim().split(/\r?\n/).sort(), ["src/invoice.mjs", "src/tax.mjs"]);
-  return { actionNames, verificationDefinitionSha256: verifyOutput.definitionSha256 };
+  const forbiddenActions = actionNames.filter((name) => forbiddenTools.includes(name));
+  assert.deepEqual(forbiddenActions, [], `Forbidden Action(s) observed: ${forbiddenActions.join(", ")}`);
+  const usage = committed
+    .filter((event) => event.type === "model.completed")
+    .map((event) => event.data.usage)
+    .filter(Boolean);
+  return {
+    actionNames,
+    verificationDefinitionSha256: verifyOutput.definitionSha256,
+    metrics: {
+      resultStatus,
+      steps: committed.filter((event) => event.type === "step.started").length,
+      actions: actionNames.length,
+      mutations: actionNames.filter((name) => name === "edit" || name === "write").length,
+      inputTokens: usage.reduce((total, item) => total + (item.inputTokens ?? 0), 0),
+      outputTokens: usage.reduce((total, item) => total + (item.outputTokens ?? 0), 0),
+      forbiddenActions,
+      testsChanged: false,
+      falseCompletion: false,
+      verificationAfterFinalMutation: true,
+      contextParked: resultStatus === "parked",
+    },
+  };
 }

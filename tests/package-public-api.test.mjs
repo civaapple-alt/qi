@@ -13,7 +13,9 @@ const expectedRuntimeExports = {
     "CodeActRunner", "ContainerProgramSandbox", "ControlledToolClient",
     "FixtureProgramSandbox", "buildContainerInvocation", "probeContainerRuntime",
   ],
-  "@civaapple/qi-ai/context": ["ContextBudgetError", "approximateTokenEstimator", "compileContext"],
+  "@civaapple/qi-ai/context": [
+    "ContextBudgetError", "approximateTokenEstimator", "compileContext", "estimateSerializedTokens",
+  ],
   "@civaapple/qi-agent/extensions": [
     "Coordinator", "DECLARATIVE_RESOURCE_KINDS", "GraphGovernor", "MultiAgentBaselineGate",
     "PublicPackageMaturitySchema", "QI_SELF_SECTIONS", "QiSelfDecisionSchema", "QiSelfGapSchema",

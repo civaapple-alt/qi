@@ -4,6 +4,7 @@ import {
   OpenAIChatCompletionsModelPort,
   normalizeKimiReasoningEffort,
 } from "@civaapple/qi-ai";
+import { buildTuiContextBlocks } from "../apps/cli/dist/index.js";
 
 function asyncEvents(events) {
   return {
@@ -33,6 +34,30 @@ function request(overrides = {}) {
     maxOutputTokens: 400,
     ...overrides,
   };
+}
+
+function assembledQiBlocks() {
+  return buildTuiContextBlocks({
+    verificationProfiles: [],
+    shellProfiles: {
+      default: "direct",
+      allowed: [],
+      directEnabled: false,
+      available: [],
+      unavailable: [],
+    },
+    skills: [],
+    capabilities: {
+      write: false,
+      verify: false,
+      network: false,
+      execute: false,
+      background: false,
+      delegate: false,
+    },
+    mode: "agent",
+    platform: "linux",
+  });
 }
 
 test("Chat Completions adapter streams text and releases tool calls only after finish", async () => {
@@ -91,6 +116,44 @@ test("Chat Completions adapter streams text and releases tool calls only after f
   assert.equal(events[2].name, "read_file");
   assert.deepEqual(events[2].input, { path: "README.md" });
   assert.equal(events[3].finishReason, "actions");
+});
+
+test("Chat Completions preserves the assembled Qi block role and order", async () => {
+  let captured;
+  const client = {
+    chat: {
+      completions: {
+        create(body) {
+          captured = body;
+          return asyncEvents([{
+            id: "chatcmpl_qi_context",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 },
+          }]);
+        },
+      },
+    },
+  };
+  const blocks = assembledQiBlocks();
+  const port = new OpenAIChatCompletionsModelPort(client, { providerNames: ["kimi"] });
+  for await (const _event of port.stream(request({
+    tools: [],
+    messages: [
+      ...blocks.map((block) => ({
+        role: block.role,
+        content: [{ type: "text", text: block.content }],
+      })),
+      { role: "user", content: [{ type: "text", text: "Explain status" }] },
+    ],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(
+    captured.messages.map((message) => message.role),
+    [...blocks.map((block) => block.role), "user"],
+  );
+  assert.match(captured.messages[0].content, /evidence-first/);
+  assert.match(captured.messages[1].content, /Session mode is Agent/);
 });
 
 test("Chat Completions adapter does not release incomplete tool arguments", async () => {

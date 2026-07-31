@@ -33,6 +33,10 @@ blocks are purpose-built least-information disclosures rather than serialized Se
 authority traces, and unrelated lifecycle diagnostics stay outside model context unless an explicit bounded
 introspection path is authorized.
 
+The default `TokenEstimator` is conservative for Unicode and callers add message/schema framing. A
+`ModelCapabilities.tokenEstimator` may supply a provider/model-calibrated deterministic estimator; one Turn must
+use the same estimator for ContextBlocks, messages, and Tool schemas.
+
 The compiler result includes deterministic per-kind ContextBlock statistics for included/omitted counts and
 estimated tokens; callers can project composition without retaining block payloads. See
 [`docs/model/`](docs/model/) and [`docs/context/`](docs/context/) for adapter and compiler contracts.

@@ -3,7 +3,7 @@ import {
   type CapabilityBroker,
   type CapabilityLease,
 } from "@civaapple/qi-agent/capability";
-import type { ContextBlock } from "@civaapple/qi-ai/context";
+import type { ContextBlock, TokenEstimator } from "@civaapple/qi-ai/context";
 import {
   InMemoryEventStore,
   type EventStore,
@@ -44,6 +44,7 @@ export interface QiAgentOptions {
   readonly workspaceRoot?: string;
   readonly contextBlocks?: readonly ContextBlock[];
   readonly contextBudgetTokens?: number;
+  readonly tokenEstimator?: TokenEstimator;
   readonly outputReserveTokens?: number;
   readonly historyBudgetTokens?: number;
   readonly maxSteps?: number;
@@ -58,6 +59,7 @@ export interface QiPromptOptions {
   readonly model?: ModelRef;
   readonly contextBlocks?: readonly ContextBlock[];
   readonly contextBudgetTokens?: number;
+  readonly tokenEstimator?: TokenEstimator;
   readonly maxOutputTokens?: number;
   readonly historyBudgetTokens?: number;
   readonly maxSteps?: number;
@@ -94,6 +96,7 @@ export class QiAgent {
   readonly #workspaceRoot: string;
   readonly #contextBlocks: readonly ContextBlock[];
   readonly #contextBudgetTokens: number;
+  readonly #tokenEstimator: TokenEstimator | undefined;
   readonly #maxOutputTokens: number;
   readonly #historyBudgetTokens: number;
   readonly #maxSteps: number;
@@ -123,6 +126,7 @@ export class QiAgent {
       options.contextBudgetTokens ?? 64_000,
       "contextBudgetTokens",
     );
+    this.#tokenEstimator = options.tokenEstimator;
     this.#maxOutputTokens = positiveInteger(
       options.outputReserveTokens ?? 8_000,
       "outputReserveTokens",
@@ -241,6 +245,7 @@ export class QiAgent {
       throw new RangeError("maxOutputTokens must be smaller than contextBudgetTokens");
     }
     const title = options.title ?? this.#title;
+    const tokenEstimator = options.tokenEstimator ?? this.#tokenEstimator;
 
     return this.#loop.run({
       sessionId: this.sessionId,
@@ -251,6 +256,7 @@ export class QiAgent {
       model: structuredClone(options.model ?? this.#model),
       contextBlocks: [...this.#contextBlocks, ...(options.contextBlocks ?? [])],
       contextBudgetTokens,
+      ...(tokenEstimator === undefined ? {} : { tokenEstimator }),
       maxOutputTokens,
       historyBudgetTokens: nonNegativeInteger(
         options.historyBudgetTokens ?? this.#historyBudgetTokens,

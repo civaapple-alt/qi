@@ -59,7 +59,7 @@ export const qiSelfModel: QiSelfModel = parseQiSelfModel({
     decision("0009", "Use explicit provider profiles and execution-side credentials", "adr-0009-use-explicit-provider-profiles-and-execution-side-credentials"),
     decision("0011", "Make human control and Ask/Plan/Agent modes durable", "adr-0011-make-human-control-and-askplanagent-modes-durable"),
     decision("0013", "Keep interaction, activation, and product language separate", "adr-0013-keep-interaction-activation-and-product-language-separate"),
-    decision("0014", "Preserve Session compatibility through explicit migrations", "adr-0014-preserve-session-compatibility-through-explicit-migrations"),
+    decision("0014", "Version pre-stable persistence boundaries explicitly", "adr-0014-version-pre-stable-persistence-boundaries-explicitly"),
     decision("0015", "Separate project policy from Session mount facts", "adr-0015-separate-project-policy-from-session-mount-facts"),
     decision("0016", "Keep execution local and Web read-only", "adr-0016-keep-execution-local-and-web-read-only"),
     decision("0017", "Bound TUI transcript work", "adr-0017-bound-tui-transcript-work"),

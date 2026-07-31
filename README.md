@@ -181,6 +181,7 @@ Important commands:
 | `npm run build:cli` | Stage the self-contained CLI package without creating a tarball |
 | `npm run pack:cli` | Build a self-contained CLI tarball |
 | `npm run accept:preview` | Pack, install, and safely start the CLI in disposable directories |
+| `npm run accept:compare-prompts` | Compare repeated prompt-evaluation JSONL files (`-- baseline.jsonl candidate.jsonl`) and enforce safety/success gates |
 | `npm run packages:audit` | Audit public package manifests and tarballs |
 | `npm run packages:check` | Run isolated JavaScript/TypeScript consumers for every Runtime package |
 | `npm run packages:plan` | Validate the coordinated dependency graph and release order |

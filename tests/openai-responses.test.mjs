@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { OpenAIResponsesModelPort } from "@civaapple/qi-ai";
+import { buildTuiContextBlocks } from "../apps/cli/dist/index.js";
 
 function asyncEvents(events) {
   return {
@@ -46,6 +47,30 @@ function request(overrides = {}) {
     metadata: { sessionId: "ses_test" },
     ...overrides,
   };
+}
+
+function assembledQiBlocks() {
+  return buildTuiContextBlocks({
+    verificationProfiles: [],
+    shellProfiles: {
+      default: "direct",
+      allowed: [],
+      directEnabled: false,
+      available: [],
+      unavailable: [],
+    },
+    skills: [],
+    capabilities: {
+      write: false,
+      verify: false,
+      network: false,
+      execute: false,
+      background: false,
+      delegate: false,
+    },
+    mode: "agent",
+    platform: "linux",
+  });
 }
 
 test("OpenAI adapter maps portable history and completed tool calls without provider state", async () => {
@@ -148,6 +173,42 @@ test("OpenAI adapter maps portable history and completed tool calls without prov
     },
     { type: "completed", finishReason: "actions", responseId: "resp_123" },
   ]);
+});
+
+test("Responses preserves the assembled Qi block role and order", async () => {
+  let captured;
+  const client = {
+    responses: {
+      create(body) {
+        captured = body;
+        return asyncEvents([{
+          type: "response.completed",
+          sequence_number: 1,
+          response: completedResponse(),
+        }]);
+      },
+    },
+  };
+  const blocks = assembledQiBlocks();
+  const port = new OpenAIResponsesModelPort(client);
+  for await (const _event of port.stream(request({
+    tools: [],
+    messages: [
+      ...blocks.map((block) => ({
+        role: block.role,
+        content: [{ type: "text", text: block.content }],
+      })),
+      { role: "user", content: [{ type: "text", text: "Explain status" }] },
+    ],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(
+    captured.input.map((item) => item.role),
+    [...blocks.map((block) => block.role), "user"],
+  );
+  assert.match(captured.input[0].content[0].text, /evidence-first/);
+  assert.match(captured.input[1].content[0].text, /Session mode is Agent/);
 });
 
 test("OpenAI adapter does not release actions from an incomplete response", async () => {

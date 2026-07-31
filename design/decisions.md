@@ -385,6 +385,20 @@ improving the requested task.
 - Required Runtime ContextBlocks are reserved for safety or control invariants. Task-helpful diagnostics are
   optional and omission-visible. Payloads stay out of `context.compiled`; that event records selected/omitted
   block identities, budgets, and bounded aggregate kind/count/token accounting only.
+- The CLI assembles one deterministic, sectioned model-context recipe per Run. Runtime safety, frozen mode,
+  coarse capability facts, and probed host facts are required `system` control blocks. Root Workspace
+  instructions, accepted Memory, and Skill metadata are separately delimited `user` context: they cannot grant
+  authority, override Runtime policy, or become completion evidence. Memory claims are never injected as naked
+  `system` instructions.
+- A valid root `AGENTS.md` remains optional in Ask, but is required when Plan designs Workspace work or an Agent
+  Run has Workspace Write authority. A present symlink, non-file, or file above the bounded size limit fails
+  closed for those Runs; an absent file does not invent a repository contract. Read-only mounts disclose only
+  logical `mount:<id>` handles and mode, never host paths.
+- Context allocation reserves current input, required control/policy blocks, and the advertised Tool schemas
+  before selecting whole restored turns and optional Workspace/Memory/Skill blocks. One deterministic estimator
+  applies to all text and schema costs; provider/model-specific estimators may narrow the conservative Unicode
+  fallback. A history-omission hint is optional under pressure, while omitted Run identities remain
+  operator-visible only in bounded `context.compiled` metadata.
 - Rejected alternatives: replaying Action/tool transcripts or raw event JSON; embedding machine tags in assistant
   prose; automatically exposing IDs and exact counters “for debugging”; and withholding all settlement indication,
   which lets restored verbal mutation claims influence later Runs with no counter-signal.

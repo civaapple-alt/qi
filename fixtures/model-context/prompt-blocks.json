@@ -1,0 +1,29 @@
+{
+  "ask": [
+    { "id": "constitution:core", "role": "system", "required": true, "priority": 100, "contentSha256": "76ec95f11af34b37640610b2cb86793f85b373e9d69316d92bb835e220824e81" },
+    { "id": "mode:ask", "role": "system", "required": true, "priority": 100, "contentSha256": "6433d2754a4ab9508cffc2ef98051299ba854c6ec9ee0f2dcbac7d41ae1f77e9" },
+    { "id": "capabilities", "role": "system", "required": true, "priority": 99, "contentSha256": "5acc8b03590f710a1f39d1ced535db52c41ce2244d34e68ca973d0511f6f27dd" },
+    { "id": "host:environment", "role": "system", "required": true, "priority": 98, "contentSha256": "42198fac6662ce53bbd230a907b528a2160464f39c6808e5c90e87e1920b06ea" },
+    { "id": "workspace:AGENTS.md", "role": "user", "required": false, "priority": 90, "contentSha256": "a0dc0cf6e9f4c1d85fd4c76d9467b3b0066c46eb36250c939301f930ec35f5a2" },
+    { "id": "skills:index", "role": "user", "required": false, "priority": 76, "contentSha256": "1330244fada6b2a8ae359a4b20e724e160f288dc697d7ec9eca1e0f9d890d2d5" },
+    { "id": "skills:workspace:review-code", "role": "user", "required": false, "priority": 75, "contentSha256": "92994e2037eaf58b535eacebf0ad280707a7849242e5a5d1b895c8693dbc5ea4" }
+  ],
+  "plan": [
+    { "id": "constitution:core", "role": "system", "required": true, "priority": 100, "contentSha256": "76ec95f11af34b37640610b2cb86793f85b373e9d69316d92bb835e220824e81" },
+    { "id": "mode:plan", "role": "system", "required": true, "priority": 100, "contentSha256": "55ffdc7bb424cd2a3052a8219e1dccb92abb02806fcf70badca0f92401b1220e" },
+    { "id": "capabilities", "role": "system", "required": true, "priority": 99, "contentSha256": "5acc8b03590f710a1f39d1ced535db52c41ce2244d34e68ca973d0511f6f27dd" },
+    { "id": "host:environment", "role": "system", "required": true, "priority": 98, "contentSha256": "42198fac6662ce53bbd230a907b528a2160464f39c6808e5c90e87e1920b06ea" },
+    { "id": "workspace:AGENTS.md", "role": "user", "required": true, "priority": 90, "contentSha256": "a0dc0cf6e9f4c1d85fd4c76d9467b3b0066c46eb36250c939301f930ec35f5a2" },
+    { "id": "skills:index", "role": "user", "required": false, "priority": 76, "contentSha256": "1330244fada6b2a8ae359a4b20e724e160f288dc697d7ec9eca1e0f9d890d2d5" },
+    { "id": "skills:workspace:review-code", "role": "user", "required": false, "priority": 75, "contentSha256": "92994e2037eaf58b535eacebf0ad280707a7849242e5a5d1b895c8693dbc5ea4" }
+  ],
+  "agent": [
+    { "id": "constitution:core", "role": "system", "required": true, "priority": 100, "contentSha256": "76ec95f11af34b37640610b2cb86793f85b373e9d69316d92bb835e220824e81" },
+    { "id": "mode:agent", "role": "system", "required": true, "priority": 100, "contentSha256": "c324053f67309ec8cd4975a2e7fb91ad58b363f09de7a1f831ea7672a42a2263" },
+    { "id": "capabilities", "role": "system", "required": true, "priority": 99, "contentSha256": "fa98407138ca344a6c31911ffc3e995871cc89a3cff56d4e2aa5dfd4c86258ae" },
+    { "id": "host:environment", "role": "system", "required": true, "priority": 98, "contentSha256": "42198fac6662ce53bbd230a907b528a2160464f39c6808e5c90e87e1920b06ea" },
+    { "id": "workspace:AGENTS.md", "role": "user", "required": true, "priority": 90, "contentSha256": "a0dc0cf6e9f4c1d85fd4c76d9467b3b0066c46eb36250c939301f930ec35f5a2" },
+    { "id": "skills:index", "role": "user", "required": false, "priority": 76, "contentSha256": "1330244fada6b2a8ae359a4b20e724e160f288dc697d7ec9eca1e0f9d890d2d5" },
+    { "id": "skills:workspace:review-code", "role": "user", "required": false, "priority": 75, "contentSha256": "92994e2037eaf58b535eacebf0ad280707a7849242e5a5d1b895c8693dbc5ea4" }
+  ]
+}

@@ -1,5 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
+import type { TokenEstimator } from "./context/compiler.js";
 
 export const ModelRefSchema = Type.Object(
   {
@@ -153,6 +154,8 @@ export interface ModelCapabilities {
   readonly contextTokens: number;
   readonly parallelActions: boolean;
   readonly promptCache: boolean;
+  /** Optional deterministic estimator calibrated for this provider/model. */
+  readonly tokenEstimator?: TokenEstimator;
 }
 
 export interface ModelPort {

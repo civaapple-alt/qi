@@ -30,4 +30,4 @@ Until a formal version envelope is added, incompatible event changes require an 
 they must not be merged as an ordinary refactor.
 
 The durable-format policy, generation-1 interpretation, fail-closed preflight, and migration release gates are
-normative in [ADR 0014](../../../design/decisions.md#adr-0014-preserve-session-compatibility-through-explicit-migrations).
+normative in [ADR 0014](../../../design/decisions.md#adr-0014-version-pre-stable-persistence-boundaries-explicitly).

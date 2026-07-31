@@ -85,7 +85,7 @@ Changing an event requires synchronized updates to the protocol schema, Kernel p
 stream compatibility tests, and the owning package documentation. Prefer additive variants and optional fields;
 there is not yet a formal mixed-version event envelope, so incompatible changes require the generation,
 preflight, atomic migration, replay, and release gates in
-[ADR 0014](../../design/decisions.md#adr-0014-preserve-session-compatibility-through-explicit-migrations).
+[ADR 0014](../../design/decisions.md#adr-0014-version-pre-stable-persistence-boundaries-explicitly).
 
 ## Verification
 

@@ -11,7 +11,9 @@ import {
   ContextBudgetError,
   approximateTokenEstimator,
   compileContext,
+  estimateSerializedTokens,
   type ContextBlock,
+  type TokenEstimator,
 } from "@civaapple/qi-ai/context";
 import {
   StateTransitionError,
@@ -66,6 +68,8 @@ export interface TurnRequest {
   model: ModelRef;
   contextBlocks: readonly ContextBlock[];
   contextBudgetTokens: number;
+  /** Use one deterministic estimator for ContextBlocks, messages, and Tool schemas. */
+  tokenEstimator?: TokenEstimator;
   maxOutputTokens?: number;
   historyBudgetTokens?: number;
   maxSteps: number;
@@ -225,9 +229,9 @@ export class TurnLoop {
     if (!Number.isInteger(maxActionsPerStep) || maxActionsPerStep <= 0) {
       throw new RangeError("maxActionsPerStep must be a positive integer");
     }
-    const historyBudgetTokens = request.historyBudgetTokens
+    const requestedHistoryBudgetTokens = request.historyBudgetTokens
       ?? Math.min(16_000, Math.floor(request.contextBudgetTokens / 4));
-    if (!Number.isInteger(historyBudgetTokens) || historyBudgetTokens < 0) {
+    if (!Number.isInteger(requestedHistoryBudgetTokens) || requestedHistoryBudgetTokens < 0) {
       throw new RangeError("historyBudgetTokens must be a non-negative integer");
     }
     validateTurnContent(request.input, request.content);
@@ -235,11 +239,6 @@ export class TurnLoop {
       await assertImageCapability(this.#modelPort, request.model, request.content);
     }
     const writer = new EventWriter(this.#eventStore, request.sessionId, this.#clock, this.#onEvent);
-    const history = compileConversationHistory(
-      writer.view,
-      Math.min(historyBudgetTokens, request.contextBudgetTokens),
-    );
-    const historyConversation = history.messages;
     if (!writer.view) {
       writer.append(
         "session.created",
@@ -283,9 +282,44 @@ export class TurnLoop {
     writer.append("run.started", { runId }, { kind: "runtime", id: "qi" });
     const frozenMode = writer.view?.runs[runId]?.mode ?? runMode;
 
+    const estimator = request.tokenEstimator ?? approximateTokenEstimator;
+    const currentInputMessage: ModelMessage = {
+      role: "user",
+      content: toModelInputParts(runInput, runContent, false),
+    };
+    const registeredNames = this.#toolRegistry.catalog().map((tool) => tool.name);
+    const initialModeTools = toolsForMode(frozenMode, registeredNames);
+    const initialAllowlist = request.toolAllowlist
+      ? initialModeTools.filter((name) => request.toolAllowlist!.includes(name))
+      : initialModeTools;
+    const initialCatalog = this.#toolRegistry.catalog({ tools: initialAllowlist });
+    const initialToolCatalogTokens = estimateToolCatalog(initialCatalog.map((tool) => tool.model), estimator);
+    const requiredBlockTokens = request.contextBlocks
+      .filter((block) => block.required)
+      .reduce((total, block) => total + estimator.estimate(block.content), 0);
+    const dynamicControlReserve = request.reserveFinalHandoff === true
+      ? Math.max(
+          estimator.estimate(createBudgetWarningBlock(request.maxSteps - 1, request.maxSteps).content),
+          estimator.estimate(createBudgetHandoffBlock(request.maxSteps, request.maxSteps).content),
+        )
+      : 0;
+    const historyCapacity = Math.max(
+      0,
+      request.contextBudgetTokens
+        - estimateMessages([currentInputMessage], estimator)
+        - initialToolCatalogTokens
+        - requiredBlockTokens
+        - dynamicControlReserve,
+    );
+    const history = compileConversationHistory(
+      writer.view,
+      Math.min(requestedHistoryBudgetTokens, historyCapacity),
+      estimator,
+    );
+    const historyConversation = history.messages;
     const conversation: ModelMessage[] = [
       ...historyConversation,
-      { role: "user", content: toModelInputParts(runInput, runContent, false) },
+      currentInputMessage,
     ];
     const settledExchanges: SettledActionExchange[] = [];
     let finalText = "";
@@ -304,20 +338,17 @@ export class TurnLoop {
       ];
       const stepId = createId("stp") as StepId;
       writer.append("step.started", { runId, stepId }, { kind: "runtime", id: "qi" });
-      const registeredNames = this.#toolRegistry.catalog().map((tool) => tool.name);
       const modeTools = toolsForMode(frozenMode, registeredNames);
       const allowlist = request.toolAllowlist
         ? modeTools.filter((name) => request.toolAllowlist!.includes(name))
         : modeTools;
       const catalog = finalHandoffStep ? [] : this.#toolRegistry.catalog({ tools: allowlist });
-      const toolCatalogTokens = approximateTokenEstimator.estimate(
-        JSON.stringify(catalog.map((tool) => tool.model)),
-      );
+      const toolCatalogTokens = estimateToolCatalog(catalog.map((tool) => tool.model), estimator);
 
       let compiled;
       try {
         const pressureThreshold = Math.floor(request.contextBudgetTokens * contextPressureRatio);
-        if (estimateMessages(conversation) + toolCatalogTokens > pressureThreshold) {
+        if (estimateMessages(conversation, estimator) + toolCatalogTokens > pressureThreshold) {
           await this.#compactExchanges({
             writer,
             request,
@@ -354,7 +385,7 @@ export class TurnLoop {
           if (!compacted) throw error;
           compiled = compileTurnContext(request, conversation, toolCatalogTokens, stepContextBlocks);
         }
-        const conversationTokens = estimateMessages(conversation);
+        const conversationTokens = estimateMessages(conversation, estimator);
         writer.append(
           "context.compiled",
           {
@@ -1284,9 +1315,10 @@ export class TurnLoop {
   }): Promise<boolean> {
     let changed = false;
     for (const exchange of input.settledExchanges) {
-      if (estimateMessages(input.conversation) <= input.targetTokens) break;
+      const estimator = input.request.tokenEstimator ?? approximateTokenEstimator;
+      if (estimateMessages(input.conversation, estimator) <= input.targetTokens) break;
       if (exchange.compacted || (!exchange.consumed && !input.includeUnconsumed)) continue;
-      const originalEstimatedTokens = estimateMessages(exchange.messages);
+      const originalEstimatedTokens = estimateMessages(exchange.messages, estimator);
       const sanitized = redactSensitiveValue(exchange.messages);
       const sanitizedMessages = sanitized.value as ModelMessage[];
       const placeholderRef = `artifact://${"0".repeat(64)}`;
@@ -1297,7 +1329,7 @@ export class TurnLoop {
           text: compactExchangeSummary(exchange.sourceStepId, sanitizedMessages, placeholderRef),
         }],
       };
-      const compactedEstimatedTokens = estimateMessages([previewMessage]);
+      const compactedEstimatedTokens = estimateMessages([previewMessage], estimator);
       if (compactedEstimatedTokens >= originalEstimatedTokens) continue;
       const start = input.conversation.indexOf(exchange.messages[0]!);
       if (start < 0 || exchange.messages.some((message, index) => input.conversation[start + index] !== message)) {
@@ -1446,12 +1478,14 @@ function compileTurnContext(
   toolCatalogTokens: number,
   blocks: readonly ContextBlock[] = request.contextBlocks,
 ) {
-  const fixedTokens = estimateMessages(conversation) + toolCatalogTokens;
+  const estimator = request.tokenEstimator ?? approximateTokenEstimator;
+  const fixedTokens = estimateMessages(conversation, estimator) + toolCatalogTokens;
   const remaining = request.contextBudgetTokens - fixedTokens;
   if (remaining <= 0) throw new ContextBudgetError(fixedTokens, request.contextBudgetTokens);
   return compileContext({
     blocks,
     budgetTokens: remaining,
+    estimator,
   });
 }
 
@@ -1690,7 +1724,10 @@ function encodeBase64(content: Uint8Array): string {
   return btoa(chunks.join(""));
 }
 
-function estimateMessages(messages: readonly ModelMessage[]): number {
+function estimateMessages(
+  messages: readonly ModelMessage[],
+  estimator: TokenEstimator = approximateTokenEstimator,
+): number {
   let imageTokens = 0;
   const withoutImagePayloads = messages.map((message) => ({
     ...message,
@@ -1710,7 +1747,18 @@ function estimateMessages(messages: readonly ModelMessage[]): number {
       Object.entries(candidate).map(([key, item]) => [key, stripImagePayloadForEstimate(item)]),
     );
   }
-  return approximateTokenEstimator.estimate(JSON.stringify(withoutImagePayloads)) + imageTokens;
+  const framingTokens = messages.reduce(
+    (total, message) => total + 4 + message.content.length * 2,
+    2,
+  );
+  return estimateSerializedTokens(withoutImagePayloads, estimator, framingTokens) + imageTokens;
+}
+
+function estimateToolCatalog(
+  tools: readonly unknown[],
+  estimator: TokenEstimator = approximateTokenEstimator,
+): number {
+  return estimateSerializedTokens(tools, estimator, tools.length * 8 + 2);
 }
 
 function compactExchangeSummary(
@@ -1797,6 +1845,7 @@ function stripReservedRunFacts(value: string): string {
 function compileConversationHistory(
   view: SessionView | undefined,
   budgetTokens: number,
+  estimator: TokenEstimator = approximateTokenEstimator,
 ): {
   messages: ModelMessage[];
   omittedRunIds: RunId[];
@@ -1865,7 +1914,7 @@ function compileConversationHistory(
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
     if (!turn) continue;
-    const turnTokens = estimateMessages(turn.messages);
+    const turnTokens = estimateMessages(turn.messages, estimator);
     if (usedTokens + turnTokens > budgetTokens) break;
     selected.unshift(turn);
     usedTokens += turnTokens;
@@ -1913,8 +1962,8 @@ function createHistoryOmissionBlock(olderTurnsOmitted: number): ContextBlock {
       "Do not invent Run IDs or tool transcripts for omitted turns.",
     ].join("\n"),
     priority: 999,
-    required: true,
-    retentionReason: "Model must know earlier dialogue was truncated without receiving Runtime IDs.",
+    required: false,
+    retentionReason: "Optional bounded notice that earlier dialogue was truncated without Runtime IDs.",
   };
 }
 

@@ -304,6 +304,61 @@ test("TurnLoop restores bounded completed conversation history across Runs", asy
   });
 });
 
+test("TurnLoop drops whole old turns after reserving required context and Tool schemas", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const model = new ScriptedModelPort([
+      [
+        { type: "text.delta", delta: "A prior answer that should yield to required policy." },
+        { type: "completed", finishReason: "stop" },
+      ],
+      (request) => {
+        assert.equal(request.messages.some((message) => message.role === "assistant"), false);
+        return [
+          { type: "text.delta", delta: "Required policy remained available." },
+          { type: "completed", finishReason: "stop" },
+        ];
+      },
+    ]);
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: model,
+      toolRegistry: new ToolRegistry(new InMemoryCapabilityBroker()),
+    });
+    const estimator = { estimate: (text) => text.length };
+
+    await loop.run(turnRequest(root, artifactStore, {
+      input: "Create history.",
+      contextBudgetTokens: 2_000,
+      tokenEstimator: estimator,
+    }));
+    const result = await loop.run(turnRequest(root, artifactStore, {
+      input: "Use required policy.",
+      contextBudgetTokens: 650,
+      historyBudgetTokens: 500,
+      tokenEstimator: estimator,
+      contextBlocks: [{
+        id: "required-large",
+        kind: "constitution",
+        source: "test",
+        role: "system",
+        content: "R".repeat(450),
+        priority: 100,
+        required: true,
+        retentionReason: "Required policy must outrank old history",
+      }],
+    }));
+
+    assert.equal(result.status, "completed");
+    const run = result.view.runs[result.runId];
+    assert.ok(
+      run.steps[run.stepOrder[0]].context.omittedBlockIds.some((id) =>
+        id.startsWith("history:omitted:")
+      ),
+    );
+  });
+});
+
 test("TurnLoop annotates restored history with coarse write settlement only", async () => {
   await withRuntime(async ({ root, artifactStore }) => {
     const { writeFile } = await import("node:fs/promises");

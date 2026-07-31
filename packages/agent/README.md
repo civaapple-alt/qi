@@ -32,7 +32,9 @@ cache, while the append-only stream remains authoritative and rebuildable.
 Memory is a portable policy/state-machine boundary: `MemoryController` validates provenance, batches candidate
 and lifecycle facts, requires a user for User/sensitive/relational claims, and exposes only optional
 `ContextBlock`s. Session and Project scope cannot be widened by an Agent. User `always` activation is limited to
-four accepted, bounded claims. SQLite projection and machine paths remain Node responsibilities.
+four accepted, bounded claims. Applications inject accepted claims as delimited optional reference data, never
+as naked `system` instructions; Memory cannot override the current request, Workspace contract, or Runtime
+policy. SQLite projection and machine paths remain Node responsibilities.
 
 Redacted model text and reasoning may also pass through the bounded process-local `RuntimeActivity` channel for
 live presentation. Terminal text and reasoning are committed once in `model.completed`; reasoning is

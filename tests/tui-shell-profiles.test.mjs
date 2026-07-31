@@ -33,18 +33,16 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
     assert.equal(directRuntime.shellProfiles.directEnabled, true);
     assert.match(directPrompt, new RegExp(`platform=.*${process.platform}`));
     assert.match(directPrompt, /bash=disallowed/);
-    assert.match(directPrompt, /Authorized shell profiles \(config\/probe units, not a single tool\)/);
-    assert.match(directPrompt, /The shell tool is separate:.*does not interpret pipes/);
-    assert.match(directPrompt, /The script tool is separate:.*never treat an argv-only shell limit/);
-    assert.match(directPrompt, /Multiple shell or script Actions may share a workdir/);
-    assert.match(directPrompt, /BATCH_WRITE_CONFLICT/);
-    assert.match(directPrompt, /do not repeat the same unsupported assumption/);
+    assert.match(directPrompt, /Shell profiles: direct=available/);
+    assert.match(directPrompt, /The shell Tool is direct executable plus argv only; it does not interpret pipes/);
+    assert.match(directPrompt, /The script Tool accepts only these probed profiles/);
+    assert.match(directPrompt, /change approach instead of repeating it/);
     const shellDescription = directModel.requests[0].tools.find((tool) => tool.name === "shell")?.description ?? "";
     assert.match(shellDescription, /Multiple shell Actions may share a workdir/);
     assert.match(shellDescription, /one authorized script Action/);
     if (process.platform === "win32") {
-      assert.match(directPrompt, /Do not attempt POSIX-only bash, lsof, xargs/);
-      assert.match(directPrompt, /non-ASCII text/);
+      assert.match(directPrompt, /Do not assume POSIX-only bash, lsof, xargs/);
+      assert.match(directPrompt, /non-ASCII Git commit messages/);
       assert.match(directPrompt, /git commit -F/);
     }
     await directRuntime.close();
@@ -71,8 +69,7 @@ test("TUI advertises shell and script only for authorized probed profiles", asyn
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("\n");
-      assert.match(scriptPrompt, /prefer one script for builtins, pipes, or multi-statement logic/);
-      assert.match(scriptPrompt, /The script tool is separate:/);
+      assert.match(scriptPrompt, /The script Tool accepts only these probed profiles/);
       const scriptDescription = scriptModel.requests[0].tools.find((tool) => tool.name === "script")?.description ?? "";
       assert.match(scriptDescription, /multi-statement logic/);
       assert.match(scriptDescription, /may share a workdir/);
@@ -113,8 +110,8 @@ test("Plan mode guidance keeps shell argv-only limits separate from script profi
     assert.match(prompt, /defer host-execution detail to this Run's host:environment/);
     assert.match(prompt, /shell is direct argv-only spawn; script uses probed pwsh\/cmd\/bash profiles/);
     assert.match(prompt, /Never collapse an argv-only shell limit/);
-    assert.match(prompt, /The shell tool is separate:/);
-    assert.match(prompt, /The script tool is separate:/);
+    assert.match(prompt, /The shell Tool is direct executable plus argv only/);
+    assert.match(prompt, /The script Tool accepts only these probed profiles/);
   } finally {
     if (runtime) await runtime.close();
     await rm(root, { recursive: true, force: true });

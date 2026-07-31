@@ -30,6 +30,11 @@ grant, then outside-Workspace path grant. A new gate
 never steals focus while the composer contains text or a follow-up is being edited; it leaves a persistent
 attention notice instead.
 
+Every Run receives a sectioned, deterministic model-context recipe with separate Runtime policy, mode,
+capability, host, Workspace, Memory, and Skill blocks. See
+[the model-context contract](docs/model-context.md) for precedence, omission, and disclosure rules, and
+[prompt evaluation](docs/prompt-evaluation.md) for deterministic and live-provider promotion gates.
+
 ### Session modes
 
 | Mode | Behavior |
@@ -179,8 +184,10 @@ Next Run use temporary choice panels over the composer; transcript cards stay co
 The editor submits with `Enter` and inserts a newline with `Shift+Enter` or `Ctrl+J`; bracketed multi-line paste
 is preserved as one message. A rendered multi-line user message receives one shared top/bottom padding pair,
 not separate card spacing for every logical line. A compact pixel mark appears before the first Run, then yields attention to the
-Session timeline. Each Run injects at most the Workspace-root `AGENTS.md` (≤64 KiB, non-symlink) as bounded
-workspace instructions; nested `AGENTS.md` files are not auto-loaded.
+Session timeline. Each Run may inject at most the Workspace-root `AGENTS.md` (≤64 KiB, regular non-symlink) as
+bounded workspace instructions; nested `AGENTS.md` files are not auto-loaded. It is optional in Ask and required
+for Plan or a write-capable Agent. An unsafe present root file fails closed for those modes, while an absent file
+means no repository contract.
 
 In a rich TTY, `Ctrl+V` (and `Alt+V` on Windows, where terminals often own `Ctrl+V`) first checks the system
 clipboard for an image — including a copied image file path — and otherwise inserts clipboard text.
@@ -237,8 +244,9 @@ expose a separate `script` tool. Project `policy.toml` `[shell]` is ignored. On 
 Qi probes platform-installed profiles and writes defaults (`direct` plus installed candidates) into the user
 config. `/shell` (also under `/settings`) multi-selects profiles and hot-applies them without restarting.
 `/config` shows default/allowed profiles, resolved executables, versions, and unavailable reasons. Profiles are
-never chosen from command text. Every Run receives a required host-environment block containing the detected
-platform and the available/disallowed profile facts. Direct `shell` is described explicitly as executable plus
+never chosen from command text. Every Run receives required capability and host-environment blocks containing
+coarse frozen grants, the detected platform, and available/disallowed profile facts. Read-only mounts expose
+only logical `mount:<id>` handles, not host paths. Direct `shell` is described explicitly as executable plus
 argv, without pipes or redirection; models are told to use at most one `shell`/`script` per workdir per Step and
 to probe multiple host tools in one `script` Action when a profile is available. On Windows the block warns against
 POSIX-only `bash`/`lsof`/`xargs` assumptions. A missing executable or unavailable profile becomes a fact for the
@@ -272,7 +280,10 @@ Run or in-flight Subagent. Unsettled delegations cancel on Session recovery befo
 ([ADR 0008](../../design/decisions.md#adr-0008-limit-subagent-delegation-to-one-isolated-layer)).
 
 User TOML may set `context_window_tokens`. The TUI reserves up to 16K tokens for model output and shows window,
-prompt budget, reserve, current use, and compacted-exchange savings. `/context` projects committed
+prompt budget, reserve, current use, and compacted-exchange savings. One deterministic estimator accounts for
+ContextBlocks, portable messages, Tool schemas, framing, and images; the Unicode fallback is conservative and a
+ModelPort may supply a model-calibrated estimator. Required policy/control and advertised Tools reserve budget
+before whole restored turns and optional blocks. `/context` projects committed
 `context.compacted` events and committed per-kind ContextBlock statistics. The block view shows included token
 share, included/omitted counts, omitted estimated tokens, and a separate subtotal for conversation messages plus
 advertised Tool schemas. Older Steps without aggregate facts remain readable but report that the block mix is
@@ -294,7 +305,9 @@ Step 31 warns that only one executable Step remains; Step 32 is a tool-free hand
 with explicit progress, blockers, next actions, and verification state.
 
 The Skill catalog combines `<workspace>/.qi/skills` and `$QI_HOME/resources/skills`; Workspace wins on a name
-collision. Only metadata enters the initial model context. The `skill` tool progressively loads a selected
+collision. Only independently omittable metadata entries enter initial model context, plus a short required
+progressive-discovery hint in the advertised `skill` Tool schema and an optional context index. The `skill` tool
+progressively loads a selected
 `SKILL.md` or named resource. `/skills` → **Install skill** picks user vs Workspace scope, then a form for a
 compatible Skill name or local path (for example from `~/.codex/skills/.system`); Qi does not search or
 download from the network. With write authority, the model can only install to the Workspace and the Action

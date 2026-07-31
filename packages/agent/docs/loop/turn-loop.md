@@ -63,8 +63,11 @@ pressure threshold. If one newest exchange cannot fit at all, hard-limit compact
 identities, outcomes, locators, and Artifact reference before the request proceeds. Each replacement emits
 `context.compacted`; it never rewrites the underlying Action or model events.
 
-Prompt accounting includes the advertised Tool catalog as well as portable messages and compiled ContextBlocks;
-tool schemas are not free space outside the model window.
+Prompt accounting uses one deterministic estimator for the advertised Tool catalog, portable messages, and
+compiled ContextBlocks; Tool schemas and message framing are not free space outside the model window. Before
+history selection, the Loop reserves current input, required policy/control, the maximum final-handoff control,
+and the first executable Step's Tool catalog. Whole old turns therefore yield before required context instead of
+causing an avoidable budget park.
 Each successful compilation also persists bounded `blockStats` grouped by ContextBlock kind. These statistics
 include selected/omitted counts and estimated tokens; conversation messages and advertised Tool schemas remain
 separate non-block prompt cost so operator percentages cannot be mistaken for provider payload accounting.
@@ -100,7 +103,8 @@ hunting mounts for the same screenshot. Tool transcripts and active Runs remain 
 masquerade as conversation. The newest complete turns are retained under `historyBudgetTokens`; when the budget
 is exhausted, older turns are omitted as whole pairs so role ordering and causal meaning remain intact. Every
 omitted Run is exposed in the next `context.compiled.omittedBlockIds` as `history:omitted:<runId>` for operators,
-and the model receives a separate Runtime block with only `olderTurnsOmitted=<N>` (no Run IDs). Agent Runs with
+and the model may receive an optional Runtime block with only `olderTurnsOmitted=<N>` (no Run IDs) when budget
+remains. Agent Runs with
 an unfinished Session Work Plan also receive an optional navigation ContextBlock listing `workPlanId`,
 `revision`, and item `workItemId` / `step` / `status` — navigation handles, not completion evidence.
 

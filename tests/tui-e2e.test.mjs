@@ -191,7 +191,11 @@ test("Memory tool auto-accepts exact public project evidence and injects it on t
     runtime.acceptMemory(pending.memoryId);
     assert.equal((await runtime.run("Which package manager does this project use?")).status, "completed");
     const compiled = runtime.events().filter((event) => event.type === "context.compiled").at(-1);
-    assert.equal(compiled.data.includedBlockIds.includes(`memory:${claim.memoryId}`), true);
+    assert.equal(compiled.data.includedBlockIds.includes("memory:context"), true);
+    const memoryMessage = model.requests.at(-1).messages.find((message) =>
+      message.content.some((part) => part.type === "text" && part.text.includes("<memory-context>"))
+    );
+    assert.equal(memoryMessage?.role, "user");
   } finally {
     await runtime?.close();
     await rm(root, { recursive: true, force: true });
@@ -244,7 +248,7 @@ test("TUI discloses Skill metadata first and loads instructions only through the
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("\n");
-      assert.match(prompt, /review-code \(unversioned, workspace\)/);
+      assert.match(prompt, /<available-skill name="review-code" version="unversioned" scope="workspace">/);
       assert.match(prompt, /Review code for concrete defects/);
       assert.doesNotMatch(prompt, /PRIVATE_REVIEW_WORKFLOW/);
       assert.equal(request.tools.some((tool) => tool.name === "skill"), true);

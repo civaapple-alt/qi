@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ContextBudgetError, compileContext } from "@civaapple/qi-ai/context";
+import {
+  ContextBudgetError,
+  approximateTokenEstimator,
+  compileContext,
+  estimateSerializedTokens,
+} from "@civaapple/qi-ai/context";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
 
 const model = { provider: "fake", model: "deterministic-v1" };
@@ -169,4 +174,33 @@ test("Context Compiler is deterministic and rejects ambiguous duplicate IDs", ()
   const second = compileContext({ blocks: [structuredClone(block)], budgetTokens: 10 });
   assert.deepEqual(first, second);
   assert.throws(() => compileContext({ blocks: [block, block], budgetTokens: 10 }), /Duplicate context block id/);
+});
+
+test("fallback token estimation is conservative for CJK and accounts for framing", () => {
+  assert.equal(approximateTokenEstimator.estimate("abcd"), 1);
+  assert.equal(approximateTokenEstimator.estimate("中文"), 4);
+  assert.ok(
+    estimateSerializedTokens([{ role: "user", content: "中文" }], approximateTokenEstimator, 6)
+      > approximateTokenEstimator.estimate("中文"),
+  );
+});
+
+test("Context Compiler rejects invalid custom estimator results", () => {
+  assert.throws(
+    () => compileContext({
+      blocks: [{
+        id: "bad-estimate",
+        kind: "recent",
+        source: "test",
+        role: "user",
+        content: "content",
+        priority: 1,
+        required: false,
+        retentionReason: "test",
+      }],
+      budgetTokens: 10,
+      estimator: { estimate: () => Number.NaN },
+    }),
+    /invalid value/,
+  );
 });
