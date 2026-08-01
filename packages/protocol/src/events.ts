@@ -295,6 +295,7 @@ export const SessionEventSchema = Type.Union([
         model: Type.String({ minLength: 1, maxLength: 256 }),
         reasoningEffort: Type.Optional(Type.Union([
           Type.Literal("low"),
+          Type.Literal("medium"),
           Type.Literal("high"),
           Type.Literal("max"),
           Type.Literal("none"),

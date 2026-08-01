@@ -118,6 +118,11 @@ always on. Other model profiles expose only the effort values they explicitly de
 The Kimi `/login` form exposes the four known models as a dropdown with a final custom-ID input, shows the
 effective effort/context defaults, and persists edits without placing the API key in TOML.
 
+**Volcengine Agent Plan** uses `provider = "volcengine-agent-plan"`, `ARK_API_KEY`, and Responses at
+`https://ark.cn-beijing.volces.com/api/plan/v3` (default model `glm-latest`). Thinking models accept
+`reasoning_effort = "low" | "medium" | "high"`; `/model` Max output tokens maps to Responses
+`max_output_tokens`. See [`packages/ai/docs/model/provider-adapters.md`](packages/ai/docs/model/provider-adapters.md).
+
 Project policy lives under `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`. Resolution order is:
 
 ```text

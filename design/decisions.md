@@ -124,7 +124,10 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
   from the profile catalog; Qi never probes failed endpoints to guess a wire API.
 - Responses and Chat Completions adapters remain thin implementations of one portable model protocol.
 - Provider-specific thinking fields are derived deterministically from the selected model profile and explicit
-  operator configuration; unknown effort values fail before network execution.
+  operator configuration; unknown effort values fail before network execution. Portable effort levels are
+  `low` / `medium` / `high` / `max` / `none`; catalogs advertise only the levels they support, and unsupported
+  selections fall back to the model `defaultEffort` on the wire. Volcengine Agent Plan Responses enables
+  deep thinking with `thinking: { type: "enabled" }` plus `reasoning: { effort }` (see vendor Responses docs).
 - Qi-managed provider credentials are sealed and resolved through a broker only at the provider boundary.
 - Provider tokens, provider authorization headers, OAuth codes, PKCE material, and other Qi-managed authentication
   secrets never enter TOML, Session events, Artifacts, or model context.

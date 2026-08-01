@@ -176,7 +176,7 @@ reasoning_effort = "max"
       { environment: { QI_HOME: join(root, "state") } },
     );
     assert.equal(k3Compact.kind, "run");
-    assert.equal(k3Compact.options.provider.reasoningEffort, "high");
+    assert.equal(k3Compact.options.provider.reasoningEffort, "medium");
     assert.equal(k3Compact.options.contextWindowTokens, 262_144);
 
     await writeFile(path, `
@@ -636,6 +636,36 @@ test("supportedEffortsForModel advertises Kimi K3 thinking efforts from provider
   assert.ok(kimi);
   assert.deepEqual(supportedEffortsForModel(kimi, "k3"), ["low", "high", "max"]);
   assert.deepEqual(supportedEffortsForModel(kimi, "kimi-for-coding"), []);
+});
+
+test("supportedEffortsForModel advertises Volcengine Agent Plan thinking efforts", () => {
+  const ark = getProviderProfile("volcengine-agent-plan");
+  assert.ok(ark);
+  assert.deepEqual(supportedEffortsForModel(ark, "glm-latest"), ["low", "medium", "high"]);
+  assert.deepEqual(supportedEffortsForModel(ark, "minimax-m2.7"), []);
+});
+
+test("Volcengine Agent Plan persists reasoning_effort in user config", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-ark-plan-config-"));
+  const path = join(root, "config.toml");
+  try {
+    const saved = await persistUserProviderDefaults({
+      provider: "volcengine-agent-plan",
+      model: "glm-latest",
+      baseURL: "https://ark.cn-beijing.volces.com/api/plan/v3",
+      reasoningEffort: "medium",
+      outputReserveTokens: 1024,
+    }, path);
+    assert.equal(saved.config.provider, "volcengine-agent-plan");
+    assert.equal(saved.config.reasoningEffort, "medium");
+    assert.equal(saved.config.outputReserveTokens, 1024);
+    const body = await readFile(path, "utf8");
+    assert.match(body, /provider = "volcengine-agent-plan"/);
+    assert.match(body, /reasoning_effort = "medium"/);
+    assert.match(body, /output_reserve_tokens = 1024/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("ensureUserShellConfig writes detected profiles once and preserves later edits", async () => {

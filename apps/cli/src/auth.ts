@@ -44,7 +44,7 @@ export interface AuthSessionStatus {
   readonly wireApi: string;
   readonly endpointTrust: "official" | "custom";
   readonly model: string;
-  readonly reasoningEffort?: "low" | "high" | "max" | "none";
+  readonly reasoningEffort?: "low" | "medium" | "high" | "max" | "none";
   readonly contextWindowTokens: number;
   readonly contextWindowTokensOverride: boolean;
   readonly baseURL?: string;
@@ -808,9 +808,11 @@ function loginReasoningEffort(
   requested: string | undefined,
   current: ProviderConfig["reasoningEffort"],
 ): ProviderConfig["reasoningEffort"] {
-  if (provider !== "kimi" && provider !== "deepseek") {
+  if (provider !== "kimi" && provider !== "deepseek" && provider !== "volcengine-agent-plan") {
     if (requested !== undefined) {
-      throw new TypeError("reasoning effort is currently supported only by the Kimi and DeepSeek providers");
+      throw new TypeError(
+        "reasoning effort is currently supported only by the Kimi, DeepSeek, and Volcengine Agent Plan providers",
+      );
     }
     return undefined;
   }

@@ -110,13 +110,16 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
   if (!model) {
     throw new TypeError(`${profile.displayName} requires ${profile.envModel ?? "QI_MODEL"} or --model`);
   }
-  const supportsReasoningEffort = provider === "kimi" || provider === "deepseek";
+  const supportsReasoningEffort =
+    provider === "kimi" || provider === "deepseek" || provider === "volcengine-agent-plan";
   const requestedReasoningEffort = optionalValue(input.reasoningEffort) ??
     optionalValue(environment.QI_REASONING_EFFORT) ??
     (provider === "kimi" ? optionalValue(environment.KIMI_MODEL_THINKING_EFFORT) : undefined) ??
     optionalValue(matchingDefaults?.reasoningEffort);
   if (requestedReasoningEffort !== undefined && !supportsReasoningEffort) {
-    throw new TypeError("reasoning effort is currently supported only by the Kimi and DeepSeek providers");
+    throw new TypeError(
+      "reasoning effort is currently supported only by the Kimi, DeepSeek, and Volcengine Agent Plan providers",
+    );
   }
   const reasoningEffort = supportsReasoningEffort
     ? normalizeReasoningEffort(requestedReasoningEffort)

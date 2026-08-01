@@ -29,10 +29,12 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.ok(ids.includes("kimi"));
   assert.ok(ids.includes("compatible"));
   assert.ok(ids.includes("deepseek"));
+  assert.ok(ids.includes("volcengine-agent-plan"));
   assert.equal(getProviderProfile("openai")?.wireApi, "responses");
   assert.equal(getProviderProfile("kimi")?.wireApi, "chat.completions");
   assert.equal(getProviderProfile("compatible")?.wireApi, "chat.completions");
   assert.equal(getProviderProfile("deepseek")?.wireApi, "responses");
+  assert.equal(getProviderProfile("volcengine-agent-plan")?.wireApi, "responses");
   assert.equal(getProviderProfile("compatible")?.displayName, "OpenAI Compatible");
   assert.equal(getProviderProfile("openai")?.officialBaseURL, "https://api.openai.com/v1");
   assert.equal(getProviderProfile("kimi")?.capabilities.toolCalls, true);
@@ -77,6 +79,28 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.equal(
     createModelPortForProfile(deepseek, { apiKey: "sk-test", model: "deepseek-v4-pro" }).constructor.name,
     "OpenAIChatCompletionsModelPort",
+  );
+  const ark = getProviderProfile("volcengine-agent-plan");
+  assert.ok(ark);
+  assert.equal(ark.displayName, "Volcengine Agent Plan");
+  assert.equal(ark.defaultModel, "glm-latest");
+  assert.equal(ark.officialBaseURL, "https://ark.cn-beijing.volces.com/api/plan/v3");
+  assert.equal(ark.envApiKey, "ARK_API_KEY");
+  assert.equal(ark.capabilities.requestMetadata, false);
+  assert.equal(ark.capabilities.reasoning, true);
+  assert.equal(providerModelContextTokens(ark, "glm-latest"), 1_048_576);
+  assert.equal(providerModelOutputReserveTokens(ark, "glm-latest"), 65_536);
+  assert.deepEqual(getProviderModelProfile(ark, "glm-latest")?.thinking, {
+    mode: "effort",
+    supportedEfforts: ["low", "medium", "high"],
+    defaultEffort: "high",
+  });
+  assert.equal(getProviderModelProfile(ark, "minimax-m2.7")?.thinking, undefined);
+  assert.equal(getProviderModelProfile(ark, "kimi-k2.6")?.thinking, undefined);
+  assert.equal(getProviderModelProfile(ark, "kimi-k2.7-code")?.thinking, undefined);
+  assert.equal(
+    createModelPortForProfile(ark, { apiKey: "sk-test", model: "glm-latest" }).constructor.name,
+    "OpenAIResponsesModelPort",
   );
 });
 
@@ -123,6 +147,20 @@ test("resolveProviderConfig selects DeepSeek wire API and effort per model", () 
   assert.equal(pro.reasoningEffort, "max");
 });
 
+test("resolveProviderConfig selects Volcengine Agent Plan Responses and effort", () => {
+  const config = resolveProviderConfig({
+    provider: "volcengine-agent-plan",
+    model: "glm-latest",
+    reasoningEffort: "medium",
+    allowMissingCredential: true,
+    environment: {},
+  });
+  assert.equal(config.wireApi, "responses");
+  assert.equal(config.reasoningEffort, "medium");
+  assert.equal(config.profile.envApiKey, "ARK_API_KEY");
+  assert.equal(config.baseURL, "https://ark.cn-beijing.volces.com/api/plan/v3");
+});
+
 test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported values", () => {
   const base = {
     provider: "kimi",
@@ -131,7 +169,7 @@ test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported
     environment: {},
   };
   assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "xhigh" }).reasoningEffort, "max");
-  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "medium" }).reasoningEffort, "high");
+  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "medium" }).reasoningEffort, "medium");
   assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "minimum" }).reasoningEffort, "low");
   assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "none" }).reasoningEffort, "none");
   assert.equal(resolveProviderConfig({
@@ -144,7 +182,7 @@ test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported
       QI_REASONING_EFFORT: "medium",
       KIMI_MODEL_THINKING_EFFORT: "max",
     },
-  }).reasoningEffort, "high");
+  }).reasoningEffort, "medium");
   assert.throws(
     () => resolveProviderConfig({ ...base, reasoningEffort: "extreme" }),
     /Unsupported reasoning effort/,
@@ -157,7 +195,7 @@ test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported
       allowMissingCredential: true,
       environment: {},
     }),
-    /only by the Kimi and DeepSeek providers/,
+    /Kimi, DeepSeek, and Volcengine Agent Plan/,
   );
 });
 

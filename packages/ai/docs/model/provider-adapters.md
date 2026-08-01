@@ -30,7 +30,7 @@ provider-name branch.
 Provider Profiles declare a default wire API (`responses` or `chat.completions`) and a transport capability matrix.
 A model catalog entry may override the profile wire API via `resolveProviderWireApi`. `createModelPortForProfile`
 selects `OpenAIResponsesModelPort` or `OpenAIChatCompletionsModelPort` from that resolved value. The TUI maps
-profile ids such as `openai`, `xai`, `kimi`, `deepseek`, `moonshot`, and `compatible` to environment variables and
+profile ids such as `openai`, `xai`, `kimi`, `deepseek`, `volcengine-agent-plan`, `moonshot`, and `compatible` to environment variables and
 `/login` flows. The `compatible` profile is Chat Completions for arbitrary OpenAI-compatible gateways (named
 aliases such as `qianwenai` / `zhipu` live in TUI config as `account_alias` / `[[compatible]]`, not as new wire
 profiles). Provider identity remains part of `ModelRef`; sharing a wire protocol does not collapse ownership.
@@ -55,10 +55,12 @@ The `kimi` profile uses `https://api.kimi.com/coding/v1` with Chat Completions a
 | `kimi-for-coding-highspeed` | 262,144 | always on (`thinking.keep=all`) |
 
 K3 effort aliases are normalized before network execution: `ultra|max|xhigh` → `max`,
-`high|medium` → `high`, and `low|minimum|light` → `low`. Enabled K3 requests send top-level
-`reasoning_effort` (not a nested `thinking.effort`). `none` sends `thinking: { type: "disabled" }`;
-other values fail locally instead of producing a remote HTTP 400. Kimi Code may route disabled-thinking
-K3/K2.7 requests to an older model, so the CLI does not advertise `none` for catalog K3/K2.7 models.
+`high` → `high`, `medium` → `medium`, and `low|minimum|light|minimal` → `low`. Catalog K3 models
+advertise only `low`/`high`/`max`; an unsupported value such as `medium` falls back to the model
+`defaultEffort` on the wire. Enabled K3 requests send top-level `reasoning_effort` (not a nested
+`thinking.effort`). `none` sends `thinking: { type: "disabled" }`; other values fail locally instead
+of producing a remote HTTP 400. Kimi Code may route disabled-thinking K3/K2.7 requests to an older
+model, so the CLI does not advertise `none` for catalog K3/K2.7 models.
 K2.7 Code models always think and send `thinking: { type: "enabled", keep: "all" }`; an explicit
 `none` fails locally. Kimi `reasoning_content` / `reasoning` stream deltas become portable
 `reasoning.delta` events. Output reserve is sent as `max_completion_tokens` for Kimi reasoning models
@@ -86,10 +88,38 @@ DeepSeek counts thinking tokens inside `max_output_tokens`. The catalog raises t
 output reserve above the generic 16k default so high-effort agent turns are less likely to park on a
 length boundary before a visible reply or tool call.
 
-Effort aliases match Kimi (`minimal` → `low`, `medium`/`xhigh` → `high`, etc.). Responses sends
-`reasoning: { effort }`; Chat Completions sends `thinking: { type }` plus `reasoning_effort` when enabled.
+Effort aliases match the shared normalizer (`minimal` → `low`, `medium` stays `medium`, `xhigh` → `max`,
+etc.). Catalog DeepSeek models advertise only `low`/`high`/`max`, so unsupported levels fall back to
+`defaultEffort` on the wire. Responses sends `reasoning: { effort }`; Chat Completions sends
+`thinking: { type }` plus `reasoning_effort` when enabled.
 
 Thinking-mode tool continuation requires replaying committed CoT: the Turn Loop adds a portable
 `{ type: "reasoning", text }` part on assistant messages that proposed Actions. Responses maps that part to a
 `reasoning` input item; Chat Completions maps it to `reasoning_content`. Cross-Run history restore does not
 revive that CoT. Qi remains stateless toward the provider (`store: false`, no `previous_response_id`).
+
+## Volcengine Agent Plan
+
+The `volcengine-agent-plan` profile targets the Agent Plan Responses endpoint
+`https://ark.cn-beijing.volces.com/api/plan/v3` (`ARK_API_KEY` / `ARK_BASE_URL` / `ARK_MODEL`).
+Default model is `glm-latest`. `requestMetadata` is off. Deep thinking follows the vendor Responses
+control shape ([深度思考](https://console.volcengine.com/ark/region:cn-beijing/docs/82379/1956279?lang=zh#dc4c1547)):
+
+| Operator effort | Wire |
+| --- | --- |
+| `low` / `medium` / `high` | `thinking: { type: "enabled" }` + `reasoning: { effort }` |
+| `none` | `thinking: { type: "disabled" }` (no `reasoning.effort`) |
+
+| Model | Context | Thinking |
+| --- | ---: | --- |
+| `glm-latest` | 1,048,576 | `low` / `medium` / `high`, default `high` |
+| `glm-5.2` | 1,048,576 | same |
+| `ark-code-latest` | 256,000 | same |
+| `doubao-seed-2.0-code` | 256,000 | same |
+| `minimax-m2.7` | 200,000 | none (omit `thinking` / `reasoning`) |
+| `kimi-k2.6` | 256,000 | none |
+| `kimi-k2.7-code` | 256,000 | none |
+
+Output reserve is sent as Responses `max_output_tokens` (for example `1024` when configured). Catalog
+models recommend a 65,536-token reserve; the CLI Max output tokens control remains the operator
+configuration surface. Qi stays stateless (`store: false`, no `previous_response_id`).

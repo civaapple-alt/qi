@@ -71,7 +71,7 @@ export interface QiUserConfig {
   readonly model?: string;
   readonly baseURL?: string;
   readonly accountAlias?: string;
-  readonly reasoningEffort?: "low" | "high" | "max" | "none";
+  readonly reasoningEffort?: "low" | "medium" | "high" | "max" | "none";
   /** Saved OpenAI-compatible endpoints; active selection is the top-level fields. */
   readonly compatible?: readonly CompatibleEndpoint[];
   readonly contextWindowTokens?: number;
@@ -157,7 +157,7 @@ export interface UserProviderDefaults {
   readonly model: string;
   readonly baseURL?: string;
   readonly accountAlias?: string;
-  readonly reasoningEffort?: "low" | "high" | "max" | "none";
+  readonly reasoningEffort?: "low" | "medium" | "high" | "max" | "none";
   readonly contextWindowTokens?: number;
   readonly outputReserveTokens?: number;
   readonly imageInput?: boolean;
@@ -198,7 +198,7 @@ export async function persistUserProviderDefaults(
     model: selection.model,
     ...(selection.baseURL === undefined ? {} : { baseURL: selection.baseURL }),
     ...(selection.accountAlias === undefined ? {} : { accountAlias: selection.accountAlias }),
-    ...(selection.provider !== "kimi" || reasoningEffort === undefined
+    ...(!providerPersistsReasoningEffort(selection.provider) || reasoningEffort === undefined
       ? {}
       : { reasoningEffort }),
     ...(catalog === undefined || catalog.length === 0 ? {} : { compatible: catalog }),
@@ -668,7 +668,15 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   const theme = optionalThemeField(root.theme, `${path}: theme`);
   const provider = optionalStringField(root.provider, `${path}: provider`);
   if (provider !== undefined) {
-    const known = ["openai", "xai", "kimi", "deepseek", "moonshot", "compatible"];
+    const known = [
+      "openai",
+      "xai",
+      "kimi",
+      "deepseek",
+      "volcengine-agent-plan",
+      "moonshot",
+      "compatible",
+    ];
     if (!known.includes(provider)) {
       throw new TypeError(`${path}: provider must be one of ${known.join(", ")}`);
     }
@@ -701,9 +709,9 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   if ((model !== undefined || baseURL !== undefined || reasoningEffort !== undefined) && provider === undefined) {
     throw new TypeError(`${path}: provider is required when model, base_url, or reasoning_effort is configured`);
   }
-  if (reasoningEffort !== undefined && provider !== "kimi" && provider !== "deepseek") {
+  if (reasoningEffort !== undefined && !providerPersistsReasoningEffort(provider)) {
     throw new TypeError(
-      `${path}: reasoning_effort is currently supported only when provider = "kimi" or "deepseek"`,
+      `${path}: reasoning_effort is currently supported only when provider = "kimi", "deepseek", or "volcengine-agent-plan"`,
     );
   }
   let capabilities: QiCapabilityConfig | undefined;
@@ -909,6 +917,10 @@ function requireTable(value: unknown, label: string): Record<string, unknown> {
 function assertOnlyKeys(table: Record<string, unknown>, allowed: readonly string[], label: string): void {
   const unknown = Object.keys(table).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) throw new TypeError(`${label} has unknown keys: ${unknown.join(", ")}`);
+}
+
+function providerPersistsReasoningEffort(provider: string | undefined): boolean {
+  return provider === "kimi" || provider === "deepseek" || provider === "volcengine-agent-plan";
 }
 
 function optionalStringField(value: unknown, label: string, maximum = 128): string | undefined {

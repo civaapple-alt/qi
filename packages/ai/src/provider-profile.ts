@@ -15,7 +15,7 @@ export interface ProviderTransportCapabilities {
   readonly requestMetadata: boolean;
 }
 
-export type ProviderThinkingEffort = "low" | "high" | "max";
+export type ProviderThinkingEffort = "low" | "medium" | "high" | "max";
 
 export interface ProviderModelThinking {
   /**
@@ -214,6 +214,92 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
     envApiKey: "DEEPSEEK_API_KEY",
     envBaseURL: "DEEPSEEK_BASE_URL",
     envModel: "DEEPSEEK_MODEL",
+  },
+  {
+    id: "volcengine-agent-plan",
+    displayName: "Volcengine Agent Plan",
+    wireApi: "responses",
+    officialBaseURL: "https://ark.cn-beijing.volces.com/api/plan/v3",
+    officialHosts: ["ark.cn-beijing.volces.com"],
+    authSchemes: ["api-key"],
+    defaultModel: "glm-latest",
+    contextTokens: 1_048_576,
+    inputModalities: ["text", "image"],
+    models: [
+      {
+        id: "glm-latest",
+        displayName: "GLM Latest",
+        contextTokens: 1_048_576,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text", "image"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "glm-5.2",
+        displayName: "GLM 5.2",
+        contextTokens: 1_048_576,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text", "image"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "ark-code-latest",
+        displayName: "Ark Code Latest",
+        contextTokens: 256_000,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text", "image"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "doubao-seed-2.0-code",
+        displayName: "Doubao Seed 2.0 Code",
+        contextTokens: 256_000,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text", "image"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "minimax-m2.7",
+        displayName: "MiniMax M2.7",
+        contextTokens: 200_000,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text"],
+      },
+      {
+        id: "kimi-k2.6",
+        displayName: "Kimi K2.6",
+        contextTokens: 256_000,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text", "image"],
+      },
+      {
+        id: "kimi-k2.7-code",
+        displayName: "Kimi K2.7 Code",
+        contextTokens: 256_000,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text", "image"],
+      },
+    ],
+    capabilities: { ...responsesCaps, requestMetadata: false },
+    envApiKey: "ARK_API_KEY",
+    envBaseURL: "ARK_BASE_URL",
+    envModel: "ARK_MODEL",
   },
   {
     id: "moonshot",

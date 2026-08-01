@@ -77,7 +77,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/goal [prompt]` | Session-local 追寻: `/goal <objective>` creates and starts; bare `/goal` opens status + actions (Continue starts immediately; Continue with guidance… and Accept notes are optional / Pause / Resume / Accept / Re-evaluate… / Cancel). Status shows Goal progress and **Evidence Ledger** gaps (diagnostics ≠ ledger). Accept/pass may leave gaps open; Re-evaluate requires rationale only for fail/unknown. Default Goal `attempts` equals current `maxSteps`; only Steps with non-read Actions consume attempts. Formal Plan / Work Plan are orthogonal (`/plan` / `update_plan`); neither auto-creates from Goal. Session resume demotes active Goals to paused |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
-| `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek`). For **OpenAI Compatible**, also set a **Name** (e.g. `qianwenai` / `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
+| `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan`). For **OpenAI Compatible**, also set a **Name** (e.g. `qianwenai` / `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
 | `/skills` | Skills hub: list discovered Skills, or Install → scope → name/path form |
@@ -287,7 +287,7 @@ Run or in-flight Subagent. Unsettled delegations cancel on Session recovery befo
 
 User TOML may set `context_window_tokens` and `output_reserve_tokens`. `/model` edits both (Max output tokens =
 the next-response reserve / API `max_output_tokens`, including thinking where the provider counts it). The reserve
-defaults from the model catalog (16K generic; DeepSeek V4 65,536) and is hard-capped at 1/8 of the window. The TUI
+defaults from the model catalog (16K generic; DeepSeek V4 / Volcengine Agent Plan 65,536) and is hard-capped at 1/8 of the window. The TUI
 shows window, prompt budget, reserve, current use, and compacted-exchange savings. One deterministic estimator accounts for
 ContextBlocks, portable messages, Tool schemas, framing, and images; the Unicode fallback is conservative and a
 ModelPort may supply a model-calibrated estimator. Required policy/control and advertised Tools reserve budget
@@ -298,7 +298,7 @@ advertised Tool schemas. Older Steps without aggregate facts remain readable but
 unavailable. Increasing the window does not turn off compaction or remove its Artifact trail.
 Without an explicit override, Kimi model windows resolve from the selected model: `k3` uses 1,048,576 and
 `k3-256k`, `kimi-for-coding`, and `kimi-for-coding-highspeed` use 262,144. Kimi defaults to `k3`.
-Set `reasoning_effort = "low" | "high" | "max" | "none"` (aliases documented by `@civaapple/qi-ai` are also
+Set `reasoning_effort = "low" | "medium" | "high" | "max" | "none"` (aliases documented by `@civaapple/qi-ai` are also
 accepted), pass `--effort`, or set `KIMI_MODEL_THINKING_EFFORT` / `QI_REASONING_EFFORT`; K3 defaults to `high`.
 K2.7 Code keeps thinking always on (no effort control). Disabling thinking may route K3/K2.7 requests to an
 older model according to the Kimi Code service contract. Authenticated `/model` and Kimi login may refresh the
@@ -308,6 +308,10 @@ catalog. An in-process model switch refreshes the model-derived window before th
 Kimi sends as `max_completion_tokens`.
 Kimi `/login` shows these defaults before authentication and saves the selected model, normalized effort, and
 editable window to `~/.qi/config.toml`; the API key remains sealed under `QI_HOME`.
+**Volcengine Agent Plan** (`volcengine-agent-plan`) uses `ARK_API_KEY` and
+`https://ark.cn-beijing.volces.com/api/plan/v3` (Responses). Default model is `glm-latest`; thinking models
+accept `low`/`medium`/`high` (wire: `thinking.type` + `reasoning.effort`). `/model` Max output tokens maps to
+`max_output_tokens` (for example `1024`).
 
 Main Runs default to 32 Steps. `max_steps` accepts 8–1000 in user or project TOML, with
 `--max-steps` > project > user > default precedence. `/settings` → **Step budget** and the `/max-steps` alias

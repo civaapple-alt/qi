@@ -95,6 +95,9 @@ Provider login details:
   (e.g. `qianwenai` / `zhipu`). Multiple endpoints are stored under `[[compatible]]`. Selecting a saved
   endpoint opens Switch / Reconfigure (API key) / Logout — same pattern as other providers. Slash:
   `/login use <name>`.
+- **Volcengine Agent Plan** (`volcengine-agent-plan`): Responses at the Agent Plan base URL with `ARK_API_KEY`.
+  Default model `glm-latest`. Thinking models expose `low`/`medium`/`high` effort; models such as
+  `minimax-m2.7` omit effort. `/model` Max output tokens maps to `max_output_tokens`.
 - Sealed provider accounts are marked **configured** in Providers. Switch without re-entering the key via
   **Switch to this provider**, or `/login use <provider>` (e.g. `/login use deepseek`). Model/base URL are
   restored from credential metadata. **Switch** only activates another sealed account; **Logout** clears only

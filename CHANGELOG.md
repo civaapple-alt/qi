@@ -10,6 +10,12 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Volcengine Agent Plan provider (`volcengine-agent-plan`): Responses wire to
+  `https://ark.cn-beijing.volces.com/api/plan/v3` with `ARK_API_KEY`, default model `glm-latest`, catalog
+  models including `glm-5.2` / `ark-code-latest` / `doubao-seed-2.0-code` (effort `low`/`medium`/`high`) and
+  no-thinking models `minimax-m2.7` / `kimi-k2.6` / `kimi-k2.7-code`. Enabled thinking sends
+  `thinking: { type: "enabled" }` plus `reasoning: { effort }`; `none` sends `thinking: { type: "disabled" }`.
+  Output reserve maps to `max_output_tokens`.
 - DeepSeek V4 Flash Responses adaptation: `deepseek-v4-flash` uses the Responses wire API with 1M context,
   effort thinking (`low`/`high`/`max`), and no image/`metadata` fields; `deepseek-v4-pro` stays on Chat
   Completions until the vendor supports Responses. Portable `{ type: "reasoning" }` parts echo committed CoT
@@ -33,6 +39,9 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- Shared reasoning-effort normalization treats `medium` as its own level (no longer aliased to `high`).
+  Providers whose catalogs omit `medium` (Kimi K3, DeepSeek V4) still fall back to the model `defaultEffort`
+  on the wire when an unsupported level is selected. Session `session.model.configured` accepts `medium`.
 - Kimi Code model support aligns with the current Code catalog and Chat Completions contract: K3/K3-256k
   advertise `low`/`high`/`max` effort (default `high`) and send top-level `reasoning_effort`; K2.7 Code models
   keep thinking always on with `thinking.keep=all`. Authenticated `/model` and login forms may refresh the
@@ -145,6 +154,8 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Documentation
 
+- Document Volcengine Agent Plan login/config, Responses deep-thinking wire shape, and `medium` effort semantics
+  in root README, CLI interaction model, provider adapters, and ADR-0009.
 - CLI and agent docs: Plan/Agent clarification via `ask_question` or freeform next-turn questions; Ask still
   omits the tool; Goal Continues inherit Session mode (ADR-0011).
 - CLI and agent docs: Plan/Agent Work Todo (`update_plan`) for focus across research and Goal slices; successive

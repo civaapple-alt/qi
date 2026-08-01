@@ -282,6 +282,16 @@ test("Kimi thinking uses top-level reasoning_effort, disable for none, and keep:
   }))) {
     // drain
   }
+  const mediumOnK3 = new OpenAIChatCompletionsModelPort(client, {
+    providerNames: ["kimi"],
+    reasoningEffort: "medium",
+  });
+  for await (const _event of mediumOnK3.stream(request({
+    model: { provider: "kimi", model: "k3" },
+    tools: [],
+  }))) {
+    // drain
+  }
 
   assert.deepEqual(bodies[0].thinking, { type: "disabled" });
   assert.equal(bodies[0].reasoning_effort, undefined);
@@ -291,14 +301,16 @@ test("Kimi thinking uses top-level reasoning_effort, disable for none, and keep:
   assert.equal(bodies[2].reasoning_effort, "high");
   assert.equal(bodies[3].thinking, undefined);
   assert.equal(bodies[3].reasoning_effort, "low");
+  // Catalog K3 omits medium; unsupported levels fall back to defaultEffort.
+  assert.equal(bodies[4].thinking, undefined);
+  assert.equal(bodies[4].reasoning_effort, "high");
   assert.equal(normalizeKimiReasoningEffort(undefined), undefined);
   assert.equal(normalizeKimiReasoningEffort(null), undefined);
   for (const value of ["ultra", "max", "xhigh"]) {
     assert.equal(normalizeKimiReasoningEffort(value), "max");
   }
-  for (const value of ["high", "medium"]) {
-    assert.equal(normalizeKimiReasoningEffort(value), "high");
-  }
+  assert.equal(normalizeKimiReasoningEffort("high"), "high");
+  assert.equal(normalizeKimiReasoningEffort("medium"), "medium");
   for (const value of ["low", "minimum", "light", "minimal"]) {
     assert.equal(normalizeKimiReasoningEffort(value), "low");
   }

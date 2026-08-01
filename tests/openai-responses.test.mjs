@@ -475,6 +475,88 @@ test("DeepSeek Responses sends reasoning effort, omits metadata, and echoes reas
   assert.equal(captured.input[2].type, "function_call");
 });
 
+test("Volcengine Agent Plan Responses sends thinking.type, reasoning.effort, and max_output_tokens", async () => {
+  let captured;
+  const client = {
+    responses: {
+      create(body) {
+        captured = body;
+        return asyncEvents([
+          { type: "response.reasoning_summary_text.delta", delta: "Plan", sequence_number: 1 },
+          { type: "response.completed", sequence_number: 2, response: completedResponse() },
+        ]);
+      },
+    },
+  };
+  const { getProviderProfile } = await import("@civaapple/qi-ai");
+  const port = new OpenAIResponsesModelPort(client, {
+    providerNames: ["volcengine-agent-plan"],
+    requestMetadata: false,
+    imageInput: true,
+    reasoningEffort: "medium",
+    profile: getProviderProfile("volcengine-agent-plan"),
+    contextTokens: 1_048_576,
+  });
+
+  for await (const _event of port.stream(request({
+    model: { provider: "volcengine-agent-plan", model: "glm-latest" },
+    tools: [],
+    maxOutputTokens: 1024,
+  }))) {
+    // Drain.
+  }
+
+  assert.equal("metadata" in captured, false);
+  assert.deepEqual(captured.thinking, { type: "enabled" });
+  assert.deepEqual(captured.reasoning, { effort: "medium" });
+  assert.equal(captured.max_output_tokens, 1024);
+});
+
+test("Volcengine Agent Plan disables thinking without reasoning.effort and omits thinking for non-thinking models", async () => {
+  const bodies = [];
+  const client = {
+    responses: {
+      create(body) {
+        bodies.push(body);
+        return asyncEvents([
+          { type: "response.completed", sequence_number: 1, response: completedResponse() },
+        ]);
+      },
+    },
+  };
+  const { getProviderProfile } = await import("@civaapple/qi-ai");
+  const profile = getProviderProfile("volcengine-agent-plan");
+  const disabled = new OpenAIResponsesModelPort(client, {
+    providerNames: ["volcengine-agent-plan"],
+    requestMetadata: false,
+    reasoningEffort: "none",
+    profile,
+  });
+  for await (const _event of disabled.stream(request({
+    model: { provider: "volcengine-agent-plan", model: "glm-latest" },
+    tools: [],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(bodies[0].thinking, { type: "disabled" });
+  assert.equal("reasoning" in bodies[0], false);
+
+  const noThinking = new OpenAIResponsesModelPort(client, {
+    providerNames: ["volcengine-agent-plan"],
+    requestMetadata: false,
+    reasoningEffort: "high",
+    profile,
+  });
+  for await (const _event of noThinking.stream(request({
+    model: { provider: "volcengine-agent-plan", model: "minimax-m2.7" },
+    tools: [],
+  }))) {
+    // Drain.
+  }
+  assert.equal("thinking" in bodies[1], false);
+  assert.equal("reasoning" in bodies[1], false);
+});
+
 test("DeepSeek Responses rejects image input", async () => {
   let called = false;
   const client = {

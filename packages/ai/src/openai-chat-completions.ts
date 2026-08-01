@@ -326,7 +326,7 @@ function chatThinkingConfig(
   return undefined;
 }
 
-/** Normalize operator effort aliases used by Kimi and DeepSeek. */
+/** Normalize operator effort aliases used by Kimi, DeepSeek, and Volcengine Agent Plan. */
 export function normalizeReasoningEffort(
   value: string | null | undefined,
 ): ProviderThinkingEffort | "none" | undefined {
@@ -337,8 +337,9 @@ export function normalizeReasoningEffort(
     case "xhigh":
       return "max";
     case "high":
-    case "medium":
       return "high";
+    case "medium":
+      return "medium";
     case "low":
     case "minimum":
     case "light":
