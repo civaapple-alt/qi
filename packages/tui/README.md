@@ -12,9 +12,12 @@ Reusable Qi-specific terminal presentation and control components built on
 - Wrap wide Markdown table cells (or stack fields on narrow terminals) so later columns are not clipped, and
   keep the latest three display-wrapped provisional model text/reasoning/tool lines visible in the Working strip.
 - Keep provisional reasoning in the live Working strip only (never as agent narration); render settled reasoning
-  as a one-line, expandable Thinking item. Length-truncated or very large assistant `text` stays as a short
-  truncated tail unless the Step is expanded. Render an accepted Formal Plan as a 200-line transcript preview
-  with its immutable local path instead of treating it as pasted input.
+  as a one-line, expandable Thinking item. Length-boundary assistant `text` stays as an 8-line truncated tail;
+  ordinary long replies preview from the head (200 rendered lines on a terminal Step, matching Formal Plan
+  scale; 48 mid-Run) with Ctrl+O for the rest. Ctrl+O prefers that truncated model output over Thinking when
+  both advertise the same shortcut, and an expanded Step renders the full assistant text from the start.
+  Render an accepted Formal Plan as a 200-line transcript preview with its immutable local path instead of
+  treating it as pasted input.
 - Render that same bounded Formal Plan preview before Plan Review choices, so the reviewed document is visible
   before acceptance.
 - Retain confirmed `ask_question` cards with every question and option plus selected, custom-text, and skipped

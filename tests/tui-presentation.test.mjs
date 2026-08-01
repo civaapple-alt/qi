@@ -1693,6 +1693,105 @@ test("length-truncated thinking dumps stay collapsed in the transcript", () => {
   // Handoff may show a one-line preview; the wall of CoT must not appear in full.
   assert.equal((transcript.match(/UNIQUE_THINKING_MARKER/g) ?? []).length, 1);
   assert.doesNotMatch(transcript, /thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking thinking/);
+  // Ctrl+O must expand the truncated assistant text, not only the Thinking line.
+  assert.equal(presenter.toggleExpand(), "Expanded model output");
+  const expanded = presenter.render(80).join("\n");
+  assert.doesNotMatch(expanded, /truncated model output · Ctrl\+O/);
+  assert.match(expanded, /UNIQUE_THINKING_MARKER/);
+  assert.equal(presenter.toggleExpand(), "Collapsed model output");
+  assert.match(presenter.render(80).join("\n"), /truncated model output · Ctrl\+O/);
+});
+
+test("long response reports preview from the head like Formal Plan, not an 8-line tail", () => {
+  const report = [
+    "# Offline memo evaluation",
+    "",
+    "Intro paragraph that must be visible in the collapsed document preview.",
+    "",
+    ...Array.from({ length: 260 }, (_, index) => `Section line ${index + 1}: ${"detail ".repeat(12)}`),
+    "",
+    "## Summary",
+    "TAIL_ONLY_SUMMARY_MARKER prefer fixing image storage first.",
+  ].join("\n");
+  assert.ok(report.length > 4_000);
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "long-report",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const stepId = "stp_report";
+  const runId = "run_report";
+  presenter.update([], {
+    sessionId: "ses_report",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: [runId],
+    runs: {
+      [runId]: {
+        runId,
+        trigger: "goal",
+        mode: "agent",
+        status: "completed",
+        input: "enumerate offline memo features",
+        stepOrder: [stepId],
+        steps: {
+          [stepId]: {
+            stepId,
+            status: "completed",
+            context: {
+              estimatedTokens: 100,
+              budgetTokens: 64_000,
+              includedBlockIds: [],
+              omittedBlockIds: [],
+            },
+            model: {
+              text: report,
+              reasoning: "Draft the evaluation report in the user's language.",
+              finishReason: "response",
+            },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+  });
+  const collapsed = presenter.render(100).join("\n");
+  assert.match(collapsed, /Thinking · Ctrl\+O/);
+  assert.match(collapsed, /Intro paragraph that must be visible in the collapsed document preview/);
+  assert.match(collapsed, /truncated model output · Ctrl\+O/);
+  assert.doesNotMatch(collapsed, /TAIL_ONLY_SUMMARY_MARKER/);
+  assert.ok(
+    collapsed.split("\n").length > 40,
+    "collapsed long-response preview should be document-scale, not an 8-line tail",
+  );
+  assert.equal(presenter.toggleExpand(), "Expanded model output");
+  const expanded = presenter.render(100).join("\n");
+  assert.match(expanded, /Intro paragraph that must be visible in the collapsed document preview/);
+  assert.match(expanded, /TAIL_ONLY_SUMMARY_MARKER/);
+  assert.doesNotMatch(expanded, /truncated model output · Ctrl\+O/);
+  assert.equal(presenter.toggleExpand(), "Collapsed model output");
 });
 
 test("live reasoning activity does not render as agent narration in the transcript", () => {

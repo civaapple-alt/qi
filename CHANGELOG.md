@@ -39,6 +39,11 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- TUI Ctrl+O expands truncated assistant model output before Thinking when both are collapsed on the
+  latest Step, and an expanded Step shows the full assistant text from the start instead of another
+  tailed window that still hid the report intro. Ordinary long replies now preview from the head at
+  Formal Plan scale (200 rendered lines on a terminal Step; 48 mid-Run); only length-boundary CoT dumps
+  keep the old 8-line truncated tail.
 - Shared reasoning-effort normalization treats `medium` as its own level (no longer aliased to `high`).
   Providers whose catalogs omit `medium` (Kimi K3, DeepSeek V4) still fall back to the model `defaultEffort`
   on the wire when an unsupported level is selected. Session `session.model.configured` accepts `medium`.

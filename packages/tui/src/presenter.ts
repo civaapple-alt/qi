@@ -134,6 +134,12 @@ const DISCOVERY_TOOLS = new Set(["read", "list", "tree", "find", "search", "git"
 /** Keep this many recent Steps expanded in an active Run; older Steps fold into one summary. */
 const ACTIVE_RUN_KEEP_STEPS = 8;
 const FORMAL_PLAN_MAX_RENDERED_LINES = 200;
+/** Collapsed transcript threshold for assistant `text` (also used by Ctrl+O targeting). */
+const COLLAPSED_MODEL_TEXT_CHARS = 4_000;
+/** Keep length-boundary CoT dumps tiny; they are not readable documents. */
+const COLLAPSED_LENGTH_DUMP_LINES = 8;
+/** Mid-Run long replies stay compact; terminal reports use Formal Plan–scale head preview. */
+const COLLAPSED_LONG_RESPONSE_LINES = 48;
 
 export class TuiPresenter {
   launch: TuiLaunchInfo;
@@ -412,6 +418,18 @@ export class TuiPresenter {
       }
       this.#expanded.add(activityKey);
       return "Expanded exploration details";
+    }
+    // Truncated assistant text outranks Thinking: both advertise Ctrl+O, and operators almost
+    // always want the report body, not the collapsed reasoning line.
+    const modelOutputKey = this.latestTruncatedModelOutputKey();
+    if (modelOutputKey) {
+      if (this.#expanded.has(modelOutputKey) || this.#expanded.has("markdown:final")) {
+        this.#expanded.delete(modelOutputKey);
+        this.#expanded.delete("markdown:final");
+        return "Collapsed model output";
+      }
+      this.#expanded.add(modelOutputKey);
+      return "Expanded model output";
     }
     const thinkingKey = this.latestThinkingKey();
     if (thinkingKey) {
@@ -1604,10 +1622,11 @@ export class TuiPresenter {
       }
       if (isPlainShortText(final)) return [final.trim()];
       const isTerminalStep = run.stepOrder.at(-1) === step.stepId && run.status !== "active" && run.status !== "triggered";
-      // Length-truncated turns often dump a wall of thinking into `text`; keep the transcript compact
-      // unless the operator explicitly expands the Step.
-      if (!stepExpanded && (step.model?.finishReason === "length" || final.length > 4_000)) {
-        const lines = boundedDisplayTailLines(final, width, 8);
+      // Length-boundary turns often dump a wall of thinking into `text` — keep that path tiny.
+      // Ordinary long reports are documents: preview from the head at Formal Plan scale on the
+      // terminal Step (200 lines), with a shorter mid-Run budget, then Ctrl+O for the rest.
+      if (!stepExpanded && step.model?.finishReason === "length") {
+        const lines = boundedDisplayTailLines(final, width, COLLAPSED_LENGTH_DUMP_LINES);
         if (lines.length === 0) return [];
         return [
           ...lines,
@@ -1617,9 +1636,20 @@ export class TuiPresenter {
       const rendered = renderMarkdown(final, {
         width,
         expandCodeBlocks: stepExpanded,
-        maxCodeLines: isTerminalStep ? 40 : 16,
+        maxCodeLines: stepExpanded ? 200 : (isTerminalStep ? 40 : 16),
       });
-      return boundRenderedAgentLines(rendered, stepExpanded ? 120 : (isTerminalStep ? 48 : 24));
+      // Explicit Step expansion means "show the report"; do not keep a tailed window that
+      // hides the title/intro while still advertising Ctrl+O.
+      if (stepExpanded) return [...rendered];
+      if (final.length > COLLAPSED_MODEL_TEXT_CHARS) {
+        const limit = isTerminalStep ? FORMAL_PLAN_MAX_RENDERED_LINES : COLLAPSED_LONG_RESPONSE_LINES;
+        if (rendered.length <= limit) return [...rendered];
+        return [
+          ...rendered.slice(0, limit),
+          `… truncated model output · Ctrl+O`,
+        ];
+      }
+      return boundRenderedAgentLines(rendered, isTerminalStep ? 48 : 24);
     }
     // Live reasoning belongs in the Working strip / Thinking block — never as agent narration.
     const liveModel = this.#modelActivity.get(step.stepId);
@@ -1932,6 +1962,15 @@ export class TuiPresenter {
     return step?.model?.reasoning ? `thinking:${step.stepId}` : undefined;
   }
 
+  /** Ctrl+O target when the selected/latest Step has length-collapsed assistant text. */
+  private latestTruncatedModelOutputKey(): string | undefined {
+    const run = this.activeRun() ?? this.selectedRun();
+    if (!run) return undefined;
+    const step = this.selectedStep() ?? (run.stepOrder.at(-1) ? run.steps[run.stepOrder.at(-1)!] : undefined);
+    if (!step || !isCollapsibleModelText(step)) return undefined;
+    return `step:${step.stepId}`;
+  }
+
   /** Ctrl+O target when an active Run has folded older Steps into a summary line. */
   private latestFoldedHistoryKey(): string | undefined {
     const run = this.activeRun() ?? this.selectedRun();
@@ -2135,6 +2174,12 @@ function handoffStatusKey(
 function isGoalAttemptsBudgetPark(run: RunView): boolean {
   if (!run.goalBinding) return false;
   return /\battempts budget exhausted\b/i.test(run.terminal?.detail ?? "");
+}
+
+function isCollapsibleModelText(step: StepView): boolean {
+  const final = step.model?.text;
+  if (!final) return false;
+  return step.model?.finishReason === "length" || final.length > COLLAPSED_MODEL_TEXT_CHARS;
 }
 
 function isPlainShortText(text: string): boolean {
