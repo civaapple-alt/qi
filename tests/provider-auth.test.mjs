@@ -47,12 +47,12 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.equal(providerModelContextTokens(kimi, "kimi-for-coding-highspeed"), 262_144);
   assert.deepEqual(getProviderModelProfile(kimi, "k3")?.thinking, {
     mode: "effort",
-    supportedEfforts: ["max"],
-    defaultEffort: "max",
+    supportedEfforts: ["low", "high", "max"],
+    defaultEffort: "high",
   });
   assert.deepEqual(getProviderModelProfile(kimi, "k3")?.inputModalities, ["text", "image"]);
   assert.deepEqual(getProviderModelProfile(kimi, "kimi-for-coding")?.thinking, {
-    mode: "toggle",
+    mode: "always",
   });
   const deepseek = getProviderProfile("deepseek");
   assert.ok(deepseek);
@@ -131,20 +131,20 @@ test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported
     environment: {},
   };
   assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "xhigh" }).reasoningEffort, "max");
-  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "medium" }).reasoningEffort, "max");
-  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "minimum" }).reasoningEffort, "max");
+  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "medium" }).reasoningEffort, "high");
+  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "minimum" }).reasoningEffort, "low");
   assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "none" }).reasoningEffort, "none");
   assert.equal(resolveProviderConfig({
     ...base,
     environment: { KIMI_MODEL_THINKING_EFFORT: "light" },
-  }).reasoningEffort, "max");
+  }).reasoningEffort, "low");
   assert.equal(resolveProviderConfig({
     ...base,
     environment: {
       QI_REASONING_EFFORT: "medium",
       KIMI_MODEL_THINKING_EFFORT: "max",
     },
-  }).reasoningEffort, "max");
+  }).reasoningEffort, "high");
   assert.throws(
     () => resolveProviderConfig({ ...base, reasoningEffort: "extreme" }),
     /Unsupported reasoning effort/,

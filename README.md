@@ -113,8 +113,8 @@ User Memory is stored in `$QI_HOME/state` and retrieved across projects.
 
 For Kimi Code, `model = "k3"` automatically selects a 1,048,576-token window; `k3-256k`,
 `kimi-for-coding`, and `kimi-for-coding-highspeed` select 262,144 unless `context_window_tokens` overrides it.
-K3 supports and defaults to `reasoning_effort = "max"`; legacy K3 `low` / `high` values normalize to `max`.
-Other model profiles expose only the effort values they explicitly declare.
+K3 supports `reasoning_effort = "low" | "high" | "max"` and defaults to `high`. K2.7 Code models keep thinking
+always on. Other model profiles expose only the effort values they explicitly declare.
 The Kimi `/login` form exposes the four known models as a dropdown with a final custom-ID input, shows the
 effective effort/context defaults, and persists edits without placing the API key in TOML.
 

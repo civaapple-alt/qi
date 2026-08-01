@@ -2,7 +2,11 @@ import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { parse, stringify } from "smol-toml";
-import { normalizeKimiReasoningEffort } from "@civaapple/qi-ai";
+import {
+  getProviderModelProfile,
+  getProviderProfile,
+  normalizeKimiReasoningEffort,
+} from "@civaapple/qi-ai";
 import { defaultLocale, type Locale } from "./i18n.js";
 import {
   normalizeAccountAlias,
@@ -178,12 +182,13 @@ export async function persistUserProviderDefaults(
       ...(selection.imageInput === undefined ? {} : { imageInput: selection.imageInput }),
     })
     : loaded.config.compatible;
-  const requestedReasoningEffort = selection.reasoningEffort ?? loaded.config.reasoningEffort;
-  const reasoningEffort = selection.provider === "kimi" &&
-      (selection.model === "k3" || selection.model === "k3-256k") &&
-      requestedReasoningEffort !== undefined && requestedReasoningEffort !== "none"
-    ? "max"
-    : requestedReasoningEffort;
+  const profile = getProviderProfile(selection.provider);
+  const alwaysOnThinking = profile !== undefined
+    && getProviderModelProfile(profile, selection.model)?.thinking?.mode === "always";
+  // Always-on models (Kimi K2.7 Code) must not keep a stale K3 effort in config.toml.
+  const reasoningEffort = alwaysOnThinking
+    ? undefined
+    : selection.reasoningEffort ?? loaded.config.reasoningEffort;
   const contextWindowTokens = selection.contextWindowTokens ?? loaded.config.contextWindowTokens;
   const next: QiUserConfig = {
     version: 1,
@@ -672,11 +677,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   const baseURL = optionalStringField(root.base_url, `${path}: base_url`, 2_048);
   const accountAlias = optionalStringField(root.account_alias, `${path}: account_alias`, 128);
   const rawReasoningEffort = optionalStringField(root.reasoning_effort, `${path}: reasoning_effort`, 32);
-  const normalizedReasoningEffort = normalizeKimiReasoningEffort(rawReasoningEffort);
-  const reasoningEffort = provider === "kimi" && (model === "k3" || model === "k3-256k") &&
-      normalizedReasoningEffort !== undefined && normalizedReasoningEffort !== "none"
-    ? "max"
-    : normalizedReasoningEffort;
+  const reasoningEffort = normalizeKimiReasoningEffort(rawReasoningEffort);
   const compatible = optionalCompatibleList(root.compatible, `${path}: compatible`);
   const contextWindowTokens = optionalIntegerField(
     root.context_window_tokens,

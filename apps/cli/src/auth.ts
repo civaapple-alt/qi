@@ -9,12 +9,16 @@ import {
   classifyProfileEndpoint,
   createModelPortForProfile,
   getProviderModelProfile,
+  listOpenAICompatibleModels,
   listProviderProfiles,
+  mergeProviderModels,
   normalizeKimiReasoningEffort,
   providerModelContextTokens,
   requireProviderProfile,
   resolveProviderWireApi,
+  type MergedProviderModel,
   type ModelPort,
+  type ProviderProfile,
 } from "@civaapple/qi-ai";
 import {
   createFetchKimiOAuthTransport,
@@ -62,6 +66,8 @@ export class AuthSession {
   readonly #subject: string;
   #config: ProviderConfig;
   #modelPort: ModelPort | undefined;
+  /** Bearer token for provider discovery calls (e.g. GET /models); never logged. */
+  #accessToken: string | undefined;
   #credentialId: string | undefined;
   #handle: string | undefined;
   #contextWindowTokens: number;
@@ -108,16 +114,17 @@ export class AuthSession {
   }
 
   status(): AuthSessionStatus {
-    const modelDefaultEffort = getProviderModelProfile(
+    const thinking = getProviderModelProfile(
       this.#config.profile,
       this.#config.model,
-    )?.thinking?.defaultEffort;
-    const supportedEfforts = getProviderModelProfile(
-      this.#config.profile,
-      this.#config.model,
-    )?.thinking?.supportedEfforts;
+    )?.thinking;
+    const modelDefaultEffort = thinking?.defaultEffort;
+    const supportedEfforts = thinking?.supportedEfforts;
     const configuredEffort = this.#config.reasoningEffort;
-    const effectiveEffort = configuredEffort === "none"
+    // Always-on thinking models (e.g. Kimi K2.7 Code) do not expose an effort control.
+    const effectiveEffort = thinking?.mode === "always"
+      ? undefined
+      : configuredEffort === "none"
       ? "none"
       : configuredEffort !== undefined && supportedEfforts?.includes(configuredEffort)
         ? configuredEffort
@@ -167,9 +174,31 @@ export class AuthSession {
       this.#installSecret(this.#config.apiKey, "api-key");
     } else {
       this.#modelPort = undefined;
+      this.#accessToken = undefined;
       this.#config = { ...this.#config, authStatus: "missing" };
     }
     return this.status();
+  }
+
+  /**
+   * Discover models via GET /models when authenticated, merged with the static catalog.
+   * Failures fall back to the catalog alone so login /model never blocks.
+   */
+  async listAvailableModels(signal?: AbortSignal): Promise<readonly MergedProviderModel[]> {
+    const profile = this.#config.profile;
+    const catalogOnly = () => mergeProviderModels(profile, undefined);
+    if (profile.id !== "kimi") return catalogOnly();
+    const apiKey = this.#accessToken;
+    const baseURL = this.#config.baseURL ?? profile.officialBaseURL;
+    if (!apiKey || !baseURL) return catalogOnly();
+    try {
+      const remote = await listOpenAICompatibleModels(baseURL, apiKey, {
+        ...(signal === undefined ? {} : { signal }),
+      });
+      return mergeProviderModels(profile, remote);
+    } catch {
+      return catalogOnly();
+    }
   }
 
   async loginApiKey(
@@ -205,10 +234,14 @@ export class AuthSession {
       `${profile.displayName} base URL`,
     );
     const endpointTrust = classifyProfileEndpoint(profile, baseURL);
-    const reasoningEffort = loginReasoningEffort(
-      provider,
-      options.reasoningEffort,
-      this.#config.provider === provider ? this.#config.reasoningEffort : undefined,
+    const reasoningEffort = resolveModelReasoningEffort(
+      profile,
+      model,
+      loginReasoningEffort(
+        provider,
+        options.reasoningEffort,
+        this.#config.provider === provider ? this.#config.reasoningEffort : undefined,
+      ),
     );
     const contextWindowTokens = loginContextWindowTokens(options.contextWindowTokens);
     const accountId = accountKey(provider, alias);
@@ -295,10 +328,14 @@ export class AuthSession {
         ?? profile.officialBaseURL,
       `${profile.displayName} base URL`,
     );
-    const reasoningEffort = loginReasoningEffort(
-      provider,
-      routing?.reasoningEffort ?? optionalNonEmpty(stored.metadata?.reasoningEffort),
-      provider === this.#config.provider ? this.#config.reasoningEffort : undefined,
+    const reasoningEffort = resolveModelReasoningEffort(
+      profile,
+      model,
+      loginReasoningEffort(
+        provider,
+        routing?.reasoningEffort ?? optionalNonEmpty(stored.metadata?.reasoningEffort),
+        provider === this.#config.provider ? this.#config.reasoningEffort : undefined,
+      ),
     );
     const contextWindowTokens = loginContextWindowTokens(
       routing?.contextWindowTokens ?? optionalStoredInteger(stored.metadata?.contextWindowTokens),
@@ -415,10 +452,14 @@ export class AuthSession {
       ?? (this.#config.provider === "kimi" ? this.#config.model : undefined)
       ?? profile.defaultModel
       ?? "k3";
-    const reasoningEffort = loginReasoningEffort(
-      "kimi",
-      options.reasoningEffort,
-      this.#config.provider === "kimi" ? this.#config.reasoningEffort : undefined,
+    const reasoningEffort = resolveModelReasoningEffort(
+      profile,
+      model,
+      loginReasoningEffort(
+        "kimi",
+        options.reasoningEffort,
+        this.#config.provider === "kimi" ? this.#config.reasoningEffort : undefined,
+      ),
     );
     const contextWindowTokens = loginContextWindowTokens(options.contextWindowTokens);
     await this.#store.set({
@@ -468,6 +509,7 @@ export class AuthSession {
     this.#credentialId = undefined;
     this.#handle = undefined;
     this.#modelPort = undefined;
+    this.#accessToken = undefined;
     if (provider === this.#config.provider && alias === this.#config.accountAlias) {
       this.#config = withoutApiKey({ ...this.#config, authStatus: "missing" });
     }
@@ -526,6 +568,7 @@ export class AuthSession {
     this.#credentialId = credentialId;
     this.#handle = issued.handle;
     const accessToken = authKind === "oauth" ? safeAccessToken(secret) : secret;
+    this.#accessToken = accessToken;
     this.#modelPort = createModelPortForProfile(this.#config.profile, {
       apiKey: accessToken,
       model: this.#config.model,
@@ -772,6 +815,17 @@ function loginReasoningEffort(
     return undefined;
   }
   return normalizeKimiReasoningEffort(requested) ?? current;
+}
+
+/** Drop effort for always-on thinking models (e.g. Kimi K2.7 Code). */
+function resolveModelReasoningEffort(
+  profile: ProviderProfile,
+  model: string,
+  effort: ProviderConfig["reasoningEffort"],
+): ProviderConfig["reasoningEffort"] {
+  const thinking = getProviderModelProfile(profile, model)?.thinking;
+  if (thinking?.mode === "always") return undefined;
+  return effort;
 }
 
 function loginContextWindowTokens(value: number | undefined): number | undefined {

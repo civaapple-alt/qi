@@ -33,6 +33,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- Kimi Code model support aligns with the current Code catalog and Chat Completions contract: K3/K3-256k
+  advertise `low`/`high`/`max` effort (default `high`) and send top-level `reasoning_effort`; K2.7 Code models
+  keep thinking always on with `thinking.keep=all`. Authenticated `/model` and login forms may refresh the
+  model list via `GET /models` and merge it with the static catalog (thinking/effort authority stays catalogued).
 - Failed `git` Actions show the full request (`git status · ref HEAD`, `git diff · maxCount 5`) plus the
   validation message in the TUI card and Web target/result, not only `INVALID_GIT_ARGUMENT`.
 - TUI statusline shows the effective thinking effort between model and context % (for example

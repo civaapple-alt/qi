@@ -16,17 +16,20 @@ materially different models; callers can inspect them with `getProviderModelProf
 `providerModelContextTokens`.
 
 Profiles also declare input modalities and optional per-model wire-API overrides. Kimi K3 and the known Kimi
-Coding models accept image parts; K3 uses a 1,048,576-token window and `max`-only/default thinking. DeepSeek V4
-Flash uses Responses with a 1M window and effort thinking; V4 Pro stays on Chat Completions until the vendor
-adds Responses. OpenAI Responses accepts images; DeepSeek rejects them. Custom OpenAI-compatible Chat
-Completions endpoints deny image input unless `imageInput` is explicitly enabled by the operator. Portable
-assistant messages may carry a `reasoning` part so thinking-mode tool turns can round-trip CoT. Chat Completions
-sends portable user text/images as a standard content array; image-bearing Tool results keep their Tool
-call/output message and add a following synthetic user media message. Artifact references must be verified and
-materialized before either adapter is invoked.
+Coding models accept image parts; K3 uses a 1,048,576-token window and effort thinking (`low`/`high`/`max`,
+default `high`) sent as top-level `reasoning_effort`. K2.7 Code keeps thinking always on with
+`thinking.keep=all`. Callers may discover remote models with `listOpenAICompatibleModels` and merge them via
+`mergeProviderModels` without changing catalog thinking authority. DeepSeek V4 Flash uses Responses with a 1M
+window and effort thinking; V4 Pro stays on Chat Completions until the vendor adds Responses. OpenAI Responses
+accepts images; DeepSeek rejects them. Custom OpenAI-compatible Chat Completions endpoints deny image input
+unless `imageInput` is explicitly enabled by the operator. Portable assistant messages may carry a `reasoning`
+part so thinking-mode tool turns can round-trip CoT. Chat Completions sends portable user text/images as a
+standard content array; image-bearing Tool results keep their Tool call/output message and add a following
+synthetic user media message. Artifact references must be verified and materialized before either adapter is
+invoked.
 
 ```ts
-import { createModelPortForProfile } from "@civaapple/qi-ai";
+import { createModelPortForProfile, listOpenAICompatibleModels } from "@civaapple/qi-ai";
 import { compileContext } from "@civaapple/qi-ai/context";
 ```
 

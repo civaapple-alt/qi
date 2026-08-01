@@ -219,7 +219,8 @@ test("Kimi Chat Completions applies K3 thinking effort aliases and streams reaso
     tools: [],
   }))) events.push(event);
 
-  assert.deepEqual(captured.thinking, { type: "enabled", effort: "max" });
+  assert.equal(captured.thinking, undefined);
+  assert.equal(captured.reasoning_effort, "max");
   assert.deepEqual(events.map((event) => event.type), [
     "reasoning.delta",
     "text.delta",
@@ -230,7 +231,7 @@ test("Kimi Chat Completions applies K3 thinking effort aliases and streams reaso
   assert.equal((await port.capabilities({ provider: "kimi", model: "k3-256k" })).contextTokens, 262_144);
 });
 
-test("Kimi thinking uses explicit disable for none and boolean enable for K2.7 Code", async () => {
+test("Kimi thinking uses top-level reasoning_effort, disable for none, and keep:all for K2.7", async () => {
   const bodies = [];
   const client = {
     chat: {
@@ -283,9 +284,13 @@ test("Kimi thinking uses explicit disable for none and boolean enable for K2.7 C
   }
 
   assert.deepEqual(bodies[0].thinking, { type: "disabled" });
-  assert.deepEqual(bodies[1].thinking, { type: "enabled" });
-  assert.deepEqual(bodies[2].thinking, { type: "enabled", effort: "max" });
-  assert.deepEqual(bodies[3].thinking, { type: "enabled", effort: "low" });
+  assert.equal(bodies[0].reasoning_effort, undefined);
+  assert.deepEqual(bodies[1].thinking, { type: "enabled", keep: "all" });
+  assert.equal(bodies[1].reasoning_effort, undefined);
+  assert.equal(bodies[2].thinking, undefined);
+  assert.equal(bodies[2].reasoning_effort, "high");
+  assert.equal(bodies[3].thinking, undefined);
+  assert.equal(bodies[3].reasoning_effort, "low");
   assert.equal(normalizeKimiReasoningEffort(undefined), undefined);
   assert.equal(normalizeKimiReasoningEffort(null), undefined);
   for (const value of ["ultra", "max", "xhigh"]) {
@@ -299,6 +304,19 @@ test("Kimi thinking uses explicit disable for none and boolean enable for K2.7 C
   }
   assert.equal(normalizeKimiReasoningEffort("none"), "none");
   assert.throws(() => normalizeKimiReasoningEffort("extreme"), /Unsupported reasoning effort/);
+
+  const alwaysOff = new OpenAIChatCompletionsModelPort(client, {
+    providerNames: ["kimi"],
+    reasoningEffort: "none",
+  });
+  await assert.rejects(
+    async () => {
+      for await (const _event of alwaysOff.stream(request({ tools: [] }))) {
+        // drain
+      }
+    },
+    /keeps thinking always on/,
+  );
 });
 
 test("DeepSeek Chat Completions sends thinking and echoes reasoning_content", async () => {

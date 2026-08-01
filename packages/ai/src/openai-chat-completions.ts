@@ -265,7 +265,7 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
 
 interface KimiThinkingConfig {
   readonly type: "enabled" | "disabled";
-  readonly effort?: ProviderThinkingEffort;
+  readonly keep?: "all";
 }
 
 interface DeepSeekThinkingConfig {
@@ -285,21 +285,28 @@ function chatThinkingConfig(
   if (profile.id === "kimi") {
     const modelProfile = getProviderModelProfile(profile, model);
     const effort = normalizeReasoningEffort(requestedEffort);
+    if (modelProfile?.thinking?.mode === "always") {
+      if (effort === "none") {
+        throw new TypeError(
+          `Kimi model ${model} keeps thinking always on; reasoning effort "none" is not supported`,
+        );
+      }
+      return { thinking: { type: "enabled", keep: "all" } };
+    }
     if (effort === "none") return { thinking: { type: "disabled" } };
     if (!modelProfile?.thinking) {
-      return effort === undefined ? undefined : { thinking: { type: "enabled", effort } };
+      // Unknown / future model ID: pass top-level reasoning_effort when the operator set one.
+      return effort === undefined ? undefined : { reasoningEffort: effort };
     }
-    if (modelProfile.thinking.mode === "toggle") return { thinking: { type: "enabled" } };
+    if (modelProfile.thinking.mode === "toggle") {
+      return { thinking: { type: "enabled", keep: "all" } };
+    }
+    // K3 effort models: top-level reasoning_effort; do not nest effort inside thinking.
     const supported = modelProfile.thinking.supportedEfforts;
     const selected = effort !== undefined && supported?.includes(effort)
       ? effort
       : modelProfile.thinking.defaultEffort ?? supported?.[0] ?? "high";
-    return {
-      thinking: {
-        type: "enabled",
-        effort: selected,
-      },
-    };
+    return { reasoningEffort: selected };
   }
   if (profile.id === "deepseek") {
     const modelProfile = getProviderModelProfile(profile, model);

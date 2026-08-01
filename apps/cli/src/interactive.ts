@@ -2375,7 +2375,7 @@ export class InteractiveTui {
         this.#render();
         return;
       }
-      openModelConfigurationPanel(this.#panelFlow());
+      void openModelConfigurationPanel(this.#panelFlow());
       return;
     }
     if (name === "max-steps") {

@@ -18,7 +18,12 @@ export interface ProviderTransportCapabilities {
 export type ProviderThinkingEffort = "low" | "high" | "max";
 
 export interface ProviderModelThinking {
-  readonly mode: "toggle" | "effort";
+  /**
+   * `toggle` — operator may enable/disable thinking.
+   * `effort` — thinking stays on; operator selects an effort level.
+   * `always` — thinking is always on and cannot be disabled (e.g. Kimi K2.7 Code).
+   */
+  readonly mode: "toggle" | "effort" | "always";
   readonly supportedEfforts?: readonly ProviderThinkingEffort[];
   readonly defaultEffort?: ProviderThinkingEffort;
 }
@@ -123,8 +128,8 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
         inputModalities: ["text", "image"],
         thinking: {
           mode: "effort",
-          supportedEfforts: ["max"],
-          defaultEffort: "max",
+          supportedEfforts: ["low", "high", "max"],
+          defaultEffort: "high",
         },
       },
       {
@@ -134,8 +139,8 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
         inputModalities: ["text", "image"],
         thinking: {
           mode: "effort",
-          supportedEfforts: ["max"],
-          defaultEffort: "max",
+          supportedEfforts: ["low", "high", "max"],
+          defaultEffort: "high",
         },
       },
       {
@@ -143,14 +148,14 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
         displayName: "Kimi K2.7 Code",
         contextTokens: 262_144,
         inputModalities: ["text", "image"],
-        thinking: { mode: "toggle" },
+        thinking: { mode: "always" },
       },
       {
         id: "kimi-for-coding-highspeed",
         displayName: "Kimi K2.7 Code HighSpeed",
         contextTokens: 262_144,
         inputModalities: ["text", "image"],
-        thinking: { mode: "toggle" },
+        thinking: { mode: "always" },
       },
     ],
     capabilities: { ...chatCaps, reasoning: true },

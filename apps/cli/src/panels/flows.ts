@@ -1,8 +1,10 @@
 import {
   getProviderModelProfile,
   listProviderProfiles,
+  mergeProviderModels,
   providerModelContextTokens,
   providerModelOutputReserveTokens,
+  type MergedProviderModel,
   type ProviderProfile,
 } from "@civaapple/qi-ai";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
@@ -442,7 +444,7 @@ async function openCompatiblePanel(ctx: PanelFlowContext): Promise<void> {
       if (item.id === "add") {
         const profile = listProviderProfiles().find((candidate) => candidate.id === "compatible");
         if (!profile) return;
-        openApiKeyForm(ctx, "compatible", profile);
+        void openApiKeyForm(ctx, "compatible", profile);
         return;
       }
       if (item.id.startsWith("endpoint:")) {
@@ -526,7 +528,7 @@ async function openCompatibleEndpointPanel(
         return;
       }
       if (item.id === "relogin") {
-        openApiKeyForm(ctx, "compatible", profile, {
+        void openApiKeyForm(ctx, "compatible", profile, {
           alias: endpoint.name,
           ...(endpoint.model === undefined ? {} : { model: endpoint.model }),
           ...(endpoint.baseURL === undefined ? {} : { baseURL: endpoint.baseURL }),
@@ -676,6 +678,7 @@ export function openPermissionsPanel(ctx: PanelFlowContext): void {
 export function supportedEffortsForModel(profile: ProviderProfile, model: string): readonly string[] {
   const modelProfile = getProviderModelProfile(profile, model);
   if (!modelProfile?.thinking) return [];
+  if (modelProfile.thinking.mode === "always") return [];
   if (modelProfile.thinking.mode === "toggle") {
     return ["none", modelProfile.thinking.defaultEffort ?? "high"];
   }
@@ -1208,7 +1211,7 @@ export function openSessionsPanel(ctx: PanelFlowContext): void {
   }));
 }
 
-export function openModelConfigurationPanel(ctx: PanelFlowContext): void {
+export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promise<void> {
   const auth = ctx.auth;
   if (!auth) {
     ctx.presenter.setNotice("Auth session is unavailable in this TUI mode.");
@@ -1219,20 +1222,37 @@ export function openModelConfigurationPanel(ctx: PanelFlowContext): void {
   const profile = listProviderProfiles().find((candidate) => candidate.id === status.provider);
   if (!profile) return;
   const locale = ctx.locale();
+  const availableModels = profile.id === "kimi"
+    ? await auth.listAvailableModels()
+    : mergeProviderModels(profile, undefined);
   const efforts = supportedEffortsForModel(profile, status.model);
+  const modelById = new Map(availableModels.map((model) => [model.id, model]));
   const fields: FormField[] = [
     {
       id: "model",
       label: "Model",
       initialValue: status.model,
       required: true,
-      ...(profile.models?.length
+      ...(availableModels.length > 0
         ? {
-            options: profile.models.map((model) => ({
-              value: model.id,
-              label: model.displayName,
-              description: `${model.id} · ${formatContextWindow(model.contextTokens)}`,
-            })),
+            options: [
+              ...availableModels.map((model) => ({
+                value: model.id,
+                label: model.displayName,
+                description: `${model.id} · ${formatContextWindow(model.contextTokens)}${
+                  model.catalogued ? "" : (locale === "zh" ? " · 远程" : " · remote")
+                }`,
+              })),
+              ...(profile.id === "kimi"
+                ? [{
+                    value: "",
+                    label: locale === "zh" ? "手动输入模型 ID…" : "Enter model ID manually…",
+                    description: locale === "zh" ? "自定义或未来模型" : "Custom or future model",
+                    customInput: true as const,
+                    placeholder: "model id",
+                  }]
+                : []),
+            ],
           }
         : {}),
     },
@@ -1288,8 +1308,10 @@ export function openModelConfigurationPanel(ctx: PanelFlowContext): void {
     fields,
     onChange: (fieldId, value, values) => {
       if (fieldId === "model" && value) {
-        const next = profile.models?.find((candidate) => candidate.id === value);
-        const windowTokens = providerModelContextTokens(profile, value);
+        const next = modelById.get(value)?.profile
+          ?? profile.models?.find((candidate) => candidate.id === value);
+        const windowTokens = modelById.get(value)?.contextTokens
+          ?? providerModelContextTokens(profile, value);
         return {
           contextWindowTokens: String(windowTokens),
           outputReserveTokens: String(resolveOutputReserveTokens(
@@ -1318,10 +1340,12 @@ export function openModelConfigurationPanel(ctx: PanelFlowContext): void {
     onClose: ctx.panels.dismiss,
     onSubmit: (values) => {
       ctx.panels.closeAll();
+      const model = (values.model ?? "").trim();
       const contextWindowTokens = parseLoginContextWindow(values.contextWindowTokens);
+      const modelEfforts = supportedEffortsForModel(profile, model);
       ctx.configureModel({
-        model: (values.model ?? "").trim(),
-        ...(values.reasoningEffort === undefined
+        model,
+        ...(modelEfforts.length === 0 || values.reasoningEffort === undefined
           ? {}
           : { reasoningEffort: values.reasoningEffort }),
         contextWindowTokens,
@@ -1424,15 +1448,15 @@ async function openProviderAuthPanel(ctx: PanelFlowContext, providerId: string):
         return;
       }
       if (item.id === "configure") {
-        openModelConfigurationPanel(ctx);
+        void openModelConfigurationPanel(ctx);
         return;
       }
       if (item.id === "api-key") {
-        openApiKeyForm(ctx, providerId, profile, primary);
+        void openApiKeyForm(ctx, providerId, profile, primary);
         return;
       }
       if (item.id === "device") {
-        openDeviceLoginForm(ctx, providerId, profile, primary?.model);
+        void openDeviceLoginForm(ctx, providerId, profile, primary?.model);
         return;
       }
       if (item.id === "logout") {
@@ -1450,17 +1474,20 @@ async function openProviderAuthPanel(ctx: PanelFlowContext, providerId: string):
   }));
 }
 
-function openDeviceLoginForm(
+async function openDeviceLoginForm(
   ctx: PanelFlowContext,
   providerId: string,
   profile: ProviderProfile,
   sealedModel?: string,
-): void {
+): Promise<void> {
   const locale = ctx.locale();
   const defaultModel = profile.defaultModel ?? "k3";
   const currentModel = ctx.auth?.status().provider === providerId
     ? ctx.auth.status().model
     : undefined;
+  const availableModels = providerId === "kimi" && ctx.auth
+    ? await ctx.auth.listAvailableModels()
+    : mergeProviderModels(profile, undefined);
   ctx.panels.push(new FormPanel({
     title: locale === "zh"
       ? `设备登录 · ${profile.displayName}`
@@ -1473,16 +1500,18 @@ function openDeviceLoginForm(
       currentModel ?? sealedModel ?? defaultModel,
       ctx.auth?.status(),
       locale,
+      availableModels,
     ),
-    onChange: kimiLoginFieldChange(profile),
+    onChange: kimiLoginFieldChange(profile, availableModels),
     submitLabel: locale === "zh" ? "继续授权" : "Continue",
     onClose: ctx.panels.dismiss,
     onSubmit: (values) => {
       ctx.panels.closeAll();
       const model = (values.model ?? "").trim() || defaultModel;
+      const modelEfforts = supportedEffortsForModel(profile, model);
       ctx.startLoginDevice(providerId, {
         model,
-        ...(values.reasoningEffort === undefined
+        ...(modelEfforts.length === 0 || values.reasoningEffort === undefined
           ? {}
           : { reasoningEffort: values.reasoningEffort }),
         contextWindowTokens: parseLoginContextWindow(values.contextWindowTokens),
@@ -1491,18 +1520,21 @@ function openDeviceLoginForm(
   }));
 }
 
-function openApiKeyForm(
+async function openApiKeyForm(
   ctx: PanelFlowContext,
   providerId: string,
   profile: ProviderProfile,
   sealed?: { model?: string; baseURL?: string; alias?: string },
-): void {
+): Promise<void> {
   const locale = ctx.locale();
   const defaultModel = sealed?.model ?? profile.defaultModel ?? "";
   const defaultBase = sealed?.baseURL ?? profile.officialBaseURL;
   const isCompatible = providerId === "compatible";
+  const availableModels = providerId === "kimi" && ctx.auth
+    ? await ctx.auth.listAvailableModels()
+    : mergeProviderModels(profile, undefined);
   const modelFields = providerId === "kimi"
-    ? kimiModelFields(profile, defaultModel, ctx.auth?.status(), locale)
+    ? kimiModelFields(profile, defaultModel, ctx.auth?.status(), locale, availableModels)
     : [{
         id: "model",
         label: "Model",
@@ -1542,7 +1574,7 @@ function openApiKeyForm(
         ? `API key 密封保存在 QI_HOME。Base URL / model / provider${providerId === "kimi" ? " / effort / 上下文窗口" : ""} 写入 ~/.qi/config.toml。`
         : `API keys are sealed under QI_HOME. Base URL / model / provider${providerId === "kimi" ? " / effort / context window" : ""} are saved to ~/.qi/config.toml.`),
     fields,
-    ...(providerId === "kimi" ? { onChange: kimiLoginFieldChange(profile) } : {}),
+    ...(providerId === "kimi" ? { onChange: kimiLoginFieldChange(profile, availableModels) } : {}),
     submitLabel: "Authenticate",
     onClose: ctx.panels.dismiss,
     onSubmit: (values) => {
@@ -1550,6 +1582,7 @@ function openApiKeyForm(
       const model = (values.model ?? "").trim() || defaultModel || undefined;
       const baseURL = (values.baseURL ?? "").trim() || defaultBase;
       const alias = (values.name ?? "").trim() || undefined;
+      const modelEfforts = model === undefined ? [] : supportedEffortsForModel(profile, model);
       ctx.startLoginApiKey(providerId, values.apiKey ?? "", {
         ...(alias === undefined ? {} : { alias }),
         ...(model === undefined ? {} : { model }),
@@ -1557,7 +1590,9 @@ function openApiKeyForm(
         ...(providerId !== "kimi"
           ? {}
           : {
-              reasoningEffort: values.reasoningEffort,
+              ...(modelEfforts.length === 0 || values.reasoningEffort === undefined
+                ? {}
+                : { reasoningEffort: values.reasoningEffort }),
               contextWindowTokens: parseLoginContextWindow(values.contextWindowTokens),
             }),
       });
@@ -1570,13 +1605,16 @@ function kimiModelFields(
   initialModel: string,
   status: ReturnType<AuthSession["status"]> | undefined,
   locale: Locale,
+  availableModels: readonly MergedProviderModel[] = mergeProviderModels(profile, undefined),
 ): FormField[] {
   const activeStatus = status?.provider === "kimi" ? status : undefined;
   const model = initialModel || profile.defaultModel || "k3";
-  const modelProfile = profile.models?.find((candidate) => candidate.id === model);
+  const modelProfile = availableModels.find((candidate) => candidate.id === model)?.profile
+    ?? profile.models?.find((candidate) => candidate.id === model);
   const contextWindowTokens = activeStatus?.model === model
     ? activeStatus.contextWindowTokens
-    : providerModelContextTokens(profile, model);
+    : availableModels.find((candidate) => candidate.id === model)?.contextTokens
+      ?? providerModelContextTokens(profile, model);
   const efforts = supportedEffortsForModel(profile, model);
   const effort = (activeStatus?.model === model ? activeStatus.reasoningEffort : undefined)
     ?? modelProfile?.thinking?.defaultEffort
@@ -1589,10 +1627,12 @@ function kimiModelFields(
       initialValue: model,
       required: true,
       options: [
-        ...(profile.models ?? []).map((candidate) => ({
+        ...availableModels.map((candidate) => ({
           value: candidate.id,
           label: candidate.displayName,
-          description: `${candidate.id} · ${formatContextWindow(candidate.contextTokens)}`,
+          description: `${candidate.id} · ${formatContextWindow(candidate.contextTokens)}${
+            candidate.catalogued ? "" : (locale === "zh" ? " · 远程" : " · remote")
+          }`,
         })),
         {
           value: "",
@@ -1626,15 +1666,22 @@ function kimiModelFields(
   ];
 }
 
-function kimiLoginFieldChange(profile: ProviderProfile): NonNullable<
+function kimiLoginFieldChange(
+  profile: ProviderProfile,
+  availableModels: readonly MergedProviderModel[] = mergeProviderModels(profile, undefined),
+): NonNullable<
   ConstructorParameters<typeof FormPanel>[0]["onChange"]
 > {
+  const modelById = new Map(availableModels.map((model) => [model.id, model]));
   return (fieldId, value) => {
     if (fieldId !== "model" || !value) return;
-    const model = profile.models?.find((candidate) => candidate.id === value);
+    const model = modelById.get(value)?.profile
+      ?? profile.models?.find((candidate) => candidate.id === value);
     const efforts = supportedEffortsForModel(profile, value);
     return {
-      contextWindowTokens: String(providerModelContextTokens(profile, value)),
+      contextWindowTokens: String(
+        modelById.get(value)?.contextTokens ?? providerModelContextTokens(profile, value),
+      ),
       ...(efforts.length === 0
         ? {}
         : { reasoningEffort: model?.thinking?.defaultEffort ?? efforts[0]! }),

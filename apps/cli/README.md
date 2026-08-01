@@ -300,9 +300,12 @@ Without an explicit override, Kimi model windows resolve from the selected model
 `k3-256k`, `kimi-for-coding`, and `kimi-for-coding-highspeed` use 262,144. Kimi defaults to `k3`.
 Set `reasoning_effort = "low" | "high" | "max" | "none"` (aliases documented by `@civaapple/qi-ai` are also
 accepted), pass `--effort`, or set `KIMI_MODEL_THINKING_EFFORT` / `QI_REASONING_EFFORT`; K3 defaults to `high`.
-Disabling thinking may route K3/K2.7 requests to an older model according to the Kimi Code service contract.
-An in-process model switch refreshes the model-derived window before the next Run; an explicit
-`context_window_tokens` remains authoritative.
+K2.7 Code keeps thinking always on (no effort control). Disabling thinking may route K3/K2.7 requests to an
+older model according to the Kimi Code service contract. Authenticated `/model` and Kimi login may refresh the
+dropdown via `GET /models` and merge remote ids with the static catalog; thinking/effort authority stays on the
+catalog. An in-process model switch refreshes the model-derived window before the next Run; an explicit
+`context_window_tokens` remains authoritative. `/model` also edits **Max output tokens** (output reserve), which
+Kimi sends as `max_completion_tokens`.
 Kimi `/login` shows these defaults before authentication and saves the selected model, normalized effort, and
 editable window to `~/.qi/config.toml`; the API key remains sealed under `QI_HOME`.
 

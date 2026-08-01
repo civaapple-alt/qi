@@ -118,13 +118,9 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
   if (requestedReasoningEffort !== undefined && !supportsReasoningEffort) {
     throw new TypeError("reasoning effort is currently supported only by the Kimi and DeepSeek providers");
   }
-  const normalizedReasoningEffort = supportsReasoningEffort
+  const reasoningEffort = supportsReasoningEffort
     ? normalizeReasoningEffort(requestedReasoningEffort)
     : undefined;
-  const reasoningEffort = provider === "kimi" && (model === "k3" || model === "k3-256k") &&
-      normalizedReasoningEffort !== undefined && normalizedReasoningEffort !== "none"
-    ? "max"
-    : normalizedReasoningEffort;
   const imageInput = provider === "compatible"
     ? input.imageInput ?? matchingDefaults?.imageInput
     : undefined;

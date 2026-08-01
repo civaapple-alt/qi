@@ -218,7 +218,7 @@ function responsesReasoningConfig(
   if (!modelProfile?.thinking) {
     return effort === undefined ? undefined : { effort };
   }
-  if (modelProfile.thinking.mode === "toggle") {
+  if (modelProfile.thinking.mode === "toggle" || modelProfile.thinking.mode === "always") {
     return { effort: "high" };
   }
   const supported = modelProfile.thinking.supportedEfforts;

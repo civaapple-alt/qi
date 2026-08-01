@@ -88,8 +88,9 @@ Provider login details:
   `base_url` / `account_alias` into `~/.qi/config.toml`.
 - Kimi API-key and device forms replace the free-form Model field with a dropdown for `k3`, `k3-256k`,
   `kimi-for-coding`, and `kimi-for-coding-highspeed`; the final dropdown item exposes a custom model-ID input.
-  The same form displays K3's default `high` effort and the selected model's default context window. Both are
-  editable, persisted as `reasoning_effort` / `context_window_tokens`, and applied to the live runtime.
+  When already authenticated, the dropdown may refresh from `GET /models` and merge remote ids with the static
+  catalog. K3 shows default `high` effort (`low`/`high`/`max`); K2.7 Code keeps thinking always on (no effort
+  control). Context window defaults remain editable and persist as `context_window_tokens`.
 - **OpenAI Compatible** (`compatible`): OpenAI Chat Completions gateways. Login requires a display **Name**
   (e.g. `qianwenai` / `zhipu`). Multiple endpoints are stored under `[[compatible]]`. Selecting a saved
   endpoint opens Switch / Reconfigure (API key) / Logout — same pattern as other providers. Slash:

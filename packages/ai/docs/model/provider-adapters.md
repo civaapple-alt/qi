@@ -51,20 +51,25 @@ The `kimi` profile uses `https://api.kimi.com/coding/v1` with Chat Completions a
 | --- | ---: | --- |
 | `k3` | 1,048,576 | `low` / `high` / `max`, default `high` |
 | `k3-256k` | 262,144 | `low` / `high` / `max`, default `high` |
-| `kimi-for-coding` | 262,144 | enabled/disabled toggle |
-| `kimi-for-coding-highspeed` | 262,144 | enabled/disabled toggle |
+| `kimi-for-coding` | 262,144 | always on (`thinking.keep=all`) |
+| `kimi-for-coding-highspeed` | 262,144 | always on (`thinking.keep=all`) |
 
 K3 effort aliases are normalized before network execution: `ultra|max|xhigh` → `max`,
-`high|medium` → `high`, and `low|minimum|light` → `low`. `none` sends
-`thinking: { type: "disabled" }`; other values fail locally instead of producing a remote HTTP 400. K2.7 Code
-models send `thinking: { type: "enabled" }` for any enabled effort. Kimi `reasoning_content` / `reasoning`
-stream deltas become portable `reasoning.delta` events. Output reserve is sent as `max_completion_tokens` for
-Kimi reasoning models rather than the legacy `max_tokens` field. That value caps the combined hidden reasoning
-and visible completion; the current Kimi wire contract exposes thinking enable/effort but no separate reasoning
-token budget. Context window and completion cap are independent, so a 1M K3 profile does not scale a 16k output
-reserve linearly from the 256k profile.
-For a manually entered future Kimi model ID, an explicit effort is passed through using the same normalized
-Kimi wire shape; omitting effort leaves thinking configuration unspecified because the model profile is unknown.
+`high|medium` → `high`, and `low|minimum|light` → `low`. Enabled K3 requests send top-level
+`reasoning_effort` (not a nested `thinking.effort`). `none` sends `thinking: { type: "disabled" }`;
+other values fail locally instead of producing a remote HTTP 400. Kimi Code may route disabled-thinking
+K3/K2.7 requests to an older model, so the CLI does not advertise `none` for catalog K3/K2.7 models.
+K2.7 Code models always think and send `thinking: { type: "enabled", keep: "all" }`; an explicit
+`none` fails locally. Kimi `reasoning_content` / `reasoning` stream deltas become portable
+`reasoning.delta` events. Output reserve is sent as `max_completion_tokens` for Kimi reasoning models
+rather than the legacy `max_tokens` field. That value caps the combined hidden reasoning and visible
+completion; the current Kimi wire contract exposes thinking enable/effort but no separate reasoning
+token budget. Context window and completion cap are independent, so a 1M K3 profile does not scale a
+16k output reserve linearly from the 256k profile.
+For a manually entered future Kimi model ID, an explicit effort is passed as top-level
+`reasoning_effort`; omitting effort leaves thinking configuration unspecified because the model
+profile is unknown. Authenticated CLI `/model` and login forms may call `GET /models` and merge
+availability with the static catalog; thinking/effort authority remains on the catalog (ADR-0009).
 
 ## DeepSeek V4
 

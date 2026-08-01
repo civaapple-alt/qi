@@ -148,12 +148,12 @@ reasoning_effort = "xhigh"
       contextWindowTokens: 300_000,
     }, path);
     assert.equal(persisted.config.model, "k3-256k");
-    assert.equal(persisted.config.reasoningEffort, "max");
+    assert.equal(persisted.config.reasoningEffort, "low");
     assert.equal(persisted.config.contextWindowTokens, 300_000);
 
     const savedBody = await readFile(path, "utf8");
     assert.match(savedBody, /model = "k3-256k"/);
-    assert.match(savedBody, /reasoning_effort = "max"/);
+    assert.match(savedBody, /reasoning_effort = "low"/);
     assert.match(savedBody, /context_window_tokens = 300000/);
 
     await writeFile(path, `
@@ -176,7 +176,7 @@ reasoning_effort = "max"
       { environment: { QI_HOME: join(root, "state") } },
     );
     assert.equal(k3Compact.kind, "run");
-    assert.equal(k3Compact.options.provider.reasoningEffort, "max");
+    assert.equal(k3Compact.options.provider.reasoningEffort, "high");
     assert.equal(k3Compact.options.contextWindowTokens, 262_144);
 
     await writeFile(path, `
@@ -192,6 +192,7 @@ context_window_tokens = 524288
     );
     assert.equal(overridden.kind, "run");
     assert.equal(overridden.options.contextWindowTokens, 524_288);
+    assert.equal(overridden.options.provider.reasoningEffort, "high");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -633,7 +634,8 @@ max_actions_per_step = 4
 test("supportedEffortsForModel advertises Kimi K3 thinking efforts from provider profile", () => {
   const kimi = getProviderProfile("kimi");
   assert.ok(kimi);
-  assert.deepEqual(supportedEffortsForModel(kimi, "k3"), ["max"]);
+  assert.deepEqual(supportedEffortsForModel(kimi, "k3"), ["low", "high", "max"]);
+  assert.deepEqual(supportedEffortsForModel(kimi, "kimi-for-coding"), []);
 });
 
 test("ensureUserShellConfig writes detected profiles once and preserves later edits", async () => {
