@@ -64,7 +64,8 @@ clear the incompatible project folder after backup.
 Project `memory.sqlite` indexes only that project's **active** Session/Project claims. The fixed local-user Continuity
 Session in `state/continuity.sqlite` is the global fact stream for explicitly confirmed User Memory, projected
 into `state/memory.sqlite`. Both indexes are versioned, transactional, and rebuildable from their event streams;
-claim text is plaintext inside these machine-private databases.
+claim text is plaintext inside these machine-private databases. CLI startup applies incremental catch-up
+(`lastAppliedSequence` / `retainOriginSessions`) instead of wiping the project index on every launch.
 
 `projectPaths()`, `ensureQiLayout()`, `ensureProjectLayout()`, and `SessionRepository` are the path/layout and
 Session catalog surface used by CLI and Web. Existing non-empty pre-0.6 homes fail without migration or deletion.
@@ -94,7 +95,8 @@ byte budget from the 1 MiB text `fetch` Tool.
 `SqliteEventStore` keeps a non-persistent, version-checked projection cache for the running process. Normal
 append validates only the new batch and advances that cache inside the existing transaction; restart, version
 mismatch, validation failure, or rollback rebuilds from the immutable stream. The cache changes no database
-schema or recovery semantics.
+schema or recovery semantics. Catalog listing and `SessionRepository.recover()` use `peekLifecycle` / cheap SQL
+titles so cold start does not full-replay every Session; cold replay remains the `SessionView` oracle.
 
 ## Declaration-only packages
 

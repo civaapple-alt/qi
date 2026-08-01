@@ -138,6 +138,14 @@ import {
   loadRootWorkspaceInstructions,
 } from "./model-context.js";
 
+const EMPTY_SHELL_PROFILES: ShellProfileSnapshot = {
+  default: "direct",
+  allowed: [],
+  directEnabled: false,
+  available: [],
+  unavailable: [],
+};
+
 const OPTIONAL_LEASE_IDS = [
   "lea_tui_write",
   "lea_tui_verify",
@@ -304,10 +312,12 @@ export class TuiRuntime {
   readonly #userMemory: MemoryController;
   readonly #userMemoryStore: SqliteEventStore;
   readonly #projectConfigPath: string;
+  #projectMemoryWarm: Promise<void> = Promise.resolve();
   #shellConfig: QiShellConfig | undefined;
   #verificationManifest: TuiVerificationManifest | undefined;
   #shellProfiles: ShellProfileSnapshot;
   #codeactRuntime: "docker" | "podman" | undefined;
+  #codeactProbe: Promise<void> | undefined;
   #verificationProfiles: readonly VerificationProfile[];
   #mounts: RuntimeMount[];
   #sensitivePathGrants: string[];
@@ -531,9 +541,6 @@ export class TuiRuntime {
     const registry = new ToolRegistry(broker);
     const projectId = options.projectId ?? workspaceProjectId(options.workspaceRoot);
     const projectMemoryIndex = new SqliteMemoryIndex(resolve(stateRoot, "memory.sqlite"));
-    projectMemoryIndex.rebuild(eventStore.listSessions().flatMap(
-      (summary) => eventStore.read(summary.sessionId).events,
-    ));
     const qiHome = resolve(options.qiHome ?? resolve(dataRoot, ".user"));
     const userState = qiStatePaths(qiHome);
     await mkdir(userState.stateRoot, { recursive: true });
@@ -620,10 +627,6 @@ export class TuiRuntime {
     });
     if (options.sessionId) supervisor.recover(options.sessionId);
     if (options.sessionId) await processTasks.recover(options.sessionId);
-    const disabledShell = await probeShellProfiles(
-      options.workspaceRoot,
-      resolveShellConfig(options.shell, false),
-    );
     const projectConfigPath = options.projectConfigPath ?? defaultProjectConfigPath(options.workspaceRoot);
     const projectConfig = await loadProjectConfig(projectConfigPath);
     const runtime = new TuiRuntime(
@@ -642,7 +645,7 @@ export class TuiRuntime {
       ownedStore,
       artifactStore,
       effectJournal,
-      disabledShell,
+      EMPTY_SHELL_PROFILES,
       broker,
       registry,
       loop,
@@ -658,6 +661,8 @@ export class TuiRuntime {
       userMemory,
       userMemoryStore,
     );
+    // Incremental catch-up runs after create returns so first TUI paint is not blocked.
+    runtime.#projectMemoryWarm = runtime.#catchUpProjectMemory();
     await runtime.applyCapabilities({
       write: options.allowWrite ?? false,
       verify: options.allowVerify ?? false,
@@ -674,6 +679,24 @@ export class TuiRuntime {
       runtime.demoteActiveGoalAfterResume();
     }
     return runtime;
+  }
+
+  /** Wait until project Memory index has caught up with active Session streams. */
+  async ensureProjectMemoryReady(): Promise<void> {
+    await this.#projectMemoryWarm;
+  }
+
+  async #catchUpProjectMemory(): Promise<void> {
+    if (!this.#memoryEnabled) return;
+    const sessionIds = this.#ownedStore
+      ? this.#ownedStore.listActiveSessionIds()
+      : this.#eventStore.listSessions().map((summary) => summary.sessionId);
+    const active = new Set(sessionIds);
+    this.#projectMemoryIndex.retainOriginSessions(active);
+    for (const sessionId of sessionIds) {
+      const after = this.#projectMemoryIndex.lastAppliedSequence(sessionId);
+      this.#projectMemoryIndex.applyBatch(this.#eventStore.read(sessionId, after).events);
+    }
   }
 
   lastGoalContinuation(): GoalContinuationDecision | undefined {
@@ -726,6 +749,9 @@ export class TuiRuntime {
     this.#allowNetwork = normalized.network;
     this.#allowBackground = normalized.background;
     this.#allowDelegate = normalized.delegate;
+    // After leases settle: container probe is slow/hang-prone and must not block first paint.
+    if (normalized.execute) this.#codeactProbe = this.#refreshCodeactTool();
+    else this.#codeactProbe = undefined;
     return { labels: this.capabilityLabels(), capabilities: normalized };
   }
 
@@ -910,18 +936,6 @@ export class TuiRuntime {
       } else {
         this.#closeOptionalTool("script");
       }
-      this.#codeactRuntime = await probeContainerRuntime();
-      if (this.#codeactRuntime) {
-        this.#setOptionalTool("codeact", createCodeActTool({
-          eventStore: this.#eventStore,
-          toolRegistry: this.#registry,
-          artifactStore: this.#artifactStore,
-          workspaceRoot: this.#workspaceRoot,
-          runtime: this.#codeactRuntime,
-        }));
-      } else {
-        this.#closeOptionalTool("codeact");
-      }
     } else {
       this.#closeOptionalTool("shell");
       this.#closeOptionalTool("script");
@@ -954,6 +968,37 @@ export class TuiRuntime {
       }));
     } else {
       this.#closeOptionalTool("delegate");
+    }
+  }
+
+  async #refreshCodeactTool(): Promise<void> {
+    const runtime = await probeContainerRuntime();
+    if (!this.#allowExecute) {
+      this.#codeactRuntime = undefined;
+      this.#broker.revoke("lea_tui_execute_codeact");
+      this.#closeOptionalTool("codeact");
+      return;
+    }
+    this.#codeactRuntime = runtime;
+    this.#broker.revoke("lea_tui_execute_codeact");
+    if (runtime) {
+      this.#setOptionalTool("codeact", createCodeActTool({
+        eventStore: this.#eventStore,
+        toolRegistry: this.#registry,
+        artifactStore: this.#artifactStore,
+        workspaceRoot: this.#workspaceRoot,
+        runtime,
+      }));
+      this.#broker.grant({
+        leaseId: "lea_tui_execute_codeact",
+        subject: this.#subject,
+        tools: ["codeact"],
+        effects: ["execute"],
+        resources: [`container-runtime:${runtime}`],
+        expiresAt: leaseExpiry(),
+      });
+    } else {
+      this.#closeOptionalTool("codeact");
     }
   }
 
@@ -1518,9 +1563,11 @@ export class TuiRuntime {
   }): Promise<TurnResult> {
     if (!options.input.trim()) throw new TypeError("Input must not be empty");
     if (this.#activeController) throw new Error("A Run is already active");
+    // Mark active before any await so mid-start capability/shell changes still deny.
     const controller = new AbortController();
     this.#activeController = controller;
     try {
+      await this.ensureProjectMemoryReady();
       this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
       this.syncMountEvents();
       this.syncSensitivePathEvents();
@@ -1637,6 +1684,8 @@ export class TuiRuntime {
   async close(): Promise<void> {
     this.cancel("TUI closed");
     await this.#processTasks.close(this.sessionId);
+    await this.#projectMemoryWarm.catch(() => undefined);
+    if (this.#codeactProbe) await this.#codeactProbe.catch(() => undefined);
     this.#projectMemoryIndex.close();
     this.#userMemoryIndex.close();
     this.#userMemoryStore.close();

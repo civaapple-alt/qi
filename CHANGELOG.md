@@ -50,6 +50,12 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- CLI and `qi-web` first paint no longer full-replay every Session for catalog/recovery: `peekLifecycle` and
+  cheap `listSessions`/`listCatalog` read lifecycle (and `session.created` titles) from SQLite without building
+  `SessionView`. CLI `SessionRepository.recover()` only fully loads `*_pending` Sessions; project Memory uses
+  deferred incremental catch-up instead of wipe-`rebuild` on every launch; container runtime probe no longer
+  blocks TUI start. `qi-web` `/workbench` omits the raw `events` array (`eventCount` instead); Audit loads
+  `/history` lazily.
 - `/model` save scope labels: **User default** (persist to `~/.qi/config.toml` + sealed credential) vs
   **Current Session only** (apply without changing config), instead of the ambiguous “Account default”.
 - Provider catalogs are declarative JSON under `@civaapple/qi-ai` (`src/catalog/`). Wire thinking dialects

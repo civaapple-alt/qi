@@ -28,7 +28,7 @@ import {
   type ProjectPaths,
   type ProjectSessionPaths,
 } from "../paths.js";
-import { SqliteEventStore } from "./sqlite-event-store.js";
+import { SqliteEventStore, type SessionLifecyclePeek } from "./sqlite-event-store.js";
 
 export interface SessionCatalogEntry extends SessionSummary {
   readonly location: "active" | "archived";
@@ -68,29 +68,35 @@ export class SessionRepository implements EventStore {
   async recover(): Promise<void> {
     this.#assertOpen();
     for (const sessionId of this.#directorySessionIds(this.#paths.sessionsRoot)) {
-      const view = this.load(sessionId);
-      if (view?.lifecycle === "archive_pending" && view.lifecycleOperationId) {
-        await this.#finishArchive(sessionId, view.lifecycleOperationId);
-      } else if (view?.lifecycle === "restore_pending" && view.lifecycleOperationId) {
+      const peek = this.#peekActive(sessionId);
+      if (peek?.lifecycle === "archive_pending" && peek.lifecycleOperationId) {
+        await this.#finishArchive(sessionId, peek.lifecycleOperationId);
+      } else if (peek?.lifecycle === "restore_pending" && peek.lifecycleOperationId) {
         new EventWriter(this, sessionId).append(
           "session.restored",
-          { operationId: view.lifecycleOperationId },
+          { operationId: peek.lifecycleOperationId },
           { kind: "runtime", id: "session-repository-recovery" },
         );
       }
     }
     for (const sessionId of this.#directorySessionIds(this.#paths.archivesRoot)) {
-      const view = this.#loadAt(projectSessionPaths(this.#paths, sessionId, "archived"));
-      if (view?.lifecycle === "restore_pending" && view.lifecycleOperationId) {
-        await this.#finishRestore(sessionId, view.lifecycleOperationId);
-      } else if (view?.lifecycle === "archive_pending" && view.lifecycleOperationId) {
-        await this.#completeArchivedStream(sessionId, view.lifecycleOperationId);
-      } else if (view?.lifecycle === "archived") {
-        const paths = projectSessionPaths(this.#paths, sessionId, "archived");
+      const paths = projectSessionPaths(this.#paths, sessionId, "archived");
+      const peek = this.#peekAt(paths);
+      if (peek?.lifecycle === "restore_pending" && peek.lifecycleOperationId) {
+        await this.#finishRestore(sessionId, peek.lifecycleOperationId);
+      } else if (peek?.lifecycle === "archive_pending" && peek.lifecycleOperationId) {
+        await this.#completeArchivedStream(sessionId, peek.lifecycleOperationId);
+      } else if (peek?.lifecycle === "archived") {
         if (!existsSync(paths.archiveManifestFile)) await writeArchiveManifest(paths, sessionId);
       }
     }
     await this.#recoverReset();
+  }
+
+  /** Active Session directory ids without opening SQLite or projecting views. */
+  listActiveSessionIds(): SessionId[] {
+    this.#assertOpen();
+    return this.#directorySessionIds(this.#paths.sessionsRoot);
   }
 
   append(sessionId: SessionId, expectedVersion: number, newEvents: readonly SessionEvent[]): SessionView {
@@ -120,15 +126,19 @@ export class SessionRepository implements EventStore {
       const root = candidate === "active" ? this.#paths.sessionsRoot : this.#paths.archivesRoot;
       for (const sessionId of this.#directorySessionIds(root)) {
         const paths = projectSessionPaths(this.#paths, sessionId, candidate);
-        const store = candidate === "active"
-          ? this.#activeStore(sessionId)
+        if (!existsSync(paths.databaseFile)) continue;
+        const store = candidate === "active" && this.#activeStores.has(sessionId)
+          ? this.#activeStores.get(sessionId)!
           : new SqliteEventStore(paths.databaseFile, { readonly: true });
+        const openedEphemeral = store !== this.#activeStores.get(sessionId);
         try {
           const summary = store.listSessions().find((item) => item.sessionId === sessionId);
-          const view = store.load(sessionId);
-          if (summary && view) entries.push({ ...summary, location: candidate, lifecycle: view.lifecycle });
+          const peek = store.peekLifecycle(sessionId);
+          if (summary && peek) {
+            entries.push({ ...summary, location: candidate, lifecycle: peek.lifecycle });
+          }
         } finally {
-          if (candidate === "archived") store.close();
+          if (openedEphemeral) store.close();
         }
       }
     }
@@ -332,11 +342,24 @@ export class SessionRepository implements EventStore {
       .sort();
   }
 
-  #loadAt(paths: ProjectSessionPaths): SessionView | undefined {
+  #peekActive(sessionId: SessionId): SessionLifecyclePeek | undefined {
+    const directory = projectSessionPaths(this.#paths, sessionId);
+    if (!existsSync(directory.databaseFile)) return undefined;
+    const existing = this.#activeStores.get(sessionId);
+    if (existing) return existing.peekLifecycle(sessionId);
+    const store = new SqliteEventStore(directory.databaseFile, { readonly: true });
+    try {
+      return store.peekLifecycle(sessionId);
+    } finally {
+      store.close();
+    }
+  }
+
+  #peekAt(paths: ProjectSessionPaths): SessionLifecyclePeek | undefined {
     if (!existsSync(paths.databaseFile)) return undefined;
     const store = new SqliteEventStore(paths.databaseFile, { readonly: true });
     try {
-      return store.load(paths.sessionId as SessionId);
+      return store.peekLifecycle(paths.sessionId as SessionId);
     } finally {
       store.close();
     }

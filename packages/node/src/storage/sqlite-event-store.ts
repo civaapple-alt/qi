@@ -8,6 +8,7 @@ import {
   replaySession,
   type EventStore,
   type EventStream,
+  type SessionLifecycle,
   type SessionSummary,
   type SessionView,
 } from "@civaapple/qi-agent/kernel";
@@ -24,7 +25,26 @@ interface SessionSummaryRow {
   session_id: string;
   version: number;
   updated_at: string;
+  title: string | null;
 }
+
+interface LifecycleRow {
+  event_type: string;
+  event_json: string;
+}
+
+/** Lifecycle facts readable without replaying the full Session stream. */
+export interface SessionLifecyclePeek {
+  readonly lifecycle: SessionLifecycle;
+  readonly lifecycleOperationId?: string;
+}
+
+const LIFECYCLE_EVENT_TYPES = [
+  "session.archive.requested",
+  "session.archived",
+  "session.restore.requested",
+  "session.restored",
+] as const;
 
 export interface SqliteEventStoreOptions {
   readonly?: boolean;
@@ -152,27 +172,74 @@ export class SqliteEventStore implements EventStore {
     return this.#projection(sessionId, row.version);
   }
 
+  /**
+   * Catalog listing without full Kernel replay. Title comes from `session.created`
+   * (derived titles appear after `load()`). Lifecycle is not included; use `peekLifecycle`.
+   */
   listSessions(): SessionSummary[] {
     this.#assertOpen();
     const rows = this.#database.prepare(`
       SELECT streams.session_id,
              streams.version,
-             json_extract(latest.event_json, '$.occurredAt') AS updated_at
+             json_extract(latest.event_json, '$.occurredAt') AS updated_at,
+             json_extract(created.event_json, '$.data.title') AS title
       FROM session_streams AS streams
       JOIN session_events AS latest
         ON latest.session_id = streams.session_id AND latest.sequence = streams.version
+      LEFT JOIN session_events AS created
+        ON created.session_id = streams.session_id AND created.sequence = 1
+          AND created.event_type = 'session.created'
       ORDER BY updated_at DESC, streams.session_id ASC
     `).all() as unknown as SessionSummaryRow[];
     return rows.map((row) => {
       const sessionId = row.session_id as SessionId;
-      const view = this.#projection(sessionId, row.version);
+      const title = typeof row.title === "string" && row.title.trim() !== "" ? row.title : sessionId;
       return {
         sessionId,
-        title: view.title ?? sessionId,
+        title,
         version: row.version,
         updatedAt: row.updated_at,
       };
     });
+  }
+
+  /**
+   * Read the latest archive/restore lifecycle fact from the append-only stream without
+   * projecting the full SessionView. Cold full replay remains the SessionView oracle.
+   */
+  peekLifecycle(sessionId: SessionId): SessionLifecyclePeek | undefined {
+    this.#assertOpen();
+    const version = this.#database
+      .prepare("SELECT version FROM session_streams WHERE session_id = ?")
+      .get(sessionId) as VersionRow | undefined;
+    if (!version || version.version === 0) return undefined;
+    const placeholders = LIFECYCLE_EVENT_TYPES.map(() => "?").join(", ");
+    const row = this.#database.prepare(`
+      SELECT event_type, event_json
+      FROM session_events
+      WHERE session_id = ? AND event_type IN (${placeholders})
+      ORDER BY sequence DESC
+      LIMIT 1
+    `).get(sessionId, ...LIFECYCLE_EVENT_TYPES) as LifecycleRow | undefined;
+    if (!row) return { lifecycle: "active" };
+    const payload = JSON.parse(row.event_json) as { data?: { operationId?: string } };
+    const operationId = typeof payload.data?.operationId === "string" ? payload.data.operationId : undefined;
+    switch (row.event_type) {
+      case "session.archive.requested":
+        return operationId === undefined
+          ? { lifecycle: "archive_pending" }
+          : { lifecycle: "archive_pending", lifecycleOperationId: operationId };
+      case "session.archived":
+        return { lifecycle: "archived" };
+      case "session.restore.requested":
+        return operationId === undefined
+          ? { lifecycle: "restore_pending" }
+          : { lifecycle: "restore_pending", lifecycleOperationId: operationId };
+      case "session.restored":
+        return { lifecycle: "active" };
+      default:
+        return { lifecycle: "active" };
+    }
   }
 
   close(): void {

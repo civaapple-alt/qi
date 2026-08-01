@@ -58,9 +58,11 @@ test("Web workbench serves real Session projections, history and committed live 
     const workbench = await fetch(`${address.url}/api/session/${sessionId}/workbench`).then((item) => item.json());
     assert.equal(workbench.narrative.sessionId, sessionId);
     assert.deepEqual(workbench.narrative.runs, []);
-    assert.equal(workbench.events.length, 1);
+    assert.equal(workbench.eventCount, 1);
+    assert.equal(workbench.events, undefined);
     assert.equal(workbench.memory.userIndexAvailable, false);
     assert.deepEqual(workbench.memory.usage, []);
+    assert.match(application, /ensureAuditEvents/);
     assert.equal((await fetch(`${address.url}/api/session/ses_missing_001`)).status, 404);
 
     const controller = new AbortController();

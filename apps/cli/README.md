@@ -262,9 +262,14 @@ to probe multiple host tools in one `script` Action when a profile is available.
 POSIX-only `bash`/`lsof`/`xargs` assumptions. A missing executable or unavailable profile becomes a fact for the
 rest of that Run, so the model must change approach instead of repeating the same assumption. The same `execute`
 grant also probes for a responding `docker` or `podman`
-runtime at startup and, only when one responds, exposes a `codeact` tool that runs a short generated program in a
-network-off, read-only-root container; its nested tool calls still pass through normal authorization and Session
-events, and it can never call `codeact` or `delegate` itself.
+runtime after first TUI paint (so hung container CLIs do not delay welcome) and, only when one responds, exposes a
+`codeact` tool that runs a short generated program in a network-off, read-only-root container; its nested tool
+calls still pass through normal authorization and Session events, and it can never call `codeact` or `delegate`
+itself.
+
+Cold start finishes interrupted archive/restore via lifecycle peek over the append-only stream rather than
+replaying every active Session into a `SessionView`. Project Memory catches up incrementally after first paint;
+the first Run waits for that catch-up before injecting Memory context.
 
 `/verify` proposes verification commands rather than requiring hand-written TOML from the start: it scans
 `package.json` scripts, a `pom.xml` presence, and fenced commands under headings in `AGENTS.md`/`README.md`,

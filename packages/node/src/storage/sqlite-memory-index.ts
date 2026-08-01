@@ -91,6 +91,55 @@ export class SqliteMemoryIndex implements MemoryIndex {
     this.applyBatch(events);
   }
 
+  /** Highest applied event sequence for a Session, or 0 when none. */
+  lastAppliedSequence(sessionId: SessionId): number {
+    this.#assertOpen();
+    const row = this.#database.prepare(
+      "SELECT MAX(sequence) AS sequence FROM memory_applied_events WHERE session_id=?",
+    ).get(sessionId) as { sequence: number | null } | undefined;
+    return row?.sequence ?? 0;
+  }
+
+  /**
+   * Drop claims and applied-event watermarks whose origin Session is no longer active
+   * (ADR-0030 active-only project Memory).
+   */
+  retainOriginSessions(activeSessionIds: ReadonlySet<SessionId>): number {
+    this.#assertOpen();
+    const rows = this.#database.prepare(
+      "SELECT DISTINCT origin_session_id AS session_id FROM memory_claims",
+    ).all() as Array<{ session_id: string }>;
+    const applied = this.#database.prepare(
+      "SELECT DISTINCT session_id FROM memory_applied_events",
+    ).all() as Array<{ session_id: string }>;
+    const stale = new Set<string>();
+    for (const row of rows) {
+      if (!activeSessionIds.has(row.session_id as SessionId)) stale.add(row.session_id);
+    }
+    for (const row of applied) {
+      if (!activeSessionIds.has(row.session_id as SessionId)) stale.add(row.session_id);
+    }
+    if (stale.size === 0) return 0;
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      const deleteClaims = this.#database.prepare(
+        "DELETE FROM memory_claims WHERE origin_session_id=?",
+      );
+      const deleteApplied = this.#database.prepare(
+        "DELETE FROM memory_applied_events WHERE session_id=?",
+      );
+      for (const sessionId of stale) {
+        deleteClaims.run(sessionId);
+        deleteApplied.run(sessionId);
+      }
+      this.#database.exec("COMMIT");
+      return stale.size;
+    } catch (error) {
+      this.#database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   get(memoryId: MemoryId): IndexedMemoryClaim | undefined {
     this.#assertOpen();
     const row = this.#database.prepare("SELECT * FROM memory_claims WHERE memory_id=?").get(memoryId) as

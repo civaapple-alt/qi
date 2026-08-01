@@ -41,9 +41,13 @@ same-volume directory move into `archives/<session-id>/` after `session.archive.
 `session.restore.requested`, moves back, then commits `session.restored`.
 
 `SessionRepository.recover()` finishes interrupted archive/restore states and resumes an incomplete
-`state/reset-operation.json` journal for `/reset-workspace`. A Session must never disappear from both
-`sessions/` and `archives/` at once. Legacy shared project `state/qi.sqlite` layouts are rejected without
-migration; see [ADR-0030](../../../design/decisions.md#adr-0030-make-session-directories-the-movable-persistence-boundary).
+`state/reset-operation.json` journal for `/reset-workspace`. Recovery inspects the latest archive/restore
+lifecycle facts via `SqliteEventStore.peekLifecycle()` (bounded SQL over the append-only stream) and only
+full-replays a Session when finishing `*_pending` work. Catalog listing (`listSessions` / `listCatalog`)
+likewise avoids projecting full `SessionView`s. Cold full replay remains the `SessionView` consistency
+oracle; peek and catalog titles are not a substitute projection cache. A Session must never disappear from
+both `sessions/` and `archives/` at once. Legacy shared project `state/qi.sqlite` layouts are rejected
+without migration; see [ADR-0030](../../../design/decisions.md#adr-0030-make-session-directories-the-movable-persistence-boundary).
 
 ## Schema evolution
 

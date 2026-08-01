@@ -256,6 +256,101 @@ test("SessionRepository recover resumes an interrupted workspace reset", async (
   }
 });
 
+test("SqliteEventStore peekLifecycle matches load without requiring full catalog replay", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-session-peek-"));
+  try {
+    const workspace = join(root, "workspace");
+    await mkdir(workspace);
+    const paths = projectPaths({
+      workspaceRoot: workspace,
+      environment: { QI_HOME: join(root, "home") },
+    });
+    await ensureProjectLayout(paths);
+    const sessionId = createId("ses");
+    await ensureProjectSessionLayout(projectSessionPaths(paths, sessionId));
+    const repository = new SessionRepository(paths);
+    new EventWriter(repository, sessionId).append(
+      "session.created",
+      { title: "Peek title" },
+      { kind: "user", id: "test" },
+    );
+    for (let index = 0; index < 40; index += 1) {
+      new EventWriter(repository, sessionId).append(
+        "presence.changed",
+        { state: "watching", reason: `tick ${index}` },
+        { kind: "runtime", id: "test" },
+      );
+    }
+    assert.deepEqual(repository.load(sessionId)?.lifecycle, "active");
+    const store = new SqliteEventStore(projectSessionPaths(paths, sessionId).databaseFile, { readonly: true });
+    try {
+      assert.deepEqual(store.peekLifecycle(sessionId), { lifecycle: "active" });
+      const listed = store.listSessions();
+      assert.equal(listed.length, 1);
+      assert.equal(listed[0]?.title, "Peek title");
+      assert.equal(listed[0]?.sessionId, sessionId);
+    } finally {
+      store.close();
+    }
+    new EventWriter(repository, sessionId).append(
+      "session.archive.requested",
+      { operationId: "op_peek", reason: "pending" },
+      { kind: "user", id: "test" },
+    );
+    repository.release(sessionId);
+    const pending = new SqliteEventStore(projectSessionPaths(paths, sessionId).databaseFile, { readonly: true });
+    try {
+      assert.deepEqual(pending.peekLifecycle(sessionId), {
+        lifecycle: "archive_pending",
+        lifecycleOperationId: "op_peek",
+      });
+      assert.equal(pending.load(sessionId)?.lifecycle, "archive_pending");
+    } finally {
+      pending.close();
+    }
+    repository.close();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("SessionRepository recover peeks healthy Sessions without retaining every active store", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-session-recover-peek-"));
+  try {
+    const workspace = join(root, "workspace");
+    await mkdir(workspace);
+    const paths = projectPaths({
+      workspaceRoot: workspace,
+      environment: { QI_HOME: join(root, "home") },
+    });
+    await ensureProjectLayout(paths);
+    const sessionIds = [];
+    for (let index = 0; index < 5; index += 1) {
+      const sessionId = createId("ses");
+      sessionIds.push(sessionId);
+      await ensureProjectSessionLayout(projectSessionPaths(paths, sessionId));
+      const repository = new SessionRepository(paths);
+      new EventWriter(repository, sessionId).append(
+        "session.created",
+        { title: `Session ${index}` },
+        { kind: "user", id: "test" },
+      );
+      repository.close();
+    }
+    const recovered = new SessionRepository(paths);
+    await recovered.recover();
+    assert.deepEqual(recovered.listActiveSessionIds().sort(), [...sessionIds].sort());
+    assert.equal(recovered.listCatalog("active").length, 5);
+    // Healthy recover must not open every Session into the live cache just to inspect lifecycle.
+    for (const sessionId of sessionIds) {
+      assert.equal(recovered.load(sessionId)?.lifecycle, "active");
+    }
+    recovered.close();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("SessionRepository preflights every Session before reset", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-session-reset-"));
   try {

@@ -22,7 +22,8 @@ npm run qi:web
 ```
 
 Open `http://127.0.0.1:4317/`. Choose a project slug in the header, then switch Sessions. Deep links use
-`?project=<slug>&session=ses_…&run=run_…`.
+`?project=<slug>&session=ses_…&run=run_…`. First enter lists Sessions without replaying every stream; the
+Narrative workbench loads first, and Audit pulls `/history` only when that mode is selected.
 
 Explicit single-database mode remains available:
 
@@ -35,8 +36,11 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
 
 - `GET /api/meta` reports `single` vs `projects` mode.
 - `GET /api/projects` lists directories under the projects root that contain `qi.sqlite`.
-- `GET /api/sessions?project=<slug>` (projects mode) and `GET /api/session/:id/workbench?project=<slug>` open one
-  project database; Sessions are ordered by latest event time.
+- `GET /api/sessions?project=<slug>` (projects mode) lists Sessions by latest event time without full stream
+  replay (catalog title from `session.created`).
+- `GET /api/session/:id/workbench?project=<slug>` returns `view`, `narrative`, `memory`, and `eventCount` for
+  first paint. The raw Audit stream is `GET /api/session/:id/history` and is loaded lazily when Audit mode is
+  selected.
 - Run labels prefer a short `displayTitle` (Accepted Formal Plans use `Accepted Plan · {title} · rev {n}`);
   raw `run.input` remains available and is not used as the sidebar or narrative title when a Formal Plan binding exists.
 - A Step whose model requested Actions is not presented as fully complete until those Actions settle.

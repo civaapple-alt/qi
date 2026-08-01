@@ -81,15 +81,31 @@ export class ProjectEventStoreRegistry {
   async open(projectId: string): Promise<EventStore> {
     const existing = this.#stores.get(projectId);
     if (existing) return existing;
-    const projects = await this.list();
-    const project = projects.find((candidate) => candidate.id === projectId);
-    if (!project) throw new TypeError(`Unknown project: ${projectId}`);
-    const descriptor = JSON.parse(await readFile(join(project.path, "project.json"), "utf8")) as {
-      workspaceRoot: string;
-    };
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(projectId)) {
+      throw new TypeError(`Unknown project: ${projectId}`);
+    }
+    const projectPath = join(this.#root, projectId);
+    let descriptor: { schemaVersion?: unknown; projectId?: unknown; workspaceRoot?: unknown };
+    try {
+      descriptor = JSON.parse(await readFile(join(projectPath, "project.json"), "utf8")) as {
+        schemaVersion?: unknown;
+        projectId?: unknown;
+        workspaceRoot?: unknown;
+      };
+    } catch (error) {
+      if (isMissing(error)) throw new TypeError(`Unknown project: ${projectId}`);
+      throw error;
+    }
+    if (
+      descriptor.schemaVersion !== 2
+      || descriptor.projectId !== projectId
+      || typeof descriptor.workspaceRoot !== "string"
+    ) {
+      throw new TypeError(`Unknown project: ${projectId}`);
+    }
     const store = new SessionRepository(projectPaths({
       workspaceRoot: descriptor.workspaceRoot,
-      dataRoot: project.path,
+      dataRoot: projectPath,
     }));
     this.#stores.set(projectId, store);
     return store;

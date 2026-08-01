@@ -73,10 +73,11 @@ export class QiWebServer {
           const memory = this.#registry && projectId
             ? projectMemoryAudit(this.#registry.projectsRoot, projectId, events)
             : singleDatabaseMemoryAudit(view, events);
+          // Omit raw events from the first paint payload; Audit loads GET …/history lazily.
           return send(response, 200, "application/json", JSON.stringify({
             view,
             narrative: projectWebSession(view, events),
-            events,
+            eventCount: events.length,
             memory,
           }));
         }
