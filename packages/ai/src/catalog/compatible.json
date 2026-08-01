@@ -1,0 +1,26 @@
+{
+  "id": "compatible",
+  "displayName": "OpenAI Compatible",
+  "wireApi": "chat.completions",
+  "officialBaseURL": "https://api.openai.com/v1",
+  "officialHosts": [],
+  "authSchemes": ["api-key"],
+  "defaultModel": "gpt-4o-mini",
+  "contextTokens": 128000,
+  "imageInputDefault": false,
+  "modelDiscovery": "openai_compatible",
+  "wire": {
+    "chatThinking": "none"
+  },
+  "capabilities": {
+    "chatCompletions": true,
+    "responses": false,
+    "streaming": true,
+    "toolCalls": true,
+    "reasoning": false,
+    "usage": true,
+    "requestMetadata": false
+  },
+  "envBaseURL": "QI_BASE_URL",
+  "envModel": "QI_MODEL"
+}

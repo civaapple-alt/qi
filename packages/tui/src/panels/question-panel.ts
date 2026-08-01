@@ -1,5 +1,5 @@
 import { Key, matchesKey, type Focusable } from "@earendil-works/pi-tui";
-import { truncateToWidth, visibleWidth } from "../layout.js";
+import { truncateToWidth, wrapPlain } from "../layout.js";
 import { theme } from "../theme/index.js";
 import { panelFooter, panelHeader, pointer } from "./chrome.js";
 import type { PanelComponent } from "./types.js";
@@ -152,24 +152,4 @@ export class QuestionPanel implements PanelComponent, Focusable {
     this.#editingText = next?.selection === "text";
     if (!next) this.#onSubmit([...this.#answers]);
   }
-}
-
-/** Wrap plain text to a display-column budget, breaking mid-word when needed (CJK). */
-function wrapPlain(text: string, width: number): string[] {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return [""];
-  const budget = Math.max(1, width);
-  const lines: string[] = [];
-  let current = "";
-  for (const character of Array.from(normalized)) {
-    const next = `${current}${character}`;
-    if (current && visibleWidth(next) > budget) {
-      lines.push(current.trimEnd());
-      current = character === " " ? "" : character;
-    } else {
-      current = next;
-    }
-  }
-  if (current) lines.push(current.trimEnd());
-  return lines.length > 0 ? lines : [""];
 }

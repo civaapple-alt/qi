@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
-import { getProviderProfile } from "@civaapple/qi-ai";
+import { getProviderProfile, resetProviderCatalog } from "@civaapple/qi-ai";
 import {
   defaultUserConfigPath,
   ensureUserShellConfig,
@@ -26,6 +26,7 @@ import {
   saveUserConfig,
   supportedEffortsForModel,
 } from "../apps/cli/dist/index.js";
+import { writeCustomOpenAiCompatibleProvider } from "../apps/cli/dist/provider-catalog-write.js";
 
 test("user config loads strict provider defaults and persistent capabilities", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-user-config-"));
@@ -224,7 +225,53 @@ test("user config is optional, strict, and cannot contain an API key", async () 
     const invalidEffort = join(root, "invalid-effort.toml");
     await writeFile(invalidEffort, 'provider = "kimi"\nreasoning_effort = "extreme"\n');
     await assert.rejects(loadUserConfig(invalidEffort), /Unsupported reasoning effort/);
+
+    const unknownProvider = join(root, "unknown-provider.toml");
+    await writeFile(unknownProvider, 'provider = "not-a-catalog-provider"\nmodel = "x"\n');
+    await assert.rejects(loadUserConfig(unknownProvider), /known catalog id/);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("user config accepts catalog overlay providers and their reasoning_effort", async () => {
+  const providersDir = await mkdtemp(join(tmpdir(), "qi-providers-cfg-"));
+  const root = await mkdtemp(join(tmpdir(), "qi-user-config-overlay-"));
+  const path = join(root, "config.toml");
+  try {
+    await writeCustomOpenAiCompatibleProvider({
+      name: "stepfun",
+      baseURL: "https://api.stepfun.com/step_plan/v1",
+      directory: providersDir,
+      wireApi: "chat.completions",
+      chatThinking: "reasoning_effort",
+      chatOutputTokenField: "max_tokens",
+      models: [{ id: "step-3.7-flash", contextTokens: 256_000, outputReserveTokens: 32_000 }],
+    });
+    assert.ok(getProviderProfile("stepfun"));
+
+    const saved = await persistUserProviderDefaults({
+      provider: "stepfun",
+      model: "step-3.7-flash",
+      accountAlias: "default",
+      baseURL: "https://api.stepfun.com/step_plan/v1",
+      reasoningEffort: "high",
+      contextWindowTokens: 256_000,
+      outputReserveTokens: 32_000,
+    }, path);
+    assert.equal(saved.config.provider, "stepfun");
+    assert.equal(saved.config.model, "step-3.7-flash");
+    assert.equal(saved.config.reasoningEffort, "high");
+
+    const loaded = await loadUserConfig(path);
+    assert.equal(loaded.config.provider, "stepfun");
+    assert.equal(loaded.config.reasoningEffort, "high");
+    const body = await readFile(path, "utf8");
+    assert.match(body, /provider = "stepfun"/);
+    assert.match(body, /reasoning_effort = "high"/);
+  } finally {
+    resetProviderCatalog();
+    await rm(providersDir, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }
 });

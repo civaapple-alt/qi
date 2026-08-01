@@ -15,11 +15,15 @@ adapter streams portable text/reasoning/action boundaries; Agent lifecycle polic
 materially different models; callers can inspect them with `getProviderModelProfile` and
 `providerModelContextTokens`.
 
-Profiles also declare input modalities and optional per-model wire-API overrides. Kimi K3 and the known Kimi
-Coding models accept image parts; K3 uses a 1,048,576-token window and effort thinking (`low`/`high`/`max`,
-default `high`) sent as top-level `reasoning_effort`. K2.7 Code keeps thinking always on with
-`thinking.keep=all`. Callers may discover remote models with `listOpenAICompatibleModels` and merge them via
-`mergeProviderModels` without changing catalog thinking authority. DeepSeek V4 Flash uses Responses with a 1M
+Built-in profiles live as declarative JSON under `src/catalog/`. Wire thinking dialects (`ProviderWireHints`)
+drive Chat Completions / Responses field shapes; composition roots may overlay `$QI_HOME/providers/*.{toml,json}`
+via `parseProviderCatalogDocument` / `installProviderCatalogOverBuiltins` (CLI Settings can write these files for
+custom OpenAI-compatible vendors). User `config.toml` `provider` must reference an installed catalog id after
+overlays load. Profiles also declare input modalities and optional per-model wire-API overrides. Kimi K3 and the known Kimi Coding models accept image
+parts; K3 uses a 1,048,576-token window and effort thinking (`low`/`high`/`max`, default `high`) sent as
+top-level `reasoning_effort`. K2.7 Code keeps thinking always on with `thinking.keep=all`. Callers may discover
+remote models with `listOpenAICompatibleModels` and merge them via `mergeProviderModels` without changing
+catalog thinking authority. DeepSeek V4 Flash uses Responses with a 1M
 window and effort thinking; V4 Pro stays on Chat Completions until the vendor adds Responses. Volcengine Agent
 Plan (`volcengine-agent-plan`) uses Responses at the Agent Plan base URL with `ARK_API_KEY`, default
 `glm-latest`, and deep-thinking control via `thinking.type` plus `reasoning.effort` (`low`/`medium`/`high`).

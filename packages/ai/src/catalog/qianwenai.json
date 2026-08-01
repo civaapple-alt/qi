@@ -1,0 +1,114 @@
+{
+  "id": "qianwenai",
+  "displayName": "Qianwen AI Token Plan",
+  "wireApi": "responses",
+  "officialBaseURL": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+  "officialHosts": ["token-plan.cn-beijing.maas.aliyuncs.com"],
+  "authSchemes": ["api-key"],
+  "defaultModel": "qwen3.8-max-preview",
+  "contextTokens": 1048576,
+  "inputModalities": ["text", "image"],
+  "outputReserveTokens": 65536,
+  "modelDiscovery": "openai_compatible",
+  "wire": {
+    "responsesThinking": "reasoning_effort"
+  },
+  "capabilities": {
+    "chatCompletions": true,
+    "responses": true,
+    "streaming": true,
+    "toolCalls": true,
+    "reasoning": true,
+    "usage": true,
+    "requestMetadata": false
+  },
+  "envApiKey": "QIANWENAI_API_KEY",
+  "envBaseURL": "QIANWENAI_BASE_URL",
+  "envModel": "QIANWENAI_MODEL",
+  "models": [
+    {
+      "id": "qwen3.8-max-preview",
+      "displayName": "Qwen3.8 Max Preview",
+      "contextTokens": 1048576,
+      "outputReserveTokens": 65536,
+      "inputModalities": ["text", "image"],
+      "wire": {
+        "responsesThinking": "reasoning_effort"
+      },
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    },
+    {
+      "id": "qwen3.7-max",
+      "displayName": "Qwen3.7 Max",
+      "contextTokens": 1048576,
+      "outputReserveTokens": 65536,
+      "inputModalities": ["text"],
+      "wire": {
+        "responsesThinking": "reasoning_effort"
+      },
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    },
+    {
+      "id": "qwen3.7-plus",
+      "displayName": "Qwen3.7 Plus",
+      "contextTokens": 1048576,
+      "outputReserveTokens": 65536,
+      "inputModalities": ["text", "image"],
+      "wire": {
+        "responsesThinking": "reasoning_effort"
+      },
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    },
+    {
+      "id": "glm-5-2",
+      "displayName": "GLM 5.2",
+      "contextTokens": 1048576,
+      "outputReserveTokens": 65536,
+      "inputModalities": ["text"],
+      "wireApi": "chat.completions",
+      "wire": {
+        "chatThinking": "enable_thinking_and_effort",
+        "chatOutputTokenField": "max_tokens"
+      },
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "displayName": "DeepSeek V4 Pro",
+      "contextTokens": 1048576,
+      "outputReserveTokens": 65536,
+      "inputModalities": ["text"],
+      "wireApi": "chat.completions",
+      "wire": {
+        "chatThinking": "enable_thinking_and_effort",
+        "chatOutputTokenField": "max_tokens"
+      },
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    }
+  ]
+}

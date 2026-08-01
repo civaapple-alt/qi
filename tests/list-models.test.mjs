@@ -107,6 +107,7 @@ test("mergeProviderModels keeps catalog thinking authority and appends remote-on
     mode: "effort",
     supportedEfforts: ["low", "high", "max"],
     defaultEffort: "high",
+    allowDisable: false,
   });
 
   const coding = merged.find((model) => model.id === "kimi-for-coding");

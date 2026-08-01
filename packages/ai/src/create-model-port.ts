@@ -8,11 +8,10 @@ import {
 } from "./openai-responses.js";
 import type { ModelPort } from "./model.js";
 import {
-  providerModelContextTokens,
   requireProviderProfile,
-  resolveProviderWireApi,
   type ProviderProfile,
 } from "./provider-profile.js";
+import { resolveModelCapabilities } from "./resolve-model-capabilities.js";
 import type { ClientOptions } from "openai";
 
 export interface CreateModelPortOptions {
@@ -33,20 +32,21 @@ export function createModelPortForProfile(
 ): ModelPort {
   const profile = typeof profileOrId === "string" ? requireProviderProfile(profileOrId) : profileOrId;
   const model = options.model ?? profile.defaultModel ?? "";
-  const wireApi = resolveProviderWireApi(profile, model);
-  const contextTokens = options.contextTokens ??
-    (model ? providerModelContextTokens(profile, model) : profile.contextTokens);
+  const resolved = resolveModelCapabilities(profile, model, {
+    ...(options.contextTokens === undefined ? {} : { contextWindowTokens: options.contextTokens }),
+    ...(options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort }),
+    ...(options.imageInput === undefined ? {} : { imageInput: options.imageInput }),
+  });
   const clientOptions: ClientOptions = {
     apiKey: options.apiKey,
     ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
   };
-  if (wireApi === "responses") {
-    const imageInput = options.imageInput ?? resolveResponsesImageInput(profile, model);
+  if (resolved.wireApi === "responses") {
     const portOptions: OpenAIResponsesModelPortOptions = {
       providerNames: [profile.id],
-      contextTokens,
+      contextTokens: resolved.contextTokens,
       requestMetadata: profile.capabilities.requestMetadata,
-      imageInput,
+      imageInput: resolved.imageInput,
       ...(options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort }),
       profile,
     };
@@ -55,18 +55,9 @@ export function createModelPortForProfile(
   const portOptions: OpenAIChatCompletionsModelPortOptions = {
     providerNames: [profile.id],
     profile,
-    contextTokens,
+    contextTokens: resolved.contextTokens,
     ...(options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort }),
-    ...(options.imageInput === undefined ? {} : { imageInput: options.imageInput }),
+    imageInput: options.imageInput ?? resolved.imageInput,
   };
   return OpenAIChatCompletionsModelPort.fromClientOptions(clientOptions, portOptions);
-}
-
-function resolveResponsesImageInput(profile: ProviderProfile, model: string): boolean {
-  // Responses adapters historically advertise images when the profile omits modalities (OpenAI/xAI).
-  // Explicit text-only profiles (DeepSeek) disable image input.
-  const modelModalities = profile.models?.find((item) => item.id === model)?.inputModalities;
-  if (modelModalities) return modelModalities.includes("image");
-  if (profile.inputModalities) return profile.inputModalities.includes("image");
-  return true;
 }

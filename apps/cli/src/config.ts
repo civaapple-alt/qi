@@ -5,6 +5,7 @@ import { parse, stringify } from "smol-toml";
 import {
   getProviderModelProfile,
   getProviderProfile,
+  listProviderProfiles,
   normalizeKimiReasoningEffort,
 } from "@civaapple/qi-ai";
 import { defaultLocale, type Locale } from "./i18n.js";
@@ -667,20 +668,12 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   const language = optionalLanguageField(root.language, `${path}: language`);
   const theme = optionalThemeField(root.theme, `${path}: theme`);
   const provider = optionalStringField(root.provider, `${path}: provider`);
-  if (provider !== undefined) {
-    const known = [
-      "openai",
-      "xai",
-      "kimi",
-      "deepseek",
-      "volcengine-agent-plan",
-      "qianwenai",
-      "moonshot",
-      "compatible",
-    ];
-    if (!known.includes(provider)) {
-      throw new TypeError(`${path}: provider must be one of ${known.join(", ")}`);
-    }
+  if (provider !== undefined && getProviderProfile(provider) === undefined) {
+    const known = listProviderProfiles().map((profile) => profile.id).sort().join(", ");
+    throw new TypeError(
+      `${path}: provider must be a known catalog id (${known}); ` +
+        `add custom providers under $QI_HOME/providers before referencing them here`,
+    );
   }
   const model = optionalStringField(root.model, `${path}: model`, 256);
   const baseURL = optionalStringField(root.base_url, `${path}: base_url`, 2_048);
@@ -712,7 +705,8 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   }
   if (reasoningEffort !== undefined && !providerPersistsReasoningEffort(provider)) {
     throw new TypeError(
-      `${path}: reasoning_effort is currently supported only when provider = "kimi", "deepseek", "volcengine-agent-plan", or "qianwenai"`,
+      `${path}: reasoning_effort is not supported for provider "${provider ?? ""}" ` +
+        `(needs a catalog provider with thinking / reasoning wire hints)`,
     );
   }
   let capabilities: QiCapabilityConfig | undefined;
@@ -921,10 +915,22 @@ function assertOnlyKeys(table: Record<string, unknown>, allowed: readonly string
 }
 
 function providerPersistsReasoningEffort(provider: string | undefined): boolean {
-  return provider === "kimi"
+  if (provider === undefined) return false;
+  // Built-in providers that historically store effort in config.toml.
+  if (
+    provider === "kimi"
     || provider === "deepseek"
     || provider === "volcengine-agent-plan"
-    || provider === "qianwenai";
+    || provider === "qianwenai"
+  ) {
+    return true;
+  }
+  const profile = getProviderProfile(provider);
+  if (profile === undefined) return false;
+  const chatThinking = profile.wire?.chatThinking;
+  if (chatThinking !== undefined && chatThinking !== "none") return true;
+  if (profile.wire?.responsesThinking !== undefined) return true;
+  return (profile.models ?? []).some((model) => model.thinking !== undefined);
 }
 
 function optionalStringField(value: unknown, label: string, maximum = 128): string | undefined {

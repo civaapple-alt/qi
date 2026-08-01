@@ -2290,7 +2290,7 @@ export class InteractiveTui {
         `Model → ${status.model}` +
         (status.reasoningEffort ? ` · effort ${status.reasoningEffort}` : "") +
         ` · output ${output.outputReserveTokens}` +
-        ` · ${persistence === "account" ? "saved to account" : "current Session only"}`,
+        ` · ${persistence === "account" ? "saved as user default" : "current Session only"}`,
       );
     }, "model");
   }

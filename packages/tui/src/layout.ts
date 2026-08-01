@@ -33,4 +33,37 @@ export function shortenPath(path: string, maxSegments = 3): string {
   return `${prefix}${segments.slice(-maxSegments).join("/")}`;
 }
 
+/** Wrap plain text to a display-column budget, breaking mid-word when needed (CJK). */
+export function wrapPlain(text: string, width: number): string[] {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [""];
+  const budget = Math.max(1, width);
+  const lines: string[] = [];
+  let current = "";
+  for (const character of Array.from(normalized)) {
+    const next = `${current}${character}`;
+    if (current && visibleWidth(next) > budget) {
+      lines.push(current.trimEnd());
+      current = character === " " ? "" : character;
+    } else {
+      current = next;
+    }
+  }
+  if (current) lines.push(current.trimEnd());
+  return lines.length > 0 ? lines : [""];
+}
+
+/** Wrap a multi-line description; blank source lines become blank output rows. */
+export function wrapPlainLines(text: string, width: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.replace(/\r/g, "").split("\n")) {
+    if (!paragraph.trim()) {
+      lines.push("");
+      continue;
+    }
+    lines.push(...wrapPlain(paragraph, width));
+  }
+  return lines.length > 0 ? lines : [""];
+}
+
 export { truncateToWidth, visibleWidth };

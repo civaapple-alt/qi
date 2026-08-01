@@ -18,12 +18,12 @@ import {
   type ModelRef,
   type ModelRequest,
 } from "./model.js";
-import { normalizeFunctionParameters, normalizeReasoningEffort } from "./openai-chat-completions.js";
+import { normalizeFunctionParameters } from "./openai-chat-completions.js";
 import {
-  getProviderModelProfile,
   type ProviderProfile,
   type ProviderThinkingEffort,
 } from "./provider-profile.js";
+import { resolveResponsesThinkingWire } from "./thinking-wire.js";
 
 export interface OpenAIResponsesClient {
   responses: {
@@ -112,7 +112,7 @@ export class OpenAIResponsesModelPort implements ModelPort {
     this.#assertProvider(request.model);
     throwIfAborted(signal);
 
-    const thinkingWire = responsesThinkingConfig(
+    const thinkingWire = resolveResponsesThinkingWire(
       this.#profile,
       request.model.model,
       this.#reasoningEffort,
@@ -202,52 +202,6 @@ export class OpenAIResponsesModelPort implements ModelPort {
       throw new TypeError(`Responses adapter does not serve provider ${model.provider}`);
     }
   }
-}
-
-interface ResponsesThinkingWire {
-  readonly thinking?: { readonly type: "enabled" | "disabled" };
-  readonly reasoning?: { readonly effort: ProviderThinkingEffort | "none" };
-}
-
-function responsesThinkingConfig(
-  profile: ProviderProfile | undefined,
-  model: string,
-  requestedEffort: string | null | undefined,
-): ResponsesThinkingWire | undefined {
-  if (profile === undefined) {
-    const effort = normalizeReasoningEffort(requestedEffort);
-    return effort === undefined ? undefined : { reasoning: { effort } };
-  }
-  const modelProfile = getProviderModelProfile(profile, model);
-  // Catalogued models without a thinking profile never send thinking/reasoning controls.
-  if (modelProfile !== undefined && modelProfile.thinking === undefined) return undefined;
-  if (modelProfile?.thinking === undefined && requestedEffort === undefined) return undefined;
-  const effort = normalizeReasoningEffort(requestedEffort);
-  const volcenginePlan = profile.id === "volcengine-agent-plan";
-
-  if (effort === "none") {
-    return volcenginePlan
-      ? { thinking: { type: "disabled" } }
-      : { reasoning: { effort: "none" } };
-  }
-  if (modelProfile?.thinking === undefined) {
-    if (effort === undefined) return undefined;
-    return volcenginePlan
-      ? { thinking: { type: "enabled" }, reasoning: { effort } }
-      : { reasoning: { effort } };
-  }
-  if (modelProfile.thinking.mode === "toggle" || modelProfile.thinking.mode === "always") {
-    return volcenginePlan
-      ? { thinking: { type: "enabled" }, reasoning: { effort: "high" } }
-      : { reasoning: { effort: "high" } };
-  }
-  const supported = modelProfile.thinking.supportedEfforts;
-  const selected = effort !== undefined && supported?.includes(effort)
-    ? effort
-    : modelProfile.thinking.defaultEffort ?? supported?.[0] ?? "high";
-  return volcenginePlan
-    ? { thinking: { type: "enabled" }, reasoning: { effort: selected } }
-    : { reasoning: { effort: selected } };
 }
 
 function toResponseInput(

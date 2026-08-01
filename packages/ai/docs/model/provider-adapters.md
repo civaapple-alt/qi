@@ -19,22 +19,48 @@ Provider adapters translate the portable request and stream contract; they do no
 
 ## Adding a provider
 
-Start from `ModelPort`, list unsupported portable features, then add mapping fixtures for text, tool proposal,
-completed tool history, cancellation, provider error, and incomplete response. The Loop should not need a
-provider-name branch.
+Prefer a **catalog document** over adapter code when the vendor speaks Responses or Chat Completions and an
+existing thinking dialect fits:
 
-`tests/openai-responses.test.mjs` is the current adapter contract suite.
+1. Add `packages/ai/src/catalog/<id>.json` (and rebuild `builtin-providers.json`), **or** drop
+   `$QI_HOME/providers/<id>.toml` for a local/custom provider.
+2. Declare `wire_api`, hosts, auth, `context_tokens`, models (modalities, thinking mode/efforts/`allow_disable`,
+   `output_reserve_tokens`), and `wire` dialects (`chat_thinking` / `responses_thinking` /
+   `chat_output_token_field`).
+3. Optional `model_discovery = "openai_compatible"` enables authenticated `GET /models` merge; thinking/effort
+   authority stays on the catalog.
+4. Add mapping fixtures for text, tool proposal, completed tool history, cancellation, provider error, and
+   incomplete response. The Loop must not need a provider-name branch.
+
+Only add a new closed dialect (or a new wire adapter) when no existing dialect can express the vendor fields.
+Adapters must not branch on `profile.id`.
+
+`tests/openai-responses.test.mjs`, `tests/openai-chat-completions.test.mjs`, and `tests/provider-catalog.test.mjs`
+are the current contract suites.
 
 ## OpenAI-compatible endpoints
 
 Provider Profiles declare a default wire API (`responses` or `chat.completions`) and a transport capability matrix.
 A model catalog entry may override the profile wire API via `resolveProviderWireApi`. `createModelPortForProfile`
 selects `OpenAIResponsesModelPort` or `OpenAIChatCompletionsModelPort` from that resolved value. The TUI maps
-profile ids such as `openai`, `xai`, `kimi`, `deepseek`, `volcengine-agent-plan`, `qianwenai`, `moonshot`, and
-`compatible` to environment variables and `/login` flows. The `compatible` profile is Chat Completions for
-arbitrary OpenAI-compatible gateways (named aliases such as `zhipu` live in TUI config as `account_alias` /
-`[[compatible]]`). First-class Qianwen Token Plan access uses provider id `qianwenai`. Provider identity remains
-part of `ModelRef`; sharing a wire protocol does not collapse ownership.
+installed catalog ids (built-ins such as `openai`, `xai`, `kimi`, `deepseek`, `volcengine-agent-plan`,
+`qianwenai`, `moonshot`, `compatible`, plus `$QI_HOME/providers` overlays) to environment variables and `/login`
+flows. `$QI_HOME/config.toml` `provider` accepts any installed catalog id after overlays load at CLI startup.
+
+Prefer a **catalog provider** when the vendor needs its own wire dialect, context window, or thinking efforts:
+
+- CLI: Settings → Providers → **Add OpenAI-compatible provider** writes `$QI_HOME/providers/<id>.toml`, installs
+  the profile, and seals the API key under that provider id (for example `stepfun`).
+- Hand-edit the same TOML for extra models, `input_modalities`, or `[provider.models.thinking]`.
+
+The thin `compatible` profile remains Chat Completions for lightweight named aliases (`[[compatible]]` /
+`account_alias`, for example `zhipu`) without a full catalog document. First-class Qianwen Token Plan access uses
+provider id `qianwenai`. Provider identity remains part of `ModelRef`; sharing a wire protocol does not collapse
+ownership.
+
+When `model_discovery = "openai_compatible"`, authenticated `/model` and login forms call `GET {baseURL}/models`
+and merge remote ids with the static catalog. Remote-only rows are selectable but do not gain thinking/effort
+authority until catalogued. Set `model_discovery = "none"` to keep the dropdown catalog-only.
 
 Compatible endpoints can support different optional request fields. Profiles that disable `requestMetadata` omit
 that Responses field (for example xAI and DeepSeek). Session, Run, and Step correlation remains durable in Qi's

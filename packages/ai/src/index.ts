@@ -3,5 +3,8 @@ export * from "./list-models.js";
 export * from "./model.js";
 export * from "./openai-chat-completions.js";
 export * from "./openai-responses.js";
+export * from "./provider-catalog.js";
 export * from "./provider-profile.js";
+export * from "./resolve-model-capabilities.js";
 export * from "./scripted-model.js";
+export * from "./thinking-wire.js";

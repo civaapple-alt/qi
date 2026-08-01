@@ -4,6 +4,7 @@ import {
   mergeProviderModels,
   providerModelContextTokens,
   providerModelOutputReserveTokens,
+  resolveModelCapabilities,
   resolveProviderWireApi,
   type MergedProviderModel,
   type ProviderProfile,
@@ -23,6 +24,14 @@ import { t, type Locale, type MessageKey } from "../i18n.js";
 import type { TuiPresenter } from "../presenter.js";
 import type { TimelineDensity } from "../presenter.js";
 import { formatProviderLabel } from "../provider.js";
+import {
+  parseChatOutputTokenField,
+  parseChatThinkingDialect,
+  buildCompatibleModelFromFields,
+  parseProviderWireApi,
+  parseResponsesThinkingDialect,
+  writeCustomOpenAiCompatibleProvider,
+} from "../provider-catalog-write.js";
 import {
   resolveOutputReserveTokens,
   TUI_MAX_ACTIONS_PER_STEP_PRESETS,
@@ -142,6 +151,16 @@ function sessionsMaxVisible(rows: number): number {
   const linesPerSession = 4;
   const chrome = 16;
   return Math.max(3, Math.min(5, Math.floor(Math.max(0, rows - chrome) / linesPerSession)));
+}
+
+/**
+ * Providers list items are label + description (~2 lines). Cap visible rows so the
+ * overlay stays near the editor instead of climbing into the transcript.
+ */
+function providersMaxVisible(rows: number): number {
+  const linesPerItem = 2;
+  const chrome = 18;
+  return Math.max(4, Math.min(7, Math.floor(Math.max(0, rows - chrome) / linesPerItem)));
 }
 
 export function openSettingsPanel(ctx: PanelFlowContext): void {
@@ -322,12 +341,19 @@ async function openProvidersPanelAsync(ctx: PanelFlowContext): Promise<void> {
     title: t(locale, "settings.providers"),
     hints: t(locale, "settings.hints"),
     searchable: true,
-    maxVisible: maxVisible(ctx.terminalRows),
+    maxVisible: providersMaxVisible(ctx.terminalRows),
     items: [
       {
         id: "status",
         label: locale === "zh" ? "当前状态" : "Current status",
         description: statusLabel,
+      },
+      {
+        id: "add-openai-compatible",
+        label: locale === "zh" ? "添加 OpenAI 兼容厂商" : "Add OpenAI-compatible provider",
+        description: locale === "zh"
+          ? "名称 / key / URL / wire / 模型与窗口 → ~/.qi/providers/<名称>.toml"
+          : "Name / key / URL / wire / models → ~/.qi/providers/<name>.toml",
       },
       ...profiles.map((profile) => {
         const sealed = sealedByProvider.get(profile.id);
@@ -355,11 +381,161 @@ async function openProvidersPanelAsync(ctx: PanelFlowContext): Promise<void> {
         openScroll(ctx, "/providers", ctx.presenter.renderPanel("providers"));
         return;
       }
+      if (item.id === "add-openai-compatible") {
+        openAddOpenAiCompatibleProviderForm(ctx);
+        return;
+      }
       if (item.id === "compatible") {
         void openCompatiblePanel(ctx);
         return;
       }
       void openProviderAuthPanel(ctx, item.id);
+    },
+  }));
+}
+
+/** Collect name/key/url/wire + one model (window/reserve fields); write providers/<id>.toml and login. */
+function openAddOpenAiCompatibleProviderForm(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  ctx.panels.push(new FormPanel({
+    title: locale === "zh" ? "添加 OpenAI 兼容厂商" : "Add OpenAI-compatible provider",
+    description: locale === "zh"
+      ? "写入 ~/.qi/providers/<名称>.toml。额外模型可之后编辑该文件。窗口/预留支持 256k、32k。"
+      : "Writes ~/.qi/providers/<name>.toml. Edit the file later for more models. Window/reserve accept 256k, 32k.",
+    fields: [
+      {
+        id: "name",
+        label: locale === "zh" ? "名称" : "Name",
+        placeholder: "xiaomi",
+        required: true,
+      },
+      {
+        id: "apiKey",
+        label: "API key",
+        placeholder: "paste key",
+        secret: true,
+        required: true,
+      },
+      {
+        id: "baseURL",
+        label: "Base URL",
+        placeholder: "https://api.example.com/v1",
+        required: true,
+      },
+      {
+        id: "wireApi",
+        label: locale === "zh" ? "Wire 协议" : "Wire API",
+        initialValue: "chat.completions",
+        options: [
+          {
+            value: "chat.completions",
+            label: "Chat Completions",
+            description: locale === "zh"
+              ? "多数兼容网关默认"
+              : "Default for most compatible gateways",
+          },
+          {
+            value: "responses",
+            label: "Responses",
+            description: locale === "zh"
+              ? "OpenAI Responses 兼容端点"
+              : "OpenAI Responses-compatible endpoints",
+          },
+        ],
+        required: true,
+      },
+      {
+        id: "chatThinking",
+        label: locale === "zh" ? "Chat thinking 方言" : "Chat thinking dialect",
+        initialValue: "none",
+        options: [
+          { value: "none", label: "none", description: locale === "zh" ? "不发 thinking 字段" : "No thinking fields" },
+          { value: "reasoning_effort", label: "reasoning_effort", description: "top-level reasoning_effort" },
+          { value: "kimi_effort", label: "kimi_effort", description: "Kimi-style disable + effort" },
+          { value: "thinking_keep_all", label: "thinking_keep_all", description: "thinking.keep=all" },
+          { value: "thinking_type_and_effort", label: "thinking_type_and_effort", description: "DeepSeek Chat style" },
+          { value: "enable_thinking_and_effort", label: "enable_thinking_and_effort", description: "enable_thinking + effort" },
+        ],
+      },
+      {
+        id: "responsesThinking",
+        label: locale === "zh" ? "Responses thinking 方言" : "Responses thinking dialect",
+        initialValue: "reasoning_effort",
+        options: [
+          { value: "reasoning_effort", label: "reasoning_effort", description: "reasoning.effort" },
+          {
+            value: "thinking_type_and_reasoning_effort",
+            label: "thinking_type_and_reasoning_effort",
+            description: "thinking.type + reasoning.effort",
+          },
+        ],
+      },
+      {
+        id: "chatOutputTokenField",
+        label: locale === "zh" ? "Chat 输出字段" : "Chat output token field",
+        initialValue: "max_tokens",
+        options: [
+          { value: "max_tokens", label: "max_tokens" },
+          { value: "max_completion_tokens", label: "max_completion_tokens" },
+        ],
+      },
+      {
+        id: "modelId",
+        label: locale === "zh" ? "模型 ID" : "Model ID",
+        placeholder: "step-3.7-flash",
+        required: true,
+      },
+      {
+        id: "contextWindowTokens",
+        label: locale === "zh" ? "上下文窗口" : "Context window",
+        placeholder: locale === "zh" ? "例如 256k（默认 128000）" : "e.g. 256k (default 128000)",
+        initialValue: "128000",
+      },
+      {
+        id: "outputReserveTokens",
+        label: locale === "zh" ? "输出预留" : "Output reserve",
+        placeholder: locale === "zh" ? "例如 32k（默认 16000）" : "e.g. 32k (default 16000)",
+        initialValue: "16000",
+      },
+    ],
+    submitLabel: locale === "zh" ? "保存并登录" : "Save and login",
+    onClose: ctx.panels.dismiss,
+    onSubmit: (values) => {
+      void (async () => {
+        try {
+          const model = buildCompatibleModelFromFields({
+            modelId: values.modelId ?? "",
+            contextWindowTokens: values.contextWindowTokens,
+            outputReserveTokens: values.outputReserveTokens,
+          });
+          const wireApi = parseProviderWireApi(values.wireApi);
+          const written = await writeCustomOpenAiCompatibleProvider({
+            name: values.name ?? "",
+            baseURL: values.baseURL ?? "",
+            models: [model],
+            wireApi,
+            chatThinking: parseChatThinkingDialect(values.chatThinking),
+            responsesThinking: parseResponsesThinkingDialect(values.responsesThinking),
+            chatOutputTokenField: parseChatOutputTokenField(values.chatOutputTokenField),
+          });
+          ctx.panels.closeAll();
+          ctx.startLoginApiKey(written.providerId, values.apiKey ?? "", {
+            model: model.id,
+            baseURL: written.profile.officialBaseURL,
+          });
+          ctx.presenter.setNotice(
+            locale === "zh"
+              ? `已写入 ${written.path} · ${wireApi} · 正在登录 ${written.displayName}/${model.id}`
+              : `Wrote ${written.path} · ${wireApi} · logging in ${written.displayName}/${model.id}`,
+          );
+          ctx.render();
+        } catch (error) {
+          ctx.presenter.setNotice(
+            error instanceof Error ? error.message : String(error),
+          );
+          ctx.render();
+        }
+      })();
     },
   }));
 }
@@ -677,13 +853,7 @@ export function openPermissionsPanel(ctx: PanelFlowContext): void {
 
 /** Effort levels advertised by the current model profile (empty when thinking is unavailable). */
 export function supportedEffortsForModel(profile: ProviderProfile, model: string): readonly string[] {
-  const modelProfile = getProviderModelProfile(profile, model);
-  if (!modelProfile?.thinking) return [];
-  if (modelProfile.thinking.mode === "always") return [];
-  if (modelProfile.thinking.mode === "toggle") {
-    return ["none", modelProfile.thinking.defaultEffort ?? "high"];
-  }
-  return [...(modelProfile.thinking.supportedEfforts ?? [])];
+  return resolveModelCapabilities(profile, model).effortsForUi;
 }
 
 export function openMaxStepsPanel(ctx: PanelFlowContext): void {
@@ -1223,7 +1393,7 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
   const profile = listProviderProfiles().find((candidate) => candidate.id === status.provider);
   if (!profile) return;
   const locale = ctx.locale();
-  const availableModels = profile.id === "kimi"
+  const availableModels = profile.modelDiscovery === "openai_compatible"
     ? await auth.listAvailableModels()
     : mergeProviderModels(profile, undefined);
   const efforts = supportedEffortsForModel(profile, status.model);
@@ -1248,7 +1418,7 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
                   }`,
                 };
               }),
-              ...(profile.id === "kimi"
+              ...(profile.modelDiscovery === "openai_compatible"
                 ? [{
                     value: "",
                     label: locale === "zh" ? "手动输入模型 ID…" : "Enter model ID manually…",
@@ -1300,16 +1470,32 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
       initialValue: "account",
       required: true,
       options: [
-        { value: "account", label: locale === "zh" ? "账户默认（推荐）" : "Account default (recommended)" },
-        { value: "session", label: locale === "zh" ? "仅当前 Session" : "Current Session only" },
+        {
+          value: "account",
+          label: locale === "zh" ? "用户默认（推荐）" : "User default (recommended)",
+          description: locale === "zh"
+            ? "写入 ~/.qi/config.toml 与凭证元数据；下次启动仍生效"
+            : "Persist to ~/.qi/config.toml and sealed credential metadata",
+        },
+        {
+          value: "session",
+          label: locale === "zh" ? "仅当前 Session" : "Current Session only",
+          description: locale === "zh"
+            ? "只改本次对话，不改配置文件"
+            : "Apply now without changing config",
+        },
       ],
     },
   ];
   ctx.panels.push(new FormPanel({
     title: locale === "zh" ? "配置模型（无需重新登录）" : "Configure model (no re-login)",
-    description: status.baseURL
-      ? `${status.provider}:${status.accountAlias} · wire ${currentWireApi} · endpoint ${status.baseURL} (read-only)`
-      : `${status.provider}:${status.accountAlias} · wire ${currentWireApi}`,
+    description: [
+      formatProviderLabel(status.provider, status.accountAlias),
+      `wire ${currentWireApi}`,
+      ...(status.baseURL
+        ? [`endpoint ${status.baseURL}`, locale === "zh" ? "endpoint 只读" : "endpoint is read-only"]
+        : []),
+    ].join("\n"),
     fields,
     onChange: (fieldId, value, values) => {
       if (fieldId === "model" && value) {
@@ -1490,7 +1676,7 @@ async function openDeviceLoginForm(
   const currentModel = ctx.auth?.status().provider === providerId
     ? ctx.auth.status().model
     : undefined;
-  const availableModels = providerId === "kimi" && ctx.auth
+  const availableModels = profile.modelDiscovery === "openai_compatible" && ctx.auth
     ? await ctx.auth.listAvailableModels()
     : mergeProviderModels(profile, undefined);
   ctx.panels.push(new FormPanel({
@@ -1500,14 +1686,14 @@ async function openDeviceLoginForm(
     description: locale === "zh"
       ? "OAuth 设备码登录。模型、effort 和上下文窗口会写入 ~/.qi/config.toml。"
       : "OAuth device-code login. Model, effort, and context window are saved to ~/.qi/config.toml.",
-    fields: kimiModelFields(
+    fields: catalogModelFields(
       profile,
       currentModel ?? sealedModel ?? defaultModel,
       ctx.auth?.status(),
       locale,
       availableModels,
     ),
-    onChange: kimiLoginFieldChange(profile, availableModels),
+    onChange: catalogLoginFieldChange(profile, availableModels),
     submitLabel: locale === "zh" ? "继续授权" : "Continue",
     onClose: ctx.panels.dismiss,
     onSubmit: (values) => {
@@ -1535,11 +1721,13 @@ async function openApiKeyForm(
   const defaultModel = sealed?.model ?? profile.defaultModel ?? "";
   const defaultBase = sealed?.baseURL ?? profile.officialBaseURL;
   const isCompatible = providerId === "compatible";
-  const availableModels = providerId === "kimi" && ctx.auth
+  const availableModels = profile.modelDiscovery === "openai_compatible" && ctx.auth
     ? await ctx.auth.listAvailableModels()
     : mergeProviderModels(profile, undefined);
-  const modelFields = providerId === "kimi"
-    ? kimiModelFields(profile, defaultModel, ctx.auth?.status(), locale, availableModels)
+  const useCatalogModelUi = (profile.models?.length ?? 0) > 0
+    || profile.modelDiscovery === "openai_compatible";
+  const modelFields = useCatalogModelUi
+    ? catalogModelFields(profile, defaultModel, ctx.auth?.status(), locale, availableModels)
     : [{
         id: "model",
         label: "Model",
@@ -1576,10 +1764,10 @@ async function openApiKeyForm(
         ? "OpenAI 兼容 Chat Completions。名称用于显示与账号别名（如 zhipu）；可保存多套并用 /login use <name> 切换。千问 Token Plan 请用一等 Provider qianwenai。Key 密封；routing 写入 config.toml。"
         : "OpenAI-compatible Chat Completions. Name is the display/account alias (e.g. zhipu); save several and switch with /login use <name>. For Qianwen Token Plan use first-class provider qianwenai. Keys stay sealed; routing is saved to config.toml.")
       : (locale === "zh"
-        ? `API key 密封保存在 QI_HOME。Base URL / model / provider${providerId === "kimi" ? " / effort / 上下文窗口" : ""} 写入 ~/.qi/config.toml。`
-        : `API keys are sealed under QI_HOME. Base URL / model / provider${providerId === "kimi" ? " / effort / context window" : ""} are saved to ~/.qi/config.toml.`),
+        ? `API key 密封保存在 QI_HOME。Base URL / model / provider${useCatalogModelUi ? " / effort / 上下文窗口" : ""} 写入 ~/.qi/config.toml。`
+        : `API keys are sealed under QI_HOME. Base URL / model / provider${useCatalogModelUi ? " / effort / context window" : ""} are saved to ~/.qi/config.toml.`),
     fields,
-    ...(providerId === "kimi" ? { onChange: kimiLoginFieldChange(profile, availableModels) } : {}),
+    ...(useCatalogModelUi ? { onChange: catalogLoginFieldChange(profile, availableModels) } : {}),
     submitLabel: "Authenticate",
     onClose: ctx.panels.dismiss,
     onSubmit: (values) => {
@@ -1592,28 +1780,28 @@ async function openApiKeyForm(
         ...(alias === undefined ? {} : { alias }),
         ...(model === undefined ? {} : { model }),
         baseURL,
-        ...(providerId !== "kimi"
-          ? {}
-          : {
+        ...(useCatalogModelUi
+          ? {
               ...(modelEfforts.length === 0 || values.reasoningEffort === undefined
                 ? {}
                 : { reasoningEffort: values.reasoningEffort }),
               contextWindowTokens: parseLoginContextWindow(values.contextWindowTokens),
-            }),
+            }
+          : {}),
       });
     },
   }));
 }
 
-function kimiModelFields(
+function catalogModelFields(
   profile: ProviderProfile,
   initialModel: string,
   status: ReturnType<AuthSession["status"]> | undefined,
   locale: Locale,
   availableModels: readonly MergedProviderModel[] = mergeProviderModels(profile, undefined),
 ): FormField[] {
-  const activeStatus = status?.provider === "kimi" ? status : undefined;
-  const model = initialModel || profile.defaultModel || "k3";
+  const activeStatus = status?.provider === profile.id ? status : undefined;
+  const model = initialModel || profile.defaultModel || availableModels[0]?.id || "";
   const modelProfile = availableModels.find((candidate) => candidate.id === model)?.profile
     ?? profile.models?.find((candidate) => candidate.id === model);
   const contextWindowTokens = activeStatus?.model === model
@@ -1671,7 +1859,7 @@ function kimiModelFields(
   ];
 }
 
-function kimiLoginFieldChange(
+function catalogLoginFieldChange(
   profile: ProviderProfile,
   availableModels: readonly MergedProviderModel[] = mergeProviderModels(profile, undefined),
 ): NonNullable<

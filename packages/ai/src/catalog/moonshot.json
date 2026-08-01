@@ -1,0 +1,26 @@
+{
+  "id": "moonshot",
+  "displayName": "Moonshot",
+  "wireApi": "chat.completions",
+  "officialBaseURL": "https://api.moonshot.cn/v1",
+  "officialHosts": ["api.moonshot.cn"],
+  "authSchemes": ["api-key"],
+  "defaultModel": "moonshot-v1-128k",
+  "contextTokens": 128000,
+  "modelDiscovery": "openai_compatible",
+  "wire": {
+    "chatThinking": "none"
+  },
+  "capabilities": {
+    "chatCompletions": true,
+    "responses": false,
+    "streaming": true,
+    "toolCalls": true,
+    "reasoning": false,
+    "usage": true,
+    "requestMetadata": false
+  },
+  "envApiKey": "MOONSHOT_API_KEY",
+  "envBaseURL": "MOONSHOT_BASE_URL",
+  "envModel": "MOONSHOT_MODEL"
+}

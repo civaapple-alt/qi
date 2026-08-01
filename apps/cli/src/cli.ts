@@ -22,6 +22,10 @@ import {
 } from "./project-config.js";
 import { resolveProviderConfig, type ProviderConfig } from "./provider.js";
 import {
+  defaultProviderCatalogDirectory,
+  loadAndInstallUserProviderCatalog,
+} from "./provider-catalog-files.js";
+import {
   assertMaxSteps,
   resolveOutputReserveTokens,
   TUI_DEFAULT_MAX_ACTIONS_PER_STEP,
@@ -174,6 +178,7 @@ export async function parseTuiCliArguments(
   }
   const cwd = options.cwd ?? process.cwd();
   const environment = options.environment ?? process.env;
+  await loadAndInstallUserProviderCatalog(defaultProviderCatalogDirectory(environment));
   // Bare `qi` uses the current directory; `--workspace` / positional path override.
   const workspaceRoot = resolve(cwd, values.get("--workspace") ?? positionalWorkspace ?? ".");
   const loaded = flags.has("--no-config")

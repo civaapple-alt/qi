@@ -1,4 +1,5 @@
 import { Input, Key, matchesKey, truncateToWidth, type Focusable } from "@earendil-works/pi-tui";
+import { wrapPlainLines } from "../layout.js";
 import { theme } from "../theme/index.js";
 import { panelFooter, panelHeader } from "./chrome.js";
 import type { PanelComponent } from "./types.js";
@@ -159,7 +160,12 @@ export class FormPanel implements PanelComponent, Focusable {
       "",
     ];
     if (this.#description) {
-      lines.push(truncateToWidth(theme.fg("textDim", `  ${this.#description}`), safe, "…"), "");
+      const prefix = "  ";
+      const budget = Math.max(1, safe - prefix.length);
+      for (const wrapped of wrapPlainLines(this.#description, budget)) {
+        lines.push(truncateToWidth(theme.fg("textDim", `${prefix}${wrapped}`), safe, "…"));
+      }
+      lines.push("");
     }
     for (const [index, field] of this.#fields.entries()) {
       const selected = index === this.#index;

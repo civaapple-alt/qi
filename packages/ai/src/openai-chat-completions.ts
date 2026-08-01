@@ -18,12 +18,19 @@ import {
 } from "./model.js";
 import {
   assertProfileSupportsRequest,
-  getProviderModelProfile,
   modelCapabilitiesFromProfile,
   requireProviderProfile,
   type ProviderThinkingEffort,
   type ProviderProfile,
 } from "./provider-profile.js";
+import {
+  normalizeKimiReasoningEffort,
+  normalizeReasoningEffort,
+  resolveChatOutputTokenField,
+  resolveChatThinkingWire,
+} from "./thinking-wire.js";
+
+export { normalizeKimiReasoningEffort, normalizeReasoningEffort };
 
 export interface OpenAIChatCompletionsClient {
   chat: {
@@ -113,9 +120,12 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
 
     const thinking = profile === undefined
       ? undefined
-      : chatThinkingConfig(profile, request.model.model, this.#reasoningEffort);
+      : resolveChatThinkingWire(profile, request.model.model, this.#reasoningEffort);
+    const outputTokenField = profile === undefined
+      ? "max_tokens"
+      : resolveChatOutputTokenField(profile, request.model.model);
     const body: ChatCompletionCreateParamsStreaming & {
-      thinking?: KimiThinkingConfig | DeepSeekThinkingConfig;
+      thinking?: { type: "enabled" | "disabled"; keep?: "all" };
       reasoning_effort?: ProviderThinkingEffort;
       enable_thinking?: boolean;
     } = {
@@ -126,7 +136,7 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
       stream_options: { include_usage: true },
       ...(request.maxOutputTokens === undefined
         ? {}
-        : profile?.id === "kimi"
+        : outputTokenField === "max_completion_tokens"
           ? { max_completion_tokens: request.maxOutputTokens }
           : { max_tokens: request.maxOutputTokens }),
       ...(thinking?.thinking === undefined ? {} : { thinking: thinking.thinking }),
@@ -263,120 +273,6 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
       throw new TypeError(`Chat Completions adapter does not serve provider ${model.provider}`);
     }
   }
-}
-
-interface KimiThinkingConfig {
-  readonly type: "enabled" | "disabled";
-  readonly keep?: "all";
-}
-
-interface DeepSeekThinkingConfig {
-  readonly type: "enabled" | "disabled";
-}
-
-interface ChatThinkingWire {
-  readonly thinking?: KimiThinkingConfig | DeepSeekThinkingConfig;
-  readonly reasoningEffort?: ProviderThinkingEffort;
-  /** DashScope / Qianwen Token Plan Chat Completions thinking switch. */
-  readonly enableThinking?: boolean;
-}
-
-function chatThinkingConfig(
-  profile: ProviderProfile,
-  model: string,
-  requestedEffort: string | null | undefined,
-): ChatThinkingWire | undefined {
-  if (profile.id === "qianwenai") {
-    const modelProfile = getProviderModelProfile(profile, model);
-    if (!modelProfile?.thinking && requestedEffort === undefined) return undefined;
-    const effort = normalizeReasoningEffort(requestedEffort);
-    if (effort === "none") return { enableThinking: false };
-    const supported = modelProfile?.thinking?.supportedEfforts;
-    const selected = effort !== undefined && supported?.includes(effort)
-      ? effort
-      : modelProfile?.thinking?.defaultEffort ?? supported?.[0] ?? effort;
-    return {
-      enableThinking: true,
-      ...(selected === undefined ? {} : { reasoningEffort: selected }),
-    };
-  }
-  if (profile.id === "kimi") {
-    const modelProfile = getProviderModelProfile(profile, model);
-    const effort = normalizeReasoningEffort(requestedEffort);
-    if (modelProfile?.thinking?.mode === "always") {
-      if (effort === "none") {
-        throw new TypeError(
-          `Kimi model ${model} keeps thinking always on; reasoning effort "none" is not supported`,
-        );
-      }
-      return { thinking: { type: "enabled", keep: "all" } };
-    }
-    if (effort === "none") return { thinking: { type: "disabled" } };
-    if (!modelProfile?.thinking) {
-      // Unknown / future model ID: pass top-level reasoning_effort when the operator set one.
-      return effort === undefined ? undefined : { reasoningEffort: effort };
-    }
-    if (modelProfile.thinking.mode === "toggle") {
-      return { thinking: { type: "enabled", keep: "all" } };
-    }
-    // K3 effort models: top-level reasoning_effort; do not nest effort inside thinking.
-    const supported = modelProfile.thinking.supportedEfforts;
-    const selected = effort !== undefined && supported?.includes(effort)
-      ? effort
-      : modelProfile.thinking.defaultEffort ?? supported?.[0] ?? "high";
-    return { reasoningEffort: selected };
-  }
-  if (profile.id === "deepseek") {
-    const modelProfile = getProviderModelProfile(profile, model);
-    if (!modelProfile?.thinking && requestedEffort === undefined) return undefined;
-    const effort = normalizeReasoningEffort(requestedEffort);
-    if (effort === "none") return { thinking: { type: "disabled" } };
-    const supported = modelProfile?.thinking?.supportedEfforts;
-    const selected = effort !== undefined && supported?.includes(effort)
-      ? effort
-      : modelProfile?.thinking?.defaultEffort ?? supported?.[0] ?? effort;
-    if (selected === undefined) return { thinking: { type: "enabled" } };
-    return {
-      thinking: { type: "enabled" },
-      reasoningEffort: selected,
-    };
-  }
-  return undefined;
-}
-
-/** Normalize operator effort aliases used by Kimi, DeepSeek, and Volcengine Agent Plan. */
-export function normalizeReasoningEffort(
-  value: string | null | undefined,
-): ProviderThinkingEffort | "none" | undefined {
-  if (value === undefined || value === null) return undefined;
-  switch (value.trim().toLowerCase()) {
-    case "ultra":
-    case "max":
-    case "xhigh":
-      return "max";
-    case "high":
-      return "high";
-    case "medium":
-      return "medium";
-    case "low":
-    case "minimum":
-    case "light":
-    case "minimal":
-      return "low";
-    case "none":
-      return "none";
-    default:
-      throw new TypeError(
-        `Unsupported reasoning effort "${value}"; expected ultra|max|xhigh|high|medium|low|minimum|minimal|light|none`,
-      );
-  }
-}
-
-/** @deprecated Prefer {@link normalizeReasoningEffort}. */
-export function normalizeKimiReasoningEffort(
-  value: string | null | undefined,
-): ProviderThinkingEffort | "none" | undefined {
-  return normalizeReasoningEffort(value);
 }
 
 function providerReasoningDelta(delta: ChatCompletionChunk["choices"][number]["delta"]): string | undefined {

@@ -31,6 +31,12 @@ export interface ProviderEnvironment {
   readonly MOONSHOT_API_KEY?: string;
   readonly MOONSHOT_BASE_URL?: string;
   readonly MOONSHOT_MODEL?: string;
+  readonly ARK_API_KEY?: string;
+  readonly ARK_BASE_URL?: string;
+  readonly ARK_MODEL?: string;
+  readonly QIANWENAI_API_KEY?: string;
+  readonly QIANWENAI_BASE_URL?: string;
+  readonly QIANWENAI_MODEL?: string;
   readonly QI_BASE_URL?: string;
 }
 

@@ -1,0 +1,65 @@
+{
+  "id": "deepseek",
+  "displayName": "DeepSeek",
+  "wireApi": "responses",
+  "officialBaseURL": "https://api.deepseek.com/v1",
+  "officialHosts": ["api.deepseek.com"],
+  "authSchemes": ["api-key"],
+  "defaultModel": "deepseek-v4-flash",
+  "contextTokens": 1048576,
+  "inputModalities": ["text"],
+  "outputReserveTokens": 65536,
+  "modelDiscovery": "openai_compatible",
+  "wire": {
+    "responsesThinking": "reasoning_effort",
+    "chatThinking": "thinking_type_and_effort"
+  },
+  "capabilities": {
+    "chatCompletions": true,
+    "responses": true,
+    "streaming": true,
+    "toolCalls": true,
+    "reasoning": true,
+    "usage": true,
+    "requestMetadata": false
+  },
+  "envApiKey": "DEEPSEEK_API_KEY",
+  "envBaseURL": "DEEPSEEK_BASE_URL",
+  "envModel": "DEEPSEEK_MODEL",
+  "models": [
+    {
+      "id": "deepseek-v4-flash",
+      "displayName": "DeepSeek V4 Flash",
+      "contextTokens": 1048576,
+      "outputReserveTokens": 65536,
+      "inputModalities": ["text"],
+      "wireApi": "responses",
+      "wire": {
+        "responsesThinking": "reasoning_effort"
+      },
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "displayName": "DeepSeek V4 Pro",
+      "contextTokens": 1048576,
+      "outputReserveTokens": 65536,
+      "inputModalities": ["text"],
+      "wireApi": "chat.completions",
+      "wire": {
+        "chatThinking": "thinking_type_and_effort"
+      },
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    }
+  ]
+}

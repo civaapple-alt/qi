@@ -77,7 +77,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/goal [prompt]` | Session-local 追寻: `/goal <objective>` creates and starts; bare `/goal` opens status + actions (Continue starts immediately; Continue with guidance… and Accept notes are optional / Pause / Resume / Accept / Re-evaluate… / Cancel). Status shows Goal progress and **Evidence Ledger** gaps (diagnostics ≠ ledger). Accept/pass may leave gaps open; Re-evaluate requires rationale only for fail/unknown. Default Goal `attempts` equals current `maxSteps`; only Steps with non-read Actions consume attempts. Formal Plan / Work Plan are orthogonal (`/plan` / `update_plan`); neither auto-creates from Goal. Session resume demotes active Goals to paused |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
-| `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan` / `qianwenai`). For **OpenAI Compatible**, also set a **Name** (e.g. `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
+| `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan` / `qianwenai` / a `$QI_HOME/providers` overlay id). For a full custom vendor (wire dialect, window, thinking), use Providers → **Add OpenAI-compatible provider** (writes `$QI_HOME/providers/<name>.toml` and seals the key). For thin multi-alias Chat Completions, use **OpenAI Compatible** with a **Name** (e.g. `zhipu`) under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
 | `/skills` | Skills hub: list discovered Skills, or Install → scope → name/path form |
@@ -89,7 +89,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/runs` | Session history hub — choose Runs, then Steps or Agents (Actions via Step; chooser when both exist; Enter selects observation; no separate `/steps` / `/actions` / `/agents` shortcuts) |
 | `/sessions` | Active/Archived Session list (about 3–5 cards visible; ↑↓ scrolls); type-to-search; Enter resumes or restores; `a` archives (with confirm) |
 | `/status` | Session/Run/Step/Action engineering detail panel |
-| `/model` | Reconfigure without re-login (model, thinking effort, context window, max output tokens; scope chosen in panel) |
+| `/model` | Reconfigure without re-login (model, thinking effort, context window, max output tokens). Save scope: **User default** writes `~/.qi/config.toml` + sealed credential metadata; **Current Session only** applies without changing config. |
 | `/reset-workspace` | Preflight all active Sessions, archive them, and start a fresh Session |
 | `/next [continue\|stop\|plan]` | Next Run panel |
 | `/steer <text>` | Queue direction for the next safe Step boundary |
@@ -218,6 +218,10 @@ base_url = "https://example.com/v1"
 model = "vision-model"
 image_input = true
 ```
+
+Thin `[[compatible]]` aliases stay under provider `compatible`. Prefer `$QI_HOME/providers/<id>.toml` (or
+Settings → **Add OpenAI-compatible provider**) when the vendor needs its own provider id, thinking dialect, or
+per-model windows; then set `provider = "<id>"` in `~/.qi/config.toml` (must match an installed catalog id).
 
 OpenAI-compatible endpoints are text-only without `image_input = true`. A Turn supports at most eight images and
 20 MiB of prepared image data. The timeline displays committed metadata rather than maintaining a separate UI

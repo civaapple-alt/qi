@@ -1,0 +1,614 @@
+[
+  {
+    "id": "openai",
+    "displayName": "OpenAI",
+    "wireApi": "responses",
+    "officialBaseURL": "https://api.openai.com/v1",
+    "officialHosts": [
+      "api.openai.com"
+    ],
+    "authSchemes": [
+      "api-key"
+    ],
+    "defaultModel": "gpt-5.4-mini",
+    "contextTokens": 128000,
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "modelDiscovery": "openai_compatible",
+    "wire": {
+      "responsesThinking": "reasoning_effort"
+    },
+    "capabilities": {
+      "chatCompletions": false,
+      "responses": true,
+      "streaming": true,
+      "toolCalls": true,
+      "reasoning": true,
+      "usage": true,
+      "requestMetadata": true
+    },
+    "envApiKey": "OPENAI_API_KEY",
+    "envBaseURL": "OPENAI_BASE_URL"
+  },
+  {
+    "id": "xai",
+    "displayName": "xAI",
+    "wireApi": "responses",
+    "officialBaseURL": "https://api.x.ai/v1",
+    "officialHosts": [
+      "api.x.ai"
+    ],
+    "authSchemes": [
+      "api-key"
+    ],
+    "defaultModel": "grok-4.5",
+    "contextTokens": 256000,
+    "modelDiscovery": "openai_compatible",
+    "wire": {
+      "responsesThinking": "reasoning_effort"
+    },
+    "capabilities": {
+      "chatCompletions": false,
+      "responses": true,
+      "streaming": true,
+      "toolCalls": true,
+      "reasoning": true,
+      "usage": true,
+      "requestMetadata": false
+    },
+    "envApiKey": "XAI_API_KEY",
+    "envBaseURL": "XAI_BASE_URL",
+    "envModel": "XAI_MODEL"
+  },
+  {
+    "id": "kimi",
+    "displayName": "Kimi Code",
+    "wireApi": "chat.completions",
+    "officialBaseURL": "https://api.kimi.com/coding/v1",
+    "officialHosts": [
+      "api.kimi.com"
+    ],
+    "authSchemes": [
+      "oauth-device",
+      "api-key"
+    ],
+    "defaultModel": "k3",
+    "contextTokens": 1048576,
+    "modelDiscovery": "openai_compatible",
+    "wire": {
+      "chatThinking": "kimi_effort",
+      "chatOutputTokenField": "max_completion_tokens"
+    },
+    "capabilities": {
+      "chatCompletions": true,
+      "responses": false,
+      "streaming": true,
+      "toolCalls": true,
+      "reasoning": true,
+      "usage": true,
+      "requestMetadata": false
+    },
+    "envApiKey": "KIMI_API_KEY",
+    "envBaseURL": "KIMI_BASE_URL",
+    "envModel": "KIMI_MODEL",
+    "models": [
+      {
+        "id": "k3",
+        "displayName": "Kimi K3",
+        "contextTokens": 1048576,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "k3-256k",
+        "displayName": "Kimi K3 256K",
+        "contextTokens": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "kimi-for-coding",
+        "displayName": "Kimi K2.7 Code",
+        "contextTokens": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "wire": {
+          "chatThinking": "thinking_keep_all",
+          "chatOutputTokenField": "max_completion_tokens"
+        },
+        "thinking": {
+          "mode": "always"
+        }
+      },
+      {
+        "id": "kimi-for-coding-highspeed",
+        "displayName": "Kimi K2.7 Code HighSpeed",
+        "contextTokens": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "wire": {
+          "chatThinking": "thinking_keep_all",
+          "chatOutputTokenField": "max_completion_tokens"
+        },
+        "thinking": {
+          "mode": "always"
+        }
+      }
+    ]
+  },
+  {
+    "id": "deepseek",
+    "displayName": "DeepSeek",
+    "wireApi": "responses",
+    "officialBaseURL": "https://api.deepseek.com/v1",
+    "officialHosts": [
+      "api.deepseek.com"
+    ],
+    "authSchemes": [
+      "api-key"
+    ],
+    "defaultModel": "deepseek-v4-flash",
+    "contextTokens": 1048576,
+    "inputModalities": [
+      "text"
+    ],
+    "outputReserveTokens": 65536,
+    "modelDiscovery": "openai_compatible",
+    "wire": {
+      "responsesThinking": "reasoning_effort",
+      "chatThinking": "thinking_type_and_effort"
+    },
+    "capabilities": {
+      "chatCompletions": true,
+      "responses": true,
+      "streaming": true,
+      "toolCalls": true,
+      "reasoning": true,
+      "usage": true,
+      "requestMetadata": false
+    },
+    "envApiKey": "DEEPSEEK_API_KEY",
+    "envBaseURL": "DEEPSEEK_BASE_URL",
+    "envModel": "DEEPSEEK_MODEL",
+    "models": [
+      {
+        "id": "deepseek-v4-flash",
+        "displayName": "DeepSeek V4 Flash",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text"
+        ],
+        "wireApi": "responses",
+        "wire": {
+          "responsesThinking": "reasoning_effort"
+        },
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "displayName": "DeepSeek V4 Pro",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text"
+        ],
+        "wireApi": "chat.completions",
+        "wire": {
+          "chatThinking": "thinking_type_and_effort"
+        },
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      }
+    ]
+  },
+  {
+    "id": "volcengine-agent-plan",
+    "displayName": "Volcengine Agent Plan",
+    "wireApi": "responses",
+    "officialBaseURL": "https://ark.cn-beijing.volces.com/api/plan/v3",
+    "officialHosts": [
+      "ark.cn-beijing.volces.com"
+    ],
+    "authSchemes": [
+      "api-key"
+    ],
+    "defaultModel": "glm-latest",
+    "contextTokens": 1048576,
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "outputReserveTokens": 65536,
+    "modelDiscovery": "openai_compatible",
+    "wire": {
+      "responsesThinking": "thinking_type_and_reasoning_effort"
+    },
+    "capabilities": {
+      "chatCompletions": false,
+      "responses": true,
+      "streaming": true,
+      "toolCalls": true,
+      "reasoning": true,
+      "usage": true,
+      "requestMetadata": false
+    },
+    "envApiKey": "ARK_API_KEY",
+    "envBaseURL": "ARK_BASE_URL",
+    "envModel": "ARK_MODEL",
+    "models": [
+      {
+        "id": "glm-latest",
+        "displayName": "GLM Latest",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "glm-5.2",
+        "displayName": "GLM 5.2",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "ark-code-latest",
+        "displayName": "Ark Code Latest",
+        "contextTokens": 256000,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "doubao-seed-2.0-code",
+        "displayName": "Doubao Seed 2.0 Code",
+        "contextTokens": 256000,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "minimax-m2.7",
+        "displayName": "MiniMax M2.7",
+        "contextTokens": 200000,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "kimi-k2.6",
+        "displayName": "Kimi K2.6",
+        "contextTokens": 256000,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "displayName": "Kimi K2.7 Code",
+        "contextTokens": 256000,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "qianwenai",
+    "displayName": "Qianwen AI Token Plan",
+    "wireApi": "responses",
+    "officialBaseURL": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    "officialHosts": [
+      "token-plan.cn-beijing.maas.aliyuncs.com"
+    ],
+    "authSchemes": [
+      "api-key"
+    ],
+    "defaultModel": "qwen3.8-max-preview",
+    "contextTokens": 1048576,
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "outputReserveTokens": 65536,
+    "modelDiscovery": "openai_compatible",
+    "wire": {
+      "responsesThinking": "reasoning_effort"
+    },
+    "capabilities": {
+      "chatCompletions": true,
+      "responses": true,
+      "streaming": true,
+      "toolCalls": true,
+      "reasoning": true,
+      "usage": true,
+      "requestMetadata": false
+    },
+    "envApiKey": "QIANWENAI_API_KEY",
+    "envBaseURL": "QIANWENAI_BASE_URL",
+    "envModel": "QIANWENAI_MODEL",
+    "models": [
+      {
+        "id": "qwen3.8-max-preview",
+        "displayName": "Qwen3.8 Max Preview",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "wire": {
+          "responsesThinking": "reasoning_effort"
+        },
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "qwen3.7-max",
+        "displayName": "Qwen3.7 Max",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text"
+        ],
+        "wire": {
+          "responsesThinking": "reasoning_effort"
+        },
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "qwen3.7-plus",
+        "displayName": "Qwen3.7 Plus",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "wire": {
+          "responsesThinking": "reasoning_effort"
+        },
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "glm-5-2",
+        "displayName": "GLM 5.2",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text"
+        ],
+        "wireApi": "chat.completions",
+        "wire": {
+          "chatThinking": "enable_thinking_and_effort",
+          "chatOutputTokenField": "max_tokens"
+        },
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "displayName": "DeepSeek V4 Pro",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text"
+        ],
+        "wireApi": "chat.completions",
+        "wire": {
+          "chatThinking": "enable_thinking_and_effort",
+          "chatOutputTokenField": "max_tokens"
+        },
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      }
+    ]
+  },
+  {
+    "id": "moonshot",
+    "displayName": "Moonshot",
+    "wireApi": "chat.completions",
+    "officialBaseURL": "https://api.moonshot.cn/v1",
+    "officialHosts": [
+      "api.moonshot.cn"
+    ],
+    "authSchemes": [
+      "api-key"
+    ],
+    "defaultModel": "moonshot-v1-128k",
+    "contextTokens": 128000,
+    "modelDiscovery": "openai_compatible",
+    "wire": {
+      "chatThinking": "none"
+    },
+    "capabilities": {
+      "chatCompletions": true,
+      "responses": false,
+      "streaming": true,
+      "toolCalls": true,
+      "reasoning": false,
+      "usage": true,
+      "requestMetadata": false
+    },
+    "envApiKey": "MOONSHOT_API_KEY",
+    "envBaseURL": "MOONSHOT_BASE_URL",
+    "envModel": "MOONSHOT_MODEL"
+  },
+  {
+    "id": "compatible",
+    "displayName": "OpenAI Compatible",
+    "wireApi": "chat.completions",
+    "officialBaseURL": "https://api.openai.com/v1",
+    "officialHosts": [],
+    "authSchemes": [
+      "api-key"
+    ],
+    "defaultModel": "gpt-4o-mini",
+    "contextTokens": 128000,
+    "imageInputDefault": false,
+    "modelDiscovery": "openai_compatible",
+    "wire": {
+      "chatThinking": "none"
+    },
+    "capabilities": {
+      "chatCompletions": true,
+      "responses": false,
+      "streaming": true,
+      "toolCalls": true,
+      "reasoning": false,
+      "usage": true,
+      "requestMetadata": false
+    },
+    "envBaseURL": "QI_BASE_URL",
+    "envModel": "QI_MODEL"
+  }
+]

@@ -1,0 +1,79 @@
+{
+  "id": "kimi",
+  "displayName": "Kimi Code",
+  "wireApi": "chat.completions",
+  "officialBaseURL": "https://api.kimi.com/coding/v1",
+  "officialHosts": ["api.kimi.com"],
+  "authSchemes": ["oauth-device", "api-key"],
+  "defaultModel": "k3",
+  "contextTokens": 1048576,
+  "modelDiscovery": "openai_compatible",
+  "wire": {
+    "chatThinking": "kimi_effort",
+    "chatOutputTokenField": "max_completion_tokens"
+  },
+  "capabilities": {
+    "chatCompletions": true,
+    "responses": false,
+    "streaming": true,
+    "toolCalls": true,
+    "reasoning": true,
+    "usage": true,
+    "requestMetadata": false
+  },
+  "envApiKey": "KIMI_API_KEY",
+  "envBaseURL": "KIMI_BASE_URL",
+  "envModel": "KIMI_MODEL",
+  "models": [
+    {
+      "id": "k3",
+      "displayName": "Kimi K3",
+      "contextTokens": 1048576,
+      "inputModalities": ["text", "image"],
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    },
+    {
+      "id": "k3-256k",
+      "displayName": "Kimi K3 256K",
+      "contextTokens": 262144,
+      "inputModalities": ["text", "image"],
+      "thinking": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "high", "max"],
+        "defaultEffort": "high",
+        "allowDisable": false
+      }
+    },
+    {
+      "id": "kimi-for-coding",
+      "displayName": "Kimi K2.7 Code",
+      "contextTokens": 262144,
+      "inputModalities": ["text", "image"],
+      "wire": {
+        "chatThinking": "thinking_keep_all",
+        "chatOutputTokenField": "max_completion_tokens"
+      },
+      "thinking": {
+        "mode": "always"
+      }
+    },
+    {
+      "id": "kimi-for-coding-highspeed",
+      "displayName": "Kimi K2.7 Code HighSpeed",
+      "contextTokens": 262144,
+      "inputModalities": ["text", "image"],
+      "wire": {
+        "chatThinking": "thinking_keep_all",
+        "chatOutputTokenField": "max_completion_tokens"
+      },
+      "thinking": {
+        "mode": "always"
+      }
+    }
+  ]
+}

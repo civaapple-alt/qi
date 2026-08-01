@@ -1,0 +1,26 @@
+{
+  "id": "openai",
+  "displayName": "OpenAI",
+  "wireApi": "responses",
+  "officialBaseURL": "https://api.openai.com/v1",
+  "officialHosts": ["api.openai.com"],
+  "authSchemes": ["api-key"],
+  "defaultModel": "gpt-5.4-mini",
+  "contextTokens": 128000,
+  "inputModalities": ["text", "image"],
+  "modelDiscovery": "openai_compatible",
+  "wire": {
+    "responsesThinking": "reasoning_effort"
+  },
+  "capabilities": {
+    "chatCompletions": false,
+    "responses": true,
+    "streaming": true,
+    "toolCalls": true,
+    "reasoning": true,
+    "usage": true,
+    "requestMetadata": true
+  },
+  "envApiKey": "OPENAI_API_KEY",
+  "envBaseURL": "OPENAI_BASE_URL"
+}

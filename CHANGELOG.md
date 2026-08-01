@@ -10,6 +10,12 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Settings → Providers → **Add OpenAI-compatible provider**: enter name, API key, base URL, wire API
+  (`chat.completions` / `responses`), thinking dialect / Chat output field, plus separate **Model ID**,
+  **Context window**, and **Output reserve** fields (token counts accept `256k` / `32k`), then write
+  `$QI_HOME/providers/<name>.toml` and seal the key for that provider id. Extra models can be added by
+  editing the TOML.
+
 - Qianwen AI Token Plan provider (`qianwenai`): OpenAI-compatible host
   `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` with `QIANWENAI_API_KEY`, default model
   `qwen3.8-max-preview`. Qwen models use Responses (`reasoning.effort`); `glm-5-2` / `deepseek-v4-pro` use
@@ -44,6 +50,14 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- `/model` save scope labels: **User default** (persist to `~/.qi/config.toml` + sealed credential) vs
+  **Current Session only** (apply without changing config), instead of the ambiguous “Account default”.
+- Provider catalogs are declarative JSON under `@civaapple/qi-ai` (`src/catalog/`). Wire thinking dialects
+  (`ProviderWireHints`) drive Chat Completions / Responses field shapes without `profile.id` branches.
+  Operators may overlay or add providers via `$QI_HOME/providers/*.toml` (or `*.json`); same `id` merges onto
+  built-ins. Catalog fields cover context window, output reserve, modalities, thinking mode / efforts /
+  `allowDisable`, and optional `modelDiscovery = "openai_compatible"` for `GET /models` (authority for
+  thinking/effort remains on the catalog). See ADR-0009 / provider-adapters.
 - Qianwen Token Plan third-party models use Chat Completions on the Token Plan host: catalog id is
   `glm-5-2` (not `glm-5.2`, which Responses rejects as unsupported), and `deepseek-v4-pro` follows the
   same Chat Completions path with `enable_thinking` / `reasoning_effort`. Qwen models stay on Responses.
@@ -64,7 +78,8 @@ backup plus reset or a new data root rather than an automatic migration.
 - TUI statusline shows the effective thinking effort between model and context % (for example
   `deepseek/deepseek-v4-flash · high · 3%`); `/model` and login syncs refresh the footer without restart.
 - TUI statusline and `/model` show the selected model's wire API (`responses` / `chat.completions`) so
-  mixed-wire providers such as Qianwen Token Plan make the active transport obvious.
+  mixed-wire providers such as Qianwen Token Plan make the active transport obvious. FormPanel
+  descriptions wrap across lines (provider / wire / endpoint) instead of truncating a single long row.
 - Plan and Agent (rich TTY) may use in-Run `ask_question`; Ask mode still omits it. Agent mode guidance treats
   structured cards and freeform assistant questions that stop for the next user turn as equally valid
   clarification. `plan_document` remains Plan-only. See ADR-0011.
@@ -136,6 +151,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Fixed
 
+- `$QI_HOME/config.toml` accepts provider ids from the installed catalog (including
+  `$QI_HOME/providers/*.toml` overlays such as `stepfun`), not only the built-in allowlist. Login /
+  `/model` user-default persistence no longer fails with `provider must be one of openai, xai, …`.
+  Overlay providers with thinking wire hints may also persist `reasoning_effort`.
 - Length-truncated model turns (thinking exhausting `max_output_tokens`) no longer flood the interactive
   transcript with a wall of CoT/`text`; the TUI keeps Thinking collapsed and shows a short truncated
   tail unless the Step is expanded. Live `model.reasoning` activity stays in the Working strip only.
@@ -169,6 +188,9 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Documentation
 
+- ADR-0009 / provider-adapters / CLI README: custom OpenAI-compatible providers via `$QI_HOME/providers` (Settings
+  add-provider form), `config.toml` accepting installed catalog ids (not a fixed allowlist), `/model` user-default
+  vs Session-only save scope, and `model_discovery` remote merge semantics.
 - Document Volcengine Agent Plan login/config, Responses deep-thinking wire shape, and `medium` effort semantics
   in root README, CLI interaction model, provider adapters, and ADR-0009.
 - CLI and agent docs: Plan/Agent clarification via `ask_question` or freeform next-turn questions; Ask still

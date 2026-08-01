@@ -119,17 +119,31 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 
 - Provider profiles declare a default wire API, base URL, auth schemes, transport capabilities, and
   model-specific context windows, thinking modes, or wire-API overrides where those differ within one provider.
+- Built-in catalogs are declarative data (`packages/ai/src/catalog/*.json`). Operators may overlay or add
+  providers under `$QI_HOME/providers/*.{toml,json}` (same `id` merges; new `id` appends). Secrets never appear
+  in catalog files. The CLI may write a custom OpenAI-compatible catalog via Settings → Providers →
+  **Add OpenAI-compatible provider** (name, key, base URL, wire API, thinking dialect, model id, context window,
+  output reserve), then seal the key under that provider id.
+- `$QI_HOME/config.toml` `provider` must be an **installed catalog id** (built-in or `$QI_HOME/providers` overlay),
+  not a fixed allowlist. `reasoning_effort` may persist for built-in thinking providers and for overlays whose
+  wire hints / model thinking blocks advertise effort. Thin multi-alias Chat Completions endpoints remain under
+  provider `compatible` + `[[compatible]]`; full per-vendor windows/thinking belong in `$QI_HOME/providers`.
+- Closed `ProviderWireHints` dialects describe Chat Completions / Responses thinking and output-token field
+  shapes. Adapters interpret dialects only — they must not branch on `profile.id`. New HTTP field shapes require
+  a new dialect (or a new wire adapter), not open-ended request templates.
 - A model entry may override the profile wire API (for example DeepSeek `deepseek-v4-flash` uses Responses while
   `deepseek-v4-pro` stays on Chat Completions until the vendor supports Responses). Selection remains explicit
   from the profile catalog; Qi never probes failed endpoints to guess a wire API.
 - Responses and Chat Completions adapters remain thin implementations of one portable model protocol.
 - Provider-specific thinking fields are derived deterministically from the selected model profile and explicit
   operator configuration; unknown effort values fail before network execution. Portable effort levels are
-  `low` / `medium` / `high` / `max` / `none`; catalogs advertise only the levels they support, and unsupported
-  selections fall back to the model `defaultEffort` on the wire. Volcengine Agent Plan Responses enables
-  deep thinking with `thinking: { type: "enabled" }` plus `reasoning: { effort }` (see vendor Responses docs).
-  Qianwen AI Token Plan (`qianwenai`) uses Responses at the Token Plan OpenAI-compatible host with
-  `QIANWENAI_*` credentials and thinking via `reasoning.effort` only (no DashScope pay-as-you-go host/key mix).
+  `low` / `medium` / `high` / `max` / `none`; catalogs advertise only the levels they support (`allowDisable`
+  controls whether UI lists `none`), and unsupported selections fall back to the model `defaultEffort` on the
+  wire. Volcengine Agent Plan Responses enables deep thinking with `thinking: { type: "enabled" }` plus
+  `reasoning: { effort }` (see vendor Responses docs). Qianwen AI Token Plan (`qianwenai`) uses Responses at the
+  Token Plan OpenAI-compatible host with `QIANWENAI_*` credentials and thinking via `reasoning.effort` only (no
+  DashScope pay-as-you-go host/key mix). Optional `modelDiscovery = "openai_compatible"` may refresh remote ids
+  via `GET /models`; thinking/effort authority remains on the catalog.
 - Qi-managed provider credentials are sealed and resolved through a broker only at the provider boundary.
 - Provider tokens, provider authorization headers, OAuth codes, PKCE material, and other Qi-managed authentication
   secrets never enter TOML, Session events, Artifacts, or model context.

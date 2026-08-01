@@ -3751,6 +3751,28 @@ test("History-style ListPanel searches bounded labels and status descriptions", 
   assert.match(stripVTControlCharacters(panel.render(60).join("\n")), /Run 1/);
 });
 
+test("FormPanel wraps long multi-line descriptions instead of truncating to one line", () => {
+  const endpoint = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1";
+  const panel = new FormPanel({
+    title: "Configure model",
+    description: [
+      "qianwenai:default",
+      "wire responses",
+      `endpoint ${endpoint}`,
+      "endpoint is read-only",
+    ].join("\n"),
+    fields: [{ id: "model", label: "Model", initialValue: "qwen3.8-max-preview", required: true }],
+    onSubmit() {},
+    onClose() {},
+  });
+  const rendered = panel.render(48).join("\n");
+  assert.match(rendered, /qianwenai:default/);
+  assert.match(rendered, /wire responses/);
+  assert.match(rendered, /endpoint https:\/\/token-plan/);
+  assert.match(rendered, /compatible-mode\/v1/);
+  assert.doesNotMatch(rendered, /\(rea…|\(read-only…/);
+});
+
 test("FormPanel dropdowns support dependent defaults and a final custom text option", () => {
   let submitted;
   const panel = new FormPanel({

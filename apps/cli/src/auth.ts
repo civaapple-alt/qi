@@ -187,7 +187,7 @@ export class AuthSession {
   async listAvailableModels(signal?: AbortSignal): Promise<readonly MergedProviderModel[]> {
     const profile = this.#config.profile;
     const catalogOnly = () => mergeProviderModels(profile, undefined);
-    if (profile.id !== "kimi") return catalogOnly();
+    if (profile.modelDiscovery !== "openai_compatible") return catalogOnly();
     const apiKey = this.#accessToken;
     const baseURL = this.#config.baseURL ?? profile.officialBaseURL;
     if (!apiKey || !baseURL) return catalogOnly();

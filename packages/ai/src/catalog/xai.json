@@ -1,0 +1,27 @@
+{
+  "id": "xai",
+  "displayName": "xAI",
+  "wireApi": "responses",
+  "officialBaseURL": "https://api.x.ai/v1",
+  "officialHosts": ["api.x.ai"],
+  "authSchemes": ["api-key"],
+  "defaultModel": "grok-4.5",
+  "contextTokens": 256000,
+  "inputModalities": ["text", "image"],
+  "modelDiscovery": "openai_compatible",
+  "wire": {
+    "responsesThinking": "reasoning_effort"
+  },
+  "capabilities": {
+    "chatCompletions": false,
+    "responses": true,
+    "streaming": true,
+    "toolCalls": true,
+    "reasoning": true,
+    "usage": true,
+    "requestMetadata": false
+  },
+  "envApiKey": "XAI_API_KEY",
+  "envBaseURL": "XAI_BASE_URL",
+  "envModel": "XAI_MODEL"
+}

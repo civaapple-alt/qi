@@ -53,6 +53,7 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
     mode: "effort",
     supportedEfforts: ["low", "high", "max"],
     defaultEffort: "high",
+    allowDisable: false,
   });
   assert.deepEqual(getProviderModelProfile(kimi, "k3")?.inputModalities, ["text", "image"]);
   assert.deepEqual(getProviderModelProfile(kimi, "kimi-for-coding")?.thinking, {
@@ -73,6 +74,7 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
     mode: "effort",
     supportedEfforts: ["low", "high", "max"],
     defaultEffort: "high",
+    allowDisable: false,
   });
   assert.equal(
     createModelPortForProfile(deepseek, { apiKey: "sk-test", model: "deepseek-v4-flash" }).constructor.name,
@@ -96,6 +98,7 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
     mode: "effort",
     supportedEfforts: ["low", "medium", "high"],
     defaultEffort: "high",
+    allowDisable: false,
   });
   assert.equal(getProviderModelProfile(ark, "minimax-m2.7")?.thinking, undefined);
   assert.equal(getProviderModelProfile(ark, "kimi-k2.6")?.thinking, undefined);
@@ -124,6 +127,7 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
     mode: "effort",
     supportedEfforts: ["low", "medium", "high", "max"],
     defaultEffort: "high",
+    allowDisable: false,
   });
   assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.8-max-preview")?.inputModalities, [
     "text",
