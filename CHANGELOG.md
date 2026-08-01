@@ -10,6 +10,11 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Qianwen AI Token Plan provider (`qianwenai`): Responses wire to
+  `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` with `QIANWENAI_API_KEY`, default model
+  `qwen3.8-max-preview`, catalog `qwen3.7-max` / `qwen3.7-plus` / `glm-5.2` / `deepseek-v4-pro` (effort
+  `low`/`medium`/`high`/`max` via `reasoning.effort`). Token Plan `sk-sp-…` keys must not be mixed with
+  DashScope pay-as-you-go hosts. See ADR-0009 / provider-adapters.
 - Volcengine Agent Plan provider (`volcengine-agent-plan`): Responses wire to
   `https://ark.cn-beijing.volces.com/api/plan/v3` with `ARK_API_KEY`, default model `glm-latest`, catalog
   models including `glm-5.2` / `ark-code-latest` / `doubao-seed-2.0-code` (effort `low`/`medium`/`high`) and

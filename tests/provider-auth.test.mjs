@@ -30,11 +30,13 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.ok(ids.includes("compatible"));
   assert.ok(ids.includes("deepseek"));
   assert.ok(ids.includes("volcengine-agent-plan"));
+  assert.ok(ids.includes("qianwenai"));
   assert.equal(getProviderProfile("openai")?.wireApi, "responses");
   assert.equal(getProviderProfile("kimi")?.wireApi, "chat.completions");
   assert.equal(getProviderProfile("compatible")?.wireApi, "chat.completions");
   assert.equal(getProviderProfile("deepseek")?.wireApi, "responses");
   assert.equal(getProviderProfile("volcengine-agent-plan")?.wireApi, "responses");
+  assert.equal(getProviderProfile("qianwenai")?.wireApi, "responses");
   assert.equal(getProviderProfile("compatible")?.displayName, "OpenAI Compatible");
   assert.equal(getProviderProfile("openai")?.officialBaseURL, "https://api.openai.com/v1");
   assert.equal(getProviderProfile("kimi")?.capabilities.toolCalls, true);
@@ -102,6 +104,39 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
     createModelPortForProfile(ark, { apiKey: "sk-test", model: "glm-latest" }).constructor.name,
     "OpenAIResponsesModelPort",
   );
+  const qianwenai = getProviderProfile("qianwenai");
+  assert.ok(qianwenai);
+  assert.equal(qianwenai.displayName, "Qianwen AI Token Plan");
+  assert.equal(qianwenai.defaultModel, "qwen3.8-max-preview");
+  assert.equal(
+    qianwenai.officialBaseURL,
+    "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+  );
+  assert.deepEqual(qianwenai.officialHosts, ["token-plan.cn-beijing.maas.aliyuncs.com"]);
+  assert.equal(qianwenai.envApiKey, "QIANWENAI_API_KEY");
+  assert.equal(qianwenai.envBaseURL, "QIANWENAI_BASE_URL");
+  assert.equal(qianwenai.envModel, "QIANWENAI_MODEL");
+  assert.equal(qianwenai.capabilities.requestMetadata, false);
+  assert.equal(qianwenai.capabilities.reasoning, true);
+  assert.equal(providerModelContextTokens(qianwenai, "qwen3.8-max-preview"), 1_048_576);
+  assert.equal(providerModelOutputReserveTokens(qianwenai, "qwen3.8-max-preview"), 65_536);
+  assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.8-max-preview")?.thinking, {
+    mode: "effort",
+    supportedEfforts: ["low", "medium", "high", "max"],
+    defaultEffort: "high",
+  });
+  assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.8-max-preview")?.inputModalities, [
+    "text",
+    "image",
+  ]);
+  assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.7-max")?.inputModalities, ["text"]);
+  assert.ok(qianwenai.models?.some((model) => model.id === "glm-5.2"));
+  assert.ok(qianwenai.models?.some((model) => model.id === "deepseek-v4-pro"));
+  assert.equal(
+    createModelPortForProfile(qianwenai, { apiKey: "sk-sp-test", model: "qwen3.8-max-preview" })
+      .constructor.name,
+    "OpenAIResponsesModelPort",
+  );
 });
 
 test("compatible provider labels use the configured name", () => {
@@ -109,6 +144,7 @@ test("compatible provider labels use the configured name", () => {
   assert.equal(formatProviderLabel("compatible", "zhipu"), "zhipu");
   assert.equal(formatProviderLabel("compatible", "default"), "compatible");
   assert.equal(formatProviderLabel("openai", "default"), "openai");
+  assert.equal(formatProviderLabel("qianwenai", "default"), "qianwenai");
   assert.equal(normalizeAccountAlias("QianWenAI"), "qianwenai");
   assert.equal(normalizeAccountAlias(undefined), "default");
   assert.throws(() => normalizeAccountAlias("bad name"), /Invalid name/);
@@ -159,6 +195,33 @@ test("resolveProviderConfig selects Volcengine Agent Plan Responses and effort",
   assert.equal(config.reasoningEffort, "medium");
   assert.equal(config.profile.envApiKey, "ARK_API_KEY");
   assert.equal(config.baseURL, "https://ark.cn-beijing.volces.com/api/plan/v3");
+});
+
+test("resolveProviderConfig selects Qianwen AI Token Plan Responses and effort", () => {
+  const config = resolveProviderConfig({
+    provider: "qianwenai",
+    model: "qwen3.8-max-preview",
+    reasoningEffort: "medium",
+    allowMissingCredential: true,
+    environment: {},
+  });
+  assert.equal(config.wireApi, "responses");
+  assert.equal(config.reasoningEffort, "medium");
+  assert.equal(config.profile.envApiKey, "QIANWENAI_API_KEY");
+  assert.equal(
+    config.baseURL,
+    "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+  );
+  assert.equal(
+    resolveProviderConfig({
+      provider: "qianwenai",
+      model: "qwen3.7-plus",
+      reasoningEffort: "xhigh",
+      allowMissingCredential: true,
+      environment: {},
+    }).reasoningEffort,
+    "max",
+  );
 });
 
 test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported values", () => {
@@ -530,9 +593,14 @@ test("parseLoginCommand distinguishes status, logout, device, and API key modes"
   assert.deepEqual(parseLoginCommand("list"), { provider: "", mode: "list" });
   assert.deepEqual(parseLoginCommand("logout kimi"), { provider: "kimi", mode: "logout" });
   assert.deepEqual(parseLoginCommand("use qianwenai"), {
+    provider: "qianwenai",
+    mode: "use",
+    alias: "default",
+  });
+  assert.deepEqual(parseLoginCommand("use zhipu"), {
     provider: "compatible",
     mode: "use",
-    alias: "qianwenai",
+    alias: "zhipu",
   });
   assert.deepEqual(parseLoginCommand("use deepseek"), {
     provider: "deepseek",

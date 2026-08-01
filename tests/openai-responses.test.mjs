@@ -512,6 +512,57 @@ test("Volcengine Agent Plan Responses sends thinking.type, reasoning.effort, and
   assert.equal(captured.max_output_tokens, 1024);
 });
 
+test("Qianwen AI Token Plan sends reasoning.effort without thinking.type", async () => {
+  const bodies = [];
+  const client = {
+    responses: {
+      create(body) {
+        bodies.push(body);
+        return asyncEvents([
+          { type: "response.reasoning_summary_text.delta", delta: "Plan", sequence_number: 1 },
+          { type: "response.completed", sequence_number: 2, response: completedResponse() },
+        ]);
+      },
+    },
+  };
+  const { getProviderProfile } = await import("@civaapple/qi-ai");
+  const profile = getProviderProfile("qianwenai");
+  const enabled = new OpenAIResponsesModelPort(client, {
+    providerNames: ["qianwenai"],
+    requestMetadata: false,
+    imageInput: true,
+    reasoningEffort: "medium",
+    profile,
+    contextTokens: 1_048_576,
+  });
+  for await (const _event of enabled.stream(request({
+    model: { provider: "qianwenai", model: "qwen3.8-max-preview" },
+    tools: [],
+    maxOutputTokens: 2048,
+  }))) {
+    // Drain.
+  }
+  assert.equal("metadata" in bodies[0], false);
+  assert.equal("thinking" in bodies[0], false);
+  assert.deepEqual(bodies[0].reasoning, { effort: "medium" });
+  assert.equal(bodies[0].max_output_tokens, 2048);
+
+  const disabled = new OpenAIResponsesModelPort(client, {
+    providerNames: ["qianwenai"],
+    requestMetadata: false,
+    reasoningEffort: "none",
+    profile,
+  });
+  for await (const _event of disabled.stream(request({
+    model: { provider: "qianwenai", model: "qwen3.7-plus" },
+    tools: [],
+  }))) {
+    // Drain.
+  }
+  assert.equal("thinking" in bodies[1], false);
+  assert.deepEqual(bodies[1].reasoning, { effort: "none" });
+});
+
 test("Volcengine Agent Plan disables thinking without reasoning.effort and omits thinking for non-thinking models", async () => {
   const bodies = [];
   const client = {

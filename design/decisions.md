@@ -128,6 +128,8 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
   `low` / `medium` / `high` / `max` / `none`; catalogs advertise only the levels they support, and unsupported
   selections fall back to the model `defaultEffort` on the wire. Volcengine Agent Plan Responses enables
   deep thinking with `thinking: { type: "enabled" }` plus `reasoning: { effort }` (see vendor Responses docs).
+  Qianwen AI Token Plan (`qianwenai`) uses Responses at the Token Plan OpenAI-compatible host with
+  `QIANWENAI_*` credentials and thinking via `reasoning.effort` only (no DashScope pay-as-you-go host/key mix).
 - Qi-managed provider credentials are sealed and resolved through a broker only at the provider boundary.
 - Provider tokens, provider authorization headers, OAuth codes, PKCE material, and other Qi-managed authentication
   secrets never enter TOML, Session events, Artifacts, or model context.

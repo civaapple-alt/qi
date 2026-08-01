@@ -30,10 +30,11 @@ provider-name branch.
 Provider Profiles declare a default wire API (`responses` or `chat.completions`) and a transport capability matrix.
 A model catalog entry may override the profile wire API via `resolveProviderWireApi`. `createModelPortForProfile`
 selects `OpenAIResponsesModelPort` or `OpenAIChatCompletionsModelPort` from that resolved value. The TUI maps
-profile ids such as `openai`, `xai`, `kimi`, `deepseek`, `volcengine-agent-plan`, `moonshot`, and `compatible` to environment variables and
-`/login` flows. The `compatible` profile is Chat Completions for arbitrary OpenAI-compatible gateways (named
-aliases such as `qianwenai` / `zhipu` live in TUI config as `account_alias` / `[[compatible]]`, not as new wire
-profiles). Provider identity remains part of `ModelRef`; sharing a wire protocol does not collapse ownership.
+profile ids such as `openai`, `xai`, `kimi`, `deepseek`, `volcengine-agent-plan`, `qianwenai`, `moonshot`, and
+`compatible` to environment variables and `/login` flows. The `compatible` profile is Chat Completions for
+arbitrary OpenAI-compatible gateways (named aliases such as `zhipu` live in TUI config as `account_alias` /
+`[[compatible]]`). First-class Qianwen Token Plan access uses provider id `qianwenai`. Provider identity remains
+part of `ModelRef`; sharing a wire protocol does not collapse ownership.
 
 Compatible endpoints can support different optional request fields. Profiles that disable `requestMetadata` omit
 that Responses field (for example xAI and DeepSeek). Session, Run, and Step correlation remains durable in Qi's
@@ -123,3 +124,28 @@ control shape ([深度思考](https://console.volcengine.com/ark/region:cn-beiji
 Output reserve is sent as Responses `max_output_tokens` (for example `1024` when configured). Catalog
 models recommend a 65,536-token reserve; the CLI Max output tokens control remains the operator
 configuration surface. Qi stays stateless (`store: false`, no `previous_response_id`).
+
+## Qianwen AI Token Plan
+
+The `qianwenai` profile targets **Token Plan** (personal/team) OpenAI-compatible Responses at
+`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`
+(`QIANWENAI_API_KEY` / `QIANWENAI_BASE_URL` / `QIANWENAI_MODEL`). Token Plan keys are `sk-sp-…` and must
+not be mixed with pay-as-you-go DashScope (`dashscope.aliyuncs.com` + `sk-ws-…`). See
+[个人版快速开始](https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-quickstart) and
+[Responses API](https://platform.qianwenai.com/docs/api-reference/chat/openai-responses).
+
+Default model is `qwen3.8-max-preview`. `requestMetadata` is off. Thinking uses vendor
+`reasoning.effort` (Qi catalogs `low` / `medium` / `high` / `max`, default `high`; `none` disables).
+Qi stays stateless (`store: false`, no `previous_response_id`, no session-cache header). Built-in Harness
+tools and multimodal generation endpoints remain out of the portable Tool surface.
+
+| Model | Context | Modalities | Thinking |
+| --- | ---: | --- | --- |
+| `qwen3.8-max-preview` | 1,048,576 | text + image | `low` / `medium` / `high` / `max`, default `high` |
+| `qwen3.7-max` | 1,048,576 | text | same |
+| `qwen3.7-plus` | 1,048,576 | text + image | same |
+| `glm-5.2` | 1,048,576 | text | same |
+| `deepseek-v4-pro` | 1,048,576 | text | same |
+
+Catalog models recommend a 65,536-token output reserve; `/model` Max output tokens maps to Responses
+`max_output_tokens`.

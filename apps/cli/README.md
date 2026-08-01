@@ -77,7 +77,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/goal [prompt]` | Session-local 追寻: `/goal <objective>` creates and starts; bare `/goal` opens status + actions (Continue starts immediately; Continue with guidance… and Accept notes are optional / Pause / Resume / Accept / Re-evaluate… / Cancel). Status shows Goal progress and **Evidence Ledger** gaps (diagnostics ≠ ledger). Accept/pass may leave gaps open; Re-evaluate requires rationale only for fail/unknown. Default Goal `attempts` equals current `maxSteps`; only Steps with non-read Actions consume attempts. Formal Plan / Work Plan are orthogonal (`/plan` / `update_plan`); neither auto-creates from Goal. Session resume demotes active Goals to paused |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
 | `/ask [prompt]` | Toggle Ask mode (Q&A, read-only); with a prompt, enter Ask and ask that question |
-| `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan`). For **OpenAI Compatible**, also set a **Name** (e.g. `qianwenai` / `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
+| `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan` / `qianwenai`). For **OpenAI Compatible**, also set a **Name** (e.g. `zhipu`); multiple names are saved under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
 | `/skills` | Skills hub: list discovered Skills, or Install → scope → name/path form |
@@ -312,6 +312,10 @@ editable window to `~/.qi/config.toml`; the API key remains sealed under `QI_HOM
 `https://ark.cn-beijing.volces.com/api/plan/v3` (Responses). Default model is `glm-latest`; thinking models
 accept `low`/`medium`/`high` (wire: `thinking.type` + `reasoning.effort`). `/model` Max output tokens maps to
 `max_output_tokens` (for example `1024`).
+**Qianwen AI Token Plan** (`qianwenai`) uses `QIANWENAI_API_KEY` and
+`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` (Responses). Default model is
+`qwen3.8-max-preview`; catalog models accept `low`/`medium`/`high`/`max` via `reasoning.effort`. Do not mix
+Token Plan `sk-sp-…` keys with pay-as-you-go DashScope hosts.
 
 Main Runs default to 32 Steps. `max_steps` accepts 8–1000 in user or project TOML, with
 `--max-steps` > project > user > default precedence. `/settings` → **Step budget** and the `/max-steps` alias

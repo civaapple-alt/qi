@@ -674,6 +674,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
       "kimi",
       "deepseek",
       "volcengine-agent-plan",
+      "qianwenai",
       "moonshot",
       "compatible",
     ];
@@ -711,7 +712,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   }
   if (reasoningEffort !== undefined && !providerPersistsReasoningEffort(provider)) {
     throw new TypeError(
-      `${path}: reasoning_effort is currently supported only when provider = "kimi", "deepseek", or "volcengine-agent-plan"`,
+      `${path}: reasoning_effort is currently supported only when provider = "kimi", "deepseek", "volcengine-agent-plan", or "qianwenai"`,
     );
   }
   let capabilities: QiCapabilityConfig | undefined;
@@ -920,7 +921,10 @@ function assertOnlyKeys(table: Record<string, unknown>, allowed: readonly string
 }
 
 function providerPersistsReasoningEffort(provider: string | undefined): boolean {
-  return provider === "kimi" || provider === "deepseek" || provider === "volcengine-agent-plan";
+  return provider === "kimi"
+    || provider === "deepseek"
+    || provider === "volcengine-agent-plan"
+    || provider === "qianwenai";
 }
 
 function optionalStringField(value: unknown, label: string, maximum = 128): string | undefined {

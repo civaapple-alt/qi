@@ -423,8 +423,8 @@ async function openCompatiblePanel(ctx: PanelFlowContext): Promise<void> {
         id: "add",
         label: locale === "zh" ? "添加 / 登录" : "Add / login",
         description: locale === "zh"
-          ? "新建名称（如 qianwenai / zhipu）并密封 API key"
-          : "Create a name (e.g. qianwenai / zhipu) and seal an API key",
+          ? "新建名称（如 zhipu）并密封 API key"
+          : "Create a name (e.g. zhipu) and seal an API key",
       },
       ...endpoints.map((entry) => {
         const routing = [entry.model, entry.baseURL].filter(Boolean).join(" · ");
@@ -1547,7 +1547,7 @@ async function openApiKeyForm(
       ? [{
         id: "name",
         label: locale === "zh" ? "名称" : "Name",
-        placeholder: "qianwenai",
+        placeholder: "zhipu",
         ...(sealed?.alias ? { initialValue: sealed.alias } : {}),
         required: true as const,
       }]
@@ -1568,8 +1568,8 @@ async function openApiKeyForm(
       : `Login · ${profile.displayName}`,
     description: isCompatible
       ? (locale === "zh"
-        ? "OpenAI 兼容 Chat Completions。名称用于显示与账号别名（如 qianwenai、zhipu）；可保存多套并用 /login use <name> 切换。Key 密封；routing 写入 config.toml。"
-        : "OpenAI-compatible Chat Completions. Name is the display/account alias (e.g. qianwenai, zhipu); save several and switch with /login use <name>. Keys stay sealed; routing is saved to config.toml.")
+        ? "OpenAI 兼容 Chat Completions。名称用于显示与账号别名（如 zhipu）；可保存多套并用 /login use <name> 切换。千问 Token Plan 请用一等 Provider qianwenai。Key 密封；routing 写入 config.toml。"
+        : "OpenAI-compatible Chat Completions. Name is the display/account alias (e.g. zhipu); save several and switch with /login use <name>. For Qianwen Token Plan use first-class provider qianwenai. Keys stay sealed; routing is saved to config.toml.")
       : (locale === "zh"
         ? `API key 密封保存在 QI_HOME。Base URL / model / provider${providerId === "kimi" ? " / effort / 上下文窗口" : ""} 写入 ~/.qi/config.toml。`
         : `API keys are sealed under QI_HOME. Base URL / model / provider${providerId === "kimi" ? " / effort / context window" : ""} are saved to ~/.qi/config.toml.`),

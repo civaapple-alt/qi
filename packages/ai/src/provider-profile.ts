@@ -302,6 +302,84 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
     envModel: "ARK_MODEL",
   },
   {
+    id: "qianwenai",
+    displayName: "Qianwen AI Token Plan",
+    wireApi: "responses",
+    // Token Plan personal/team OpenAI-compatible host — never mix with dashscope.aliyuncs.com pay-as-you-go.
+    officialBaseURL: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    officialHosts: ["token-plan.cn-beijing.maas.aliyuncs.com"],
+    authSchemes: ["api-key"],
+    defaultModel: "qwen3.8-max-preview",
+    contextTokens: 1_048_576,
+    inputModalities: ["text", "image"],
+    models: [
+      {
+        id: "qwen3.8-max-preview",
+        displayName: "Qwen3.8 Max Preview",
+        contextTokens: 1_048_576,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text", "image"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "qwen3.7-max",
+        displayName: "Qwen3.7 Max",
+        contextTokens: 1_048_576,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "qwen3.7-plus",
+        displayName: "Qwen3.7 Plus",
+        contextTokens: 1_048_576,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text", "image"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "glm-5.2",
+        displayName: "GLM 5.2",
+        contextTokens: 1_048_576,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+      {
+        id: "deepseek-v4-pro",
+        displayName: "DeepSeek V4 Pro",
+        contextTokens: 1_048_576,
+        outputReserveTokens: 65_536,
+        inputModalities: ["text"],
+        thinking: {
+          mode: "effort",
+          supportedEfforts: ["low", "medium", "high", "max"],
+          defaultEffort: "high",
+        },
+      },
+    ],
+    capabilities: { ...responsesCaps, requestMetadata: false },
+    envApiKey: "QIANWENAI_API_KEY",
+    envBaseURL: "QIANWENAI_BASE_URL",
+    envModel: "QIANWENAI_MODEL",
+  },
+  {
     id: "moonshot",
     displayName: "Moonshot",
     wireApi: "chat.completions",
@@ -321,8 +399,8 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
     wireApi: "chat.completions",
     officialBaseURL: "https://api.openai.com/v1",
     // Empty hosts → any endpoint is treated as custom; login form supplies name + key + URL + model.
-    // Wire protocol stays OpenAI Chat Completions; `name` (account alias) labels gateways such as
-    // qianwenai / zhipu without inventing a new provider profile.
+    // Wire protocol stays OpenAI Chat Completions; `name` (account alias) labels arbitrary gateways
+    // (e.g. zhipu). First-class Token Plan access uses provider id `qianwenai`.
     officialHosts: [],
     authSchemes: ["api-key"],
     defaultModel: "gpt-4o-mini",

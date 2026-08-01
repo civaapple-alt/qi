@@ -121,7 +121,12 @@ effective effort/context defaults, and persists edits without placing the API ke
 **Volcengine Agent Plan** uses `provider = "volcengine-agent-plan"`, `ARK_API_KEY`, and Responses at
 `https://ark.cn-beijing.volces.com/api/plan/v3` (default model `glm-latest`). Thinking models accept
 `reasoning_effort = "low" | "medium" | "high"`; `/model` Max output tokens maps to Responses
-`max_output_tokens`. See [`packages/ai/docs/model/provider-adapters.md`](packages/ai/docs/model/provider-adapters.md).
+`max_output_tokens`.
+
+**Qianwen AI Token Plan** uses `provider = "qianwenai"`, `QIANWENAI_API_KEY`, and Responses at
+`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` (default model `qwen3.8-max-preview`).
+Thinking accepts `reasoning_effort = "low" | "medium" | "high" | "max"`. See
+[`packages/ai/docs/model/provider-adapters.md`](packages/ai/docs/model/provider-adapters.md).
 
 Project policy lives under `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`. Resolution order is:
 

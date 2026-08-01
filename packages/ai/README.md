@@ -23,10 +23,13 @@ default `high`) sent as top-level `reasoning_effort`. K2.7 Code keeps thinking a
 window and effort thinking; V4 Pro stays on Chat Completions until the vendor adds Responses. Volcengine Agent
 Plan (`volcengine-agent-plan`) uses Responses at the Agent Plan base URL with `ARK_API_KEY`, default
 `glm-latest`, and deep-thinking control via `thinking.type` plus `reasoning.effort` (`low`/`medium`/`high`).
-OpenAI Responses accepts images; DeepSeek rejects them. Custom OpenAI-compatible Chat Completions endpoints deny
-image input unless `imageInput` is explicitly enabled by the operator. Portable assistant messages may carry a
-`reasoning` part so thinking-mode tool turns can round-trip CoT. Chat Completions sends portable user text/images
-as a standard content array; image-bearing Tool results keep their Tool call/output message and add a following
+Qianwen AI Token Plan (`qianwenai`) uses Responses at
+`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` with `QIANWENAI_API_KEY`, default
+`qwen3.8-max-preview`, and thinking via `reasoning.effort` (`low`/`medium`/`high`/`max`). OpenAI Responses
+accepts images; DeepSeek rejects them. Custom OpenAI-compatible Chat Completions endpoints deny image input
+unless `imageInput` is explicitly enabled by the operator. Portable assistant messages may carry a `reasoning`
+part so thinking-mode tool turns can round-trip CoT. Chat Completions sends portable user text/images as a
+standard content array; image-bearing Tool results keep their Tool call/output message and add a following
 synthetic user media message. Artifact references must be verified and materialized before either adapter is
 invoked.
 

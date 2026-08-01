@@ -92,16 +92,18 @@ Provider login details:
   catalog. K3 shows default `high` effort (`low`/`high`/`max`); K2.7 Code keeps thinking always on (no effort
   control). Context window defaults remain editable and persist as `context_window_tokens`.
 - **OpenAI Compatible** (`compatible`): OpenAI Chat Completions gateways. Login requires a display **Name**
-  (e.g. `qianwenai` / `zhipu`). Multiple endpoints are stored under `[[compatible]]`. Selecting a saved
-  endpoint opens Switch / Reconfigure (API key) / Logout — same pattern as other providers. Slash:
-  `/login use <name>`.
+  (e.g. `zhipu`). Multiple endpoints are stored under `[[compatible]]`. Selecting a saved endpoint opens
+  Switch / Reconfigure (API key) / Logout — same pattern as other providers. Slash: `/login use <name>`.
 - **Volcengine Agent Plan** (`volcengine-agent-plan`): Responses at the Agent Plan base URL with `ARK_API_KEY`.
   Default model `glm-latest`. Thinking models expose `low`/`medium`/`high` effort; models such as
   `minimax-m2.7` omit effort. `/model` Max output tokens maps to `max_output_tokens`.
+- **Qianwen AI Token Plan** (`qianwenai`): Responses at the Token Plan OpenAI-compatible host with
+  `QIANWENAI_API_KEY`. Default model `qwen3.8-max-preview`. Thinking via `reasoning.effort`
+  (`low`/`medium`/`high`/`max`). Do not mix with DashScope pay-as-you-go Base URL/keys.
 - Sealed provider accounts are marked **configured** in Providers. Switch without re-entering the key via
-  **Switch to this provider**, or `/login use <provider>` (e.g. `/login use deepseek`). Model/base URL are
-  restored from credential metadata. **Switch** only activates another sealed account; **Logout** clears only
-  the selected provider or compatible name (other sealed accounts and catalog entries remain).
+  **Switch to this provider**, or `/login use <provider>` (e.g. `/login use deepseek` / `qianwenai`). Model/base
+  URL are restored from credential metadata. **Switch** only activates another sealed account; **Logout**
+  clears only the selected provider or compatible name (other sealed accounts and catalog entries remain).
 - **Kimi device/OAuth**: confirm Model / effort / context before the browser authorize step, or use
   `/login kimi device model <id> effort <level> context <tokens>`.
 

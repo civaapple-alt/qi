@@ -111,7 +111,10 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
     throw new TypeError(`${profile.displayName} requires ${profile.envModel ?? "QI_MODEL"} or --model`);
   }
   const supportsReasoningEffort =
-    provider === "kimi" || provider === "deepseek" || provider === "volcengine-agent-plan";
+    provider === "kimi"
+    || provider === "deepseek"
+    || provider === "volcengine-agent-plan"
+    || provider === "qianwenai";
   const requestedReasoningEffort = optionalValue(input.reasoningEffort) ??
     optionalValue(environment.QI_REASONING_EFFORT) ??
     (provider === "kimi" ? optionalValue(environment.KIMI_MODEL_THINKING_EFFORT) : undefined) ??

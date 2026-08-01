@@ -764,7 +764,7 @@ function getKnownProvider(id: string): boolean {
   }
 }
 
-/** `/login use deepseek` or `/login use qianwenai` (compatible alias). */
+/** `/login use deepseek` / `qianwenai`, or `/login use zhipu` (compatible alias). */
 export function resolveUseLoginTarget(token: string): {
   provider: string;
   mode: "use";
@@ -808,7 +808,12 @@ function loginReasoningEffort(
   requested: string | undefined,
   current: ProviderConfig["reasoningEffort"],
 ): ProviderConfig["reasoningEffort"] {
-  if (provider !== "kimi" && provider !== "deepseek" && provider !== "volcengine-agent-plan") {
+  if (
+    provider !== "kimi"
+    && provider !== "deepseek"
+    && provider !== "volcengine-agent-plan"
+    && provider !== "qianwenai"
+  ) {
     if (requested !== undefined) {
       throw new TypeError(
         "reasoning effort is currently supported only by the Kimi, DeepSeek, and Volcengine Agent Plan providers",
