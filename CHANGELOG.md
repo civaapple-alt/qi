@@ -63,6 +63,8 @@ backup plus reset or a new data root rather than an automatic migration.
   validation message in the TUI card and Web target/result, not only `INVALID_GIT_ARGUMENT`.
 - TUI statusline shows the effective thinking effort between model and context % (for example
   `deepseek/deepseek-v4-flash · high · 3%`); `/model` and login syncs refresh the footer without restart.
+- TUI statusline and `/model` show the selected model's wire API (`responses` / `chat.completions`) so
+  mixed-wire providers such as Qianwen Token Plan make the active transport obvious.
 - Plan and Agent (rich TTY) may use in-Run `ask_question`; Ask mode still omits it. Agent mode guidance treats
   structured cards and freeform assistant questions that stop for the next user turn as equally valid
   clarification. `plan_document` remains Plan-only. See ADR-0011.

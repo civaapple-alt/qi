@@ -103,6 +103,8 @@ export interface InspectionEntry {
 export interface StatuslineModel {
   readonly phase: TuiPhase;
   readonly model: string;
+  /** Effective provider wire API for the selected model (`responses` / `chat.completions`). */
+  readonly wireApi?: string;
   readonly reasoningEffort?: string;
   readonly contextPercent?: number;
   readonly filesChanged: number;
@@ -658,6 +660,7 @@ export class TuiPresenter {
     return {
       phase: this.phase(),
       model: `${formatProviderLabel(this.launch.provider, this.launch.accountAlias)}/${this.launch.model}`,
+      ...(this.launch.wireApi === undefined ? {} : { wireApi: this.launch.wireApi }),
       ...(this.launch.reasoningEffort === undefined
         ? {}
         : { reasoningEffort: this.launch.reasoningEffort }),
@@ -678,6 +681,7 @@ export class TuiPresenter {
     const usable = Math.max(20, width);
     const left = [
       model.model,
+      model.wireApi,
       model.reasoningEffort,
       model.contextPercent === undefined ? undefined : `${model.contextPercent}%`,
       model.filesChanged > 0 ? `${model.filesChanged} files` : undefined,

@@ -4,6 +4,7 @@ import {
   mergeProviderModels,
   providerModelContextTokens,
   providerModelOutputReserveTokens,
+  resolveProviderWireApi,
   type MergedProviderModel,
   type ProviderProfile,
 } from "@civaapple/qi-ai";
@@ -1227,6 +1228,7 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
     : mergeProviderModels(profile, undefined);
   const efforts = supportedEffortsForModel(profile, status.model);
   const modelById = new Map(availableModels.map((model) => [model.id, model]));
+  const currentWireApi = resolveProviderWireApi(profile, status.model);
   const fields: FormField[] = [
     {
       id: "model",
@@ -1236,13 +1238,16 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
       ...(availableModels.length > 0
         ? {
             options: [
-              ...availableModels.map((model) => ({
-                value: model.id,
-                label: model.displayName,
-                description: `${model.id} · ${formatContextWindow(model.contextTokens)}${
-                  model.catalogued ? "" : (locale === "zh" ? " · 远程" : " · remote")
-                }`,
-              })),
+              ...availableModels.map((model) => {
+                const wire = resolveProviderWireApi(profile, model.id);
+                return {
+                  value: model.id,
+                  label: model.displayName,
+                  description: `${model.id} · ${wire} · ${formatContextWindow(model.contextTokens)}${
+                    model.catalogued ? "" : (locale === "zh" ? " · 远程" : " · remote")
+                  }`,
+                };
+              }),
               ...(profile.id === "kimi"
                 ? [{
                     value: "",
@@ -1303,8 +1308,8 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
   ctx.panels.push(new FormPanel({
     title: locale === "zh" ? "配置模型（无需重新登录）" : "Configure model (no re-login)",
     description: status.baseURL
-      ? `${status.provider}:${status.accountAlias} · endpoint ${status.baseURL} (read-only)`
-      : `${status.provider}:${status.accountAlias}`,
+      ? `${status.provider}:${status.accountAlias} · wire ${currentWireApi} · endpoint ${status.baseURL} (read-only)`
+      : `${status.provider}:${status.accountAlias} · wire ${currentWireApi}`,
     fields,
     onChange: (fieldId, value, values) => {
       if (fieldId === "model" && value) {
@@ -1630,7 +1635,7 @@ function kimiModelFields(
         ...availableModels.map((candidate) => ({
           value: candidate.id,
           label: candidate.displayName,
-          description: `${candidate.id} · ${formatContextWindow(candidate.contextTokens)}${
+          description: `${candidate.id} · ${resolveProviderWireApi(profile, candidate.id)} · ${formatContextWindow(candidate.contextTokens)}${
             candidate.catalogued ? "" : (locale === "zh" ? " · 远程" : " · remote")
           }`,
         })),

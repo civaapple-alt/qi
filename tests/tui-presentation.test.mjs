@@ -2069,7 +2069,22 @@ test("statusline shows thinking effort between model and context percent", () =>
     wireApi: "responses",
     authStatus: "ready",
   });
-  assert.match(presenter.formatStatusline(true, 120).join("\n"), /deepseek\/deepseek-v4-flash · max · 3%/);
+  assert.match(
+    presenter.formatStatusline(true, 120).join("\n"),
+    /deepseek\/deepseek-v4-flash · responses · max · 3%/,
+  );
+
+  presenter.patchAuthLaunch({
+    provider: "qianwenai",
+    model: "glm-5-2",
+    reasoningEffort: "high",
+    wireApi: "chat.completions",
+    authStatus: "ready",
+  });
+  assert.match(
+    presenter.formatStatusline(true, 120).join("\n"),
+    /qianwenai\/glm-5-2 · chat\.completions · high · 3%/,
+  );
 
   presenter.patchAuthLaunch({
     provider: "openai",
