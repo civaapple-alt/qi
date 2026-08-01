@@ -313,9 +313,9 @@ editable window to `~/.qi/config.toml`; the API key remains sealed under `QI_HOM
 accept `low`/`medium`/`high` (wire: `thinking.type` + `reasoning.effort`). `/model` Max output tokens maps to
 `max_output_tokens` (for example `1024`).
 **Qianwen AI Token Plan** (`qianwenai`) uses `QIANWENAI_API_KEY` and
-`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` (Responses). Default model is
-`qwen3.8-max-preview`; catalog models accept `low`/`medium`/`high`/`max` via `reasoning.effort`. Do not mix
-Token Plan `sk-sp-…` keys with pay-as-you-go DashScope hosts.
+`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`. Default model is
+`qwen3.8-max-preview` (Responses). Third-party catalog ids `glm-5-2` / `deepseek-v4-pro` use Chat Completions.
+Effort is `low`/`medium`/`high`/`max`. Do not mix Token Plan `sk-sp-…` keys with pay-as-you-go DashScope hosts.
 
 Main Runs default to 32 Steps. `max_steps` accepts 8–1000 in user or project TOML, with
 `--max-steps` > project > user > default precedence. `/settings` → **Step budget** and the `/max-steps` alias

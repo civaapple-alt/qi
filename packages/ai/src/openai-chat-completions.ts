@@ -117,6 +117,7 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
     const body: ChatCompletionCreateParamsStreaming & {
       thinking?: KimiThinkingConfig | DeepSeekThinkingConfig;
       reasoning_effort?: ProviderThinkingEffort;
+      enable_thinking?: boolean;
     } = {
       model: request.model.model,
       messages: toChatMessages(request.messages),
@@ -129,6 +130,7 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
           ? { max_completion_tokens: request.maxOutputTokens }
           : { max_tokens: request.maxOutputTokens }),
       ...(thinking?.thinking === undefined ? {} : { thinking: thinking.thinking }),
+      ...(thinking?.enableThinking === undefined ? {} : { enable_thinking: thinking.enableThinking }),
       ...(thinking?.reasoningEffort === undefined
         ? {}
         : { reasoning_effort: thinking.reasoningEffort }),
@@ -275,6 +277,8 @@ interface DeepSeekThinkingConfig {
 interface ChatThinkingWire {
   readonly thinking?: KimiThinkingConfig | DeepSeekThinkingConfig;
   readonly reasoningEffort?: ProviderThinkingEffort;
+  /** DashScope / Qianwen Token Plan Chat Completions thinking switch. */
+  readonly enableThinking?: boolean;
 }
 
 function chatThinkingConfig(
@@ -282,6 +286,20 @@ function chatThinkingConfig(
   model: string,
   requestedEffort: string | null | undefined,
 ): ChatThinkingWire | undefined {
+  if (profile.id === "qianwenai") {
+    const modelProfile = getProviderModelProfile(profile, model);
+    if (!modelProfile?.thinking && requestedEffort === undefined) return undefined;
+    const effort = normalizeReasoningEffort(requestedEffort);
+    if (effort === "none") return { enableThinking: false };
+    const supported = modelProfile?.thinking?.supportedEfforts;
+    const selected = effort !== undefined && supported?.includes(effort)
+      ? effort
+      : modelProfile?.thinking?.defaultEffort ?? supported?.[0] ?? effort;
+    return {
+      enableThinking: true,
+      ...(selected === undefined ? {} : { reasoningEffort: selected }),
+    };
+  }
   if (profile.id === "kimi") {
     const modelProfile = getProviderModelProfile(profile, model);
     const effort = normalizeReasoningEffort(requestedEffort);

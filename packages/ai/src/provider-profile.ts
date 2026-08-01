@@ -350,11 +350,13 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
         },
       },
       {
-        id: "glm-5.2",
+        // Token Plan OpenAI-compatible wire id uses hyphens (glm-5-2); Responses rejects dotted glm-5.2.
+        id: "glm-5-2",
         displayName: "GLM 5.2",
         contextTokens: 1_048_576,
         outputReserveTokens: 65_536,
         inputModalities: ["text"],
+        wireApi: "chat.completions",
         thinking: {
           mode: "effort",
           supportedEfforts: ["low", "medium", "high", "max"],
@@ -362,11 +364,13 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
         },
       },
       {
+        // Not in Responses model enum; use Chat Completions on the same Token Plan host.
         id: "deepseek-v4-pro",
         displayName: "DeepSeek V4 Pro",
         contextTokens: 1_048_576,
         outputReserveTokens: 65_536,
         inputModalities: ["text"],
+        wireApi: "chat.completions",
         thinking: {
           mode: "effort",
           supportedEfforts: ["low", "medium", "high", "max"],
@@ -374,7 +378,11 @@ export const BUILTIN_PROVIDER_PROFILES: readonly ProviderProfile[] = Object.free
         },
       },
     ],
-    capabilities: { ...responsesCaps, requestMetadata: false },
+    capabilities: {
+      ...responsesCaps,
+      chatCompletions: true,
+      requestMetadata: false,
+    },
     envApiKey: "QIANWENAI_API_KEY",
     envBaseURL: "QIANWENAI_BASE_URL",
     envModel: "QIANWENAI_MODEL",

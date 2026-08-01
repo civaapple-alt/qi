@@ -10,11 +10,11 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
-- Qianwen AI Token Plan provider (`qianwenai`): Responses wire to
+- Qianwen AI Token Plan provider (`qianwenai`): OpenAI-compatible host
   `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` with `QIANWENAI_API_KEY`, default model
-  `qwen3.8-max-preview`, catalog `qwen3.7-max` / `qwen3.7-plus` / `glm-5.2` / `deepseek-v4-pro` (effort
-  `low`/`medium`/`high`/`max` via `reasoning.effort`). Token Plan `sk-sp-…` keys must not be mixed with
-  DashScope pay-as-you-go hosts. See ADR-0009 / provider-adapters.
+  `qwen3.8-max-preview`. Qwen models use Responses (`reasoning.effort`); `glm-5-2` / `deepseek-v4-pro` use
+  Chat Completions (`enable_thinking`). Token Plan `sk-sp-…` keys must not be mixed with DashScope
+  pay-as-you-go hosts. See ADR-0009 / provider-adapters.
 - Volcengine Agent Plan provider (`volcengine-agent-plan`): Responses wire to
   `https://ark.cn-beijing.volces.com/api/plan/v3` with `ARK_API_KEY`, default model `glm-latest`, catalog
   models including `glm-5.2` / `ark-code-latest` / `doubao-seed-2.0-code` (effort `low`/`medium`/`high`) and
@@ -44,6 +44,9 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- Qianwen Token Plan third-party models use Chat Completions on the Token Plan host: catalog id is
+  `glm-5-2` (not `glm-5.2`, which Responses rejects as unsupported), and `deepseek-v4-pro` follows the
+  same Chat Completions path with `enable_thinking` / `reasoning_effort`. Qwen models stay on Responses.
 - TUI Ctrl+O expands truncated assistant model output before Thinking when both are collapsed on the
   latest Step, and an expanded Step shows the full assistant text from the start instead of another
   tailed window that still hid the report intro. Ordinary long replies now preview from the head at

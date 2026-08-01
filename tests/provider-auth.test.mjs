@@ -130,12 +130,19 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
     "image",
   ]);
   assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.7-max")?.inputModalities, ["text"]);
-  assert.ok(qianwenai.models?.some((model) => model.id === "glm-5.2"));
+  assert.ok(qianwenai.models?.some((model) => model.id === "glm-5-2"));
   assert.ok(qianwenai.models?.some((model) => model.id === "deepseek-v4-pro"));
+  assert.equal(resolveProviderWireApi(qianwenai, "qwen3.8-max-preview"), "responses");
+  assert.equal(resolveProviderWireApi(qianwenai, "glm-5-2"), "chat.completions");
+  assert.equal(resolveProviderWireApi(qianwenai, "deepseek-v4-pro"), "chat.completions");
   assert.equal(
     createModelPortForProfile(qianwenai, { apiKey: "sk-sp-test", model: "qwen3.8-max-preview" })
       .constructor.name,
     "OpenAIResponsesModelPort",
+  );
+  assert.equal(
+    createModelPortForProfile(qianwenai, { apiKey: "sk-sp-test", model: "glm-5-2" }).constructor.name,
+    "OpenAIChatCompletionsModelPort",
   );
 });
 

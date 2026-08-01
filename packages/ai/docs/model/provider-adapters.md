@@ -134,18 +134,20 @@ not be mixed with pay-as-you-go DashScope (`dashscope.aliyuncs.com` + `sk-ws-…
 [个人版快速开始](https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-quickstart) and
 [Responses API](https://platform.qianwenai.com/docs/api-reference/chat/openai-responses).
 
-Default model is `qwen3.8-max-preview`. `requestMetadata` is off. Thinking uses vendor
-`reasoning.effort` (Qi catalogs `low` / `medium` / `high` / `max`, default `high`; `none` disables).
-Qi stays stateless (`store: false`, no `previous_response_id`, no session-cache header). Built-in Harness
-tools and multimodal generation endpoints remain out of the portable Tool surface.
+Default model is `qwen3.8-max-preview`. `requestMetadata` is off. Qwen catalog models use Responses with
+vendor `reasoning.effort`. Third-party plan models (`glm-5-2`, `deepseek-v4-pro`) are not in the Responses
+model enum and use Chat Completions on the same host (`enable_thinking` + `reasoning_effort`). Note the
+wire id is `glm-5-2` (hyphen), not `glm-5.2`. Qi stays stateless (`store: false`, no `previous_response_id`,
+no session-cache header). Built-in Harness tools and multimodal generation endpoints remain out of the
+portable Tool surface.
 
-| Model | Context | Modalities | Thinking |
-| --- | ---: | --- | --- |
-| `qwen3.8-max-preview` | 1,048,576 | text + image | `low` / `medium` / `high` / `max`, default `high` |
-| `qwen3.7-max` | 1,048,576 | text | same |
-| `qwen3.7-plus` | 1,048,576 | text + image | same |
-| `glm-5.2` | 1,048,576 | text | same |
-| `deepseek-v4-pro` | 1,048,576 | text | same |
+| Model | Wire | Context | Modalities | Thinking |
+| --- | --- | ---: | --- | --- |
+| `qwen3.8-max-preview` | Responses | 1,048,576 | text + image | `low` / `medium` / `high` / `max`, default `high` |
+| `qwen3.7-max` | Responses | 1,048,576 | text | same |
+| `qwen3.7-plus` | Responses | 1,048,576 | text + image | same |
+| `glm-5-2` | Chat Completions | 1,048,576 | text | same (`enable_thinking`) |
+| `deepseek-v4-pro` | Chat Completions | 1,048,576 | text | same (`enable_thinking`) |
 
 Catalog models recommend a 65,536-token output reserve; `/model` Max output tokens maps to Responses
-`max_output_tokens`.
+`max_output_tokens` or Chat Completions `max_tokens`.

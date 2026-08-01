@@ -331,6 +331,44 @@ test("Kimi thinking uses top-level reasoning_effort, disable for none, and keep:
   );
 });
 
+test("Qianwen Token Plan Chat Completions sends enable_thinking for glm-5-2", async () => {
+  let captured;
+  const client = {
+    chat: {
+      completions: {
+        create(body) {
+          captured = body;
+          return asyncEvents([{
+            id: "chatcmpl_qw",
+            choices: [{
+              index: 0,
+              delta: { content: "ok" },
+              finish_reason: "stop",
+            }],
+          }]);
+        },
+      },
+    },
+  };
+  const { getProviderProfile } = await import("@civaapple/qi-ai");
+  const port = new OpenAIChatCompletionsModelPort(client, {
+    providerNames: ["qianwenai"],
+    reasoningEffort: "medium",
+    profile: getProviderProfile("qianwenai"),
+  });
+  for await (const _event of port.stream({
+    requestId: "request-qianwenai-001",
+    model: { provider: "qianwenai", model: "glm-5-2" },
+    tools: [],
+    messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+  })) {
+    // Drain.
+  }
+  assert.equal(captured.enable_thinking, true);
+  assert.equal(captured.reasoning_effort, "medium");
+  assert.equal("thinking" in captured, false);
+});
+
 test("DeepSeek Chat Completions sends thinking and echoes reasoning_content", async () => {
   let captured;
   const client = {
