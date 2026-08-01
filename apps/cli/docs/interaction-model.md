@@ -171,6 +171,10 @@ every column useful, the renderer switches to a per-row vertical field layout so
   committed event timestamps.
   Live tails use a flat `·` prefix (also up to three lines) rather than box-drawing chrome.
 - Read: header-only (`path · N lines`); file contents are never echoed into the transcript.
+- Git: the subject is the full tool request (`git <operation>[ · ref …][ · maxCount …]`). Failures keep that
+  request plus the validation or process message (`ref is only valid for rev-parse and show`,
+  `maxCount is only valid for log`); `details.command` (and spawned `argv` when present) stays on the durable
+  ToolFailure envelope for Web and History Center inspection.
 - Write/edit: completed cards read `Edited <path> +N -M` (Cursor-style). The body uses a `▎` gutter, shows
   change lines with nearby context, and omits `---`/`+++`/`@@` chrome. Long patches collapse surplus middle as
   `… truncated (N more lines) · Ctrl+O`; short patches are never stats-only. Full unified diffs remain on the
@@ -218,8 +222,8 @@ them. An empty composer paints Cursor-style placeholder chrome (`→ Add a messa
 while a Run is active, `ctrl+c to stop|quit` on the right) with a **static** reverse-video caret on the first
 letter after `→` (e.g. `A` in Add); the terminal hardware cursor stays hidden so it does not blink as a second
 vertical bar while typing. A fixed two-line
-statusline under the editor reports phase, model, context %, changed files, workspace, capabilities, and active
-ProcessTask count.
+statusline under the editor reports model, thinking effort (when the active model advertises one), context %,
+changed files, active ProcessTask count, mode, and workspace.
 
 Finite `shell` Actions wait for exit. Long-lived servers and watchers require the separate `background`
 capability and `task` tool. `task.started`, `task.stop.requested`, `task.exited`, and `task.lost` make ownership and

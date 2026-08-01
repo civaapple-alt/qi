@@ -176,6 +176,61 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
   assert.deepEqual(view.memories, {});
 });
 
+test("Web narrative shows full git request on INVALID_GIT_ARGUMENT failures", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = "ses_web_git_arg";
+  const runId = "run_web_git_arg";
+  const stepId = "stp_web_git_arg";
+  const actionId = "act_web_git_arg";
+  const actor = { kind: "runtime", id: "test" };
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { title: "Git argument failure" }, actor);
+  writer.append("run.triggered", { runId, trigger: "user", input: "inspect git" }, actor);
+  writer.append("run.started", { runId }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId,
+    toolName: "git",
+    effect: "read",
+    input: { operation: "status", ref: "HEAD" },
+    resources: ["vcs:."],
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+  writer.append("authority.requested", { runId, stepId, actionId }, actor);
+  writer.append("authority.granted", { runId, stepId, actionId, leaseId: "lea_git" }, actor);
+  writer.append("action.started", { runId, stepId, actionId }, actor);
+  writer.append("action.failed", {
+    runId,
+    stepId,
+    actionId,
+    errorCode: "INVALID_GIT_ARGUMENT",
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        code: "INVALID_GIT_ARGUMENT",
+        message: "ref is only valid for rev-parse and show",
+        details: { command: "git status · ref HEAD", operation: "status", ref: "HEAD" },
+      }),
+    }],
+  }, actor);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, actor);
+
+  const view = store.load(sessionId);
+  assert.ok(view);
+  const narrative = projectWebSession(view, store.read(sessionId).events);
+  const action = narrative.runs[0].steps[0].actions[0];
+  assert.equal(action.toolName, "git");
+  assert.equal(action.target, "git status · ref HEAD");
+  assert.equal(action.errorCode, "INVALID_GIT_ARGUMENT");
+  assert.equal(
+    action.resultSummary,
+    "git status · ref HEAD · ref is only valid for rev-parse and show",
+  );
+  assert.equal(action.result?.details?.command, "git status · ref HEAD");
+});
+
 test("Web narrative shortens Accepted Plan titles and projects Thinking, Work Plan, and tool cards", () => {
   const store = new InMemoryEventStore();
   const sessionId = createId("ses");
@@ -240,7 +295,7 @@ test("Web narrative shortens Accepted Plan titles and projects Thinking, Work Pl
       ],
     },
     resources: ["work-plan:current"],
-    effect: "write",
+    effect: "read",
   }, actor);
   writer.append("action.proposed", {
     runId,

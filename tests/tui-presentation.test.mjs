@@ -1906,6 +1906,81 @@ test("statusline keeps mode on narrow terminals", () => {
   assert.match(narrow, /Plan/);
 });
 
+test("statusline shows thinking effort between model and context percent", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    reasoningEffort: "high",
+    capabilities: [],
+    contextWindowTokens: 1_048_576,
+    contextBudgetTokens: 983_040,
+    outputReserveTokens: 65_536,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  presenter.update([], {
+    sessionId: "ses_effort",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "active",
+        input: "hello",
+        stepOrder: ["step_1"],
+        steps: {
+          step_1: {
+            stepId: "step_1",
+            status: "running",
+            context: { estimatedTokens: 31_457, budgetTokens: 983_040 },
+          },
+        },
+        actions: {},
+        delegations: {},
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "active", reason: "run" },
+  });
+  const status = presenter.formatStatusline(true, 120).join("\n");
+  assert.match(status, /deepseek\/deepseek-v4-flash · high · 3%/);
+  assert.match(status, /Agent/);
+
+  presenter.patchAuthLaunch({
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    reasoningEffort: "max",
+    wireApi: "responses",
+    authStatus: "ready",
+  });
+  assert.match(presenter.formatStatusline(true, 120).join("\n"), /deepseek\/deepseek-v4-flash · max · 3%/);
+
+  presenter.patchAuthLaunch({
+    provider: "openai",
+    model: "gpt-5",
+    wireApi: "responses",
+    authStatus: "ready",
+  });
+  assert.doesNotMatch(presenter.formatStatusline(true, 120).join("\n"), /\b(high|max|low|none)\b/);
+});
+
 test("renderPanel exposes config for temporary panels", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/tmp/ws",
@@ -3193,6 +3268,41 @@ test("shell cards use compact $ command · duration grammar", () => {
   assert.match(summary[0] ?? "", /\$ git status 6\.1s/);
   assert.equal(summary.length, 1);
   assert.doesNotMatch(summary.join("\n"), /line2|line3|nothing to commit/);
+});
+
+test("failed git cards show full request, error code, and message", () => {
+  const invalidRef = renderToolCard({
+    actionId: "act_git_ref",
+    toolName: "git",
+    status: "failed",
+    elapsed: "32ms",
+    errorCode: "INVALID_GIT_ARGUMENT",
+    input: { operation: "status", ref: "HEAD" },
+    output: {
+      code: "INVALID_GIT_ARGUMENT",
+      message: "ref is only valid for rev-parse and show",
+      details: { command: "git status · ref HEAD", operation: "status", ref: "HEAD" },
+    },
+  }).join("\n");
+  assert.match(invalidRef, /git status · ref HEAD/);
+  assert.match(invalidRef, /INVALID_GIT_ARGUMENT/);
+  assert.match(invalidRef, /ref is only valid for rev-parse and show/);
+
+  const invalidCount = renderToolCard({
+    actionId: "act_git_count",
+    toolName: "git",
+    status: "failed",
+    elapsed: "18ms",
+    errorCode: "INVALID_GIT_ARGUMENT",
+    input: { operation: "diff", maxCount: 5 },
+    output: {
+      code: "INVALID_GIT_ARGUMENT",
+      message: "maxCount is only valid for log",
+      details: { command: "git diff · maxCount 5", operation: "diff", maxCount: 5 },
+    },
+  }, { summaryOnly: true }).join("\n");
+  assert.match(invalidCount, /git diff · maxCount 5/);
+  assert.match(invalidCount, /maxCount is only valid for log/);
 });
 
 test("failed shell cards unwrap bounded process evidence from the ToolFailure envelope", () => {

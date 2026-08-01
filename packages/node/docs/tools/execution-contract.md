@@ -102,8 +102,10 @@ Use `git` for fixed read-only repository inspection while holding only read auth
 `diff`, staged `diff-staged`, oneline `log` (`maxCount` 1–50, default 10), `rev-parse` / `show` (optional single
 `ref`, default `HEAD`; ranges and option-like tokens are rejected), `branch`, and `remote`. Its operation schema
 does not accept arbitrary arguments, Git optional locks and external diff drivers are disabled, and the
-executable must resolve outside the Workspace. Mutating Git commands (`add`, `commit`, …) remain behind the
-explicit `shell` execute capability.
+executable must resolve outside the Workspace. Argument validation failures (`INVALID_GIT_ARGUMENT` /
+`INVALID_GIT_REF`) and process failures attach `details.command` (and `argv` when spawned) so TUI/Web can show
+the full request — for example `git status · ref HEAD` or `git diff · maxCount 5` — not only the error code.
+Mutating Git commands (`add`, `commit`, …) remain behind the explicit `shell` execute capability.
 
 General host execution receives a program name and argument vector rather than a command-line string. It does
 not expand shell globs, variables, pipes, or redirection; use discovery Tools for paths and a declared script

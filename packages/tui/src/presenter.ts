@@ -48,6 +48,8 @@ export interface TuiLaunchInfo {
   readonly dataRoot: string;
   readonly provider: string;
   readonly model: string;
+  /** Effective thinking effort for the active model (`low` / `high` / `max` / `none`). */
+  readonly reasoningEffort?: string;
   readonly accountAlias?: string;
   readonly baseURL?: string;
   readonly wireApi?: string;
@@ -101,6 +103,7 @@ export interface InspectionEntry {
 export interface StatuslineModel {
   readonly phase: TuiPhase;
   readonly model: string;
+  readonly reasoningEffort?: string;
   readonly contextPercent?: number;
   readonly filesChanged: number;
   readonly workspace: string;
@@ -193,6 +196,7 @@ export class TuiPresenter {
   patchAuthLaunch(status: {
     readonly provider: string;
     readonly model: string;
+    readonly reasoningEffort?: string;
     readonly accountAlias?: string;
     readonly wireApi: string;
     readonly authStatus: "ready" | "missing" | "expired";
@@ -201,13 +205,19 @@ export class TuiPresenter {
     readonly contextBudgetTokens?: number;
     readonly outputReserveTokens?: number;
   }): void {
-    const { baseURL: _previousBaseURL, accountAlias: _previousAlias, ...rest } = this.launch;
+    const {
+      baseURL: _previousBaseURL,
+      accountAlias: _previousAlias,
+      reasoningEffort: _previousEffort,
+      ...rest
+    } = this.launch;
     this.launch = {
       ...rest,
       provider: status.provider,
       model: status.model,
       wireApi: status.wireApi,
       authStatus: status.authStatus,
+      ...(status.reasoningEffort === undefined ? {} : { reasoningEffort: status.reasoningEffort }),
       ...(status.accountAlias === undefined ? {} : { accountAlias: status.accountAlias }),
       ...(status.baseURL === undefined ? {} : { baseURL: status.baseURL }),
       ...(status.contextWindowTokens === undefined
@@ -630,6 +640,9 @@ export class TuiPresenter {
     return {
       phase: this.phase(),
       model: `${formatProviderLabel(this.launch.provider, this.launch.accountAlias)}/${this.launch.model}`,
+      ...(this.launch.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: this.launch.reasoningEffort }),
       ...(contextPercent === undefined ? {} : { contextPercent }),
       filesChanged,
       workspace: this.launch.workspaceRoot,
@@ -647,6 +660,7 @@ export class TuiPresenter {
     const usable = Math.max(20, width);
     const left = [
       model.model,
+      model.reasoningEffort,
       model.contextPercent === undefined ? undefined : `${model.contextPercent}%`,
       model.filesChanged > 0 ? `${model.filesChanged} files` : undefined,
       model.activeTasks > 0 ? `tasks ${model.activeTasks}` : undefined,

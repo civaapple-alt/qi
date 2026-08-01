@@ -161,8 +161,10 @@ Long pastes collapse to a line/char summary; Agent replies and Plans use a bound
 the terminal cannot preserve useful columns, rather than clipping right-side values. Tool cards appear only
 when Actions exist; settlement glyphs stay distinct (`✓` / `!` / `⊘` / `?` / `×` / `●`); shell cards use compact
 `$ command duration`, with successful output available through `Ctrl+O` and bounded failure evidence retained.
-Consecutive same-Step read-only `read` / `list` / `tree` / `find` / `search` / `git` Actions settle as
-`Explored N actions`; diagnostic, selected, and exceptional groups show every durable child. Write/edit cards use Cursor-style
+Failed `git` cards keep the full request (`git status · ref HEAD`, `git diff · maxCount 5`) plus the validation
+message, not only `INVALID_GIT_ARGUMENT`. Consecutive same-Step read-only `read` / `list` / `tree` / `find` /
+`search` / `git` Actions settle as `Explored N actions`; diagnostic, selected, and exceptional groups show every
+durable child. Write/edit cards use Cursor-style
 `Edited path +N -M`, a `▎` gutter, nearby context, and no `---`/`+++`/`@@` chrome (`… truncated · Ctrl+O`).
 The first Plan or Agent `update_plan` call does not require IDs: Qi discards model-supplied provisional Work
 item IDs, assigns stable IDs, and returns them for later snapshots. Failed Todo cards show the rejection code
@@ -177,8 +179,9 @@ single long reasoning line still occupies up to three visible lines, then replay
 elapsed time after two seconds and “still running” after thirty. Active Runs also reuse settled-Step formatting caches, collapse prior
 Action cards to one-line summaries, and fold older Steps (`… N earlier steps · Ctrl+O`); chrome-only Session
 events skip transcript invalidate, while `authority.denied` repaints its visible `⊘` settlement.
-A fixed two-line statusline shows `model · context%` and the active mode (`Ask` / `Plan` / `Agent`) on the first
-line, and `workspace · branch` on the second. Theme follows dark/light/auto semantic tokens and degrades through
+A fixed two-line statusline shows `model · [effort] · context%` (thinking effort when the active model advertises
+one) and the active mode (`Ask` / `Plan` / `Agent`) on the first line, and `workspace · branch` on the second.
+Theme follows dark/light/auto semantic tokens and degrades through
 truecolor, ANSI-256, basic ANSI, and `NO_COLOR`; glyph/text always carries status meaning. Ordinary conversation
 termination is labeled `responded`; `verified` is reserved for evidence-backed completion. Plan Review and
 Next Run use temporary choice panels over the composer; transcript cards stay compact Session projections

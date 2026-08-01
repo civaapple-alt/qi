@@ -50,6 +50,9 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
   `move`/`remove`) use specialized narrative cards keyed by tool name (not Session mode), so Plan-mode Work Todos
   and Agent-mode clarification Questions render the same cards; generic JSON Tool result remains under a details
   fold. Web remains read-only and does not answer in-Run Questions.
+- Failed `git` Actions project the full request on the target line (`git status · ref HEAD`,
+  `git diff · maxCount 5`) and prepend that command to the result summary with the validation message; Tool
+  result `details.command` remains available under the fold.
 - Contract effect labels distinguish machine-private Artifact writes from Workspace writes. A completed Work Plan
   item without a completed Workspace mutation or verification Action is shown with a warning; Todo state alone is
   navigation, not mutation or Goal evidence. Contract binds `currentWorkPlanId` (successive Work Plans switch it).

@@ -26,6 +26,9 @@ Reusable Qi-specific terminal presentation and control components built on
   omitted token cost, and a separate conversation/Tool-schema subtotal when durable block statistics exist.
 - Keep bounded file Diff previews for completed mutations in the current Run, and
   expose bounded process failure evidence instead of hiding it inside the ToolFailure envelope.
+- Project failed `git` cards with the full request (`git status · ref HEAD`, `git diff · maxCount 5`) and the
+  validation message, not only `INVALID_GIT_ARGUMENT`.
+- Include effective thinking effort on the statusline between model and context % when launch info supplies it.
 - For indeterminate Actions, surface the durable settlement reason (and reconciliation hint) on the tool card
   and enrich parked-run handoff text beyond the generic "settlement could not be confirmed" phrase.
 - Provide reusable composer, follow-up queue, selection/form/scroll panels, themes, and layout helpers.

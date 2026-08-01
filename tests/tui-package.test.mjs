@@ -105,6 +105,7 @@ test("@civaapple/qi-tui presenter renders without constructing an application ru
   presenter.patchAuthLaunch({
     provider: "kimi",
     model: "k3-256k",
+    reasoningEffort: "max",
     wireApi: "chat.completions",
     authStatus: "ready",
     contextWindowTokens: 262_144,
@@ -112,6 +113,7 @@ test("@civaapple/qi-tui presenter renders without constructing an application ru
     outputReserveTokens: 16_000,
   });
   assert.equal(presenter.launch.model, "k3-256k");
+  assert.equal(presenter.launch.reasoningEffort, "max");
   assert.equal(presenter.launch.contextWindowTokens, 262_144);
   assert.equal(presenter.launch.contextBudgetTokens, 246_144);
 });

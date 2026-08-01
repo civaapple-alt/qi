@@ -594,7 +594,10 @@ function summarizeTarget(toolName: string, input: unknown, resources: readonly s
     const args = Array.isArray(value?.args) ? value.args.map(String) : [];
     target = [string(value?.command), ...args].filter(Boolean).join(" ");
   } else if (toolName === "git") {
-    target = string(value?.operation);
+    const parts = [`git ${string(value?.operation) ?? "status"}`];
+    if (value?.ref !== undefined) parts.push(`ref ${String(value.ref)}`);
+    if (value?.maxCount !== undefined) parts.push(`maxCount ${String(value.maxCount)}`);
+    target = parts.join(" · ");
   } else if (toolName === "move") {
     target = `${string(value?.from) ?? "?"} → ${string(value?.to) ?? "?"}`;
   } else if (toolName === "find") {
@@ -634,7 +637,13 @@ function summarizeResult(toolName: string, result: unknown): string | undefined 
   const value = record(result);
   if (!value) return undefined;
   const details = record(value.details);
-  if (typeof value.message === "string") return shorten(value.message, 220);
+  if (typeof value.message === "string") {
+    const command = typeof details?.command === "string" ? details.command.trim() : "";
+    if (toolName === "git" && command) {
+      return shorten(`${command} · ${value.message}`, 220);
+    }
+    return shorten(value.message, 220);
+  }
   if (typeof value.stdout === "string" && value.stdout.trim()) return shorten(value.stdout.trim().split(/\r?\n/, 1)[0] ?? "", 220);
   if (typeof details?.stdout === "string" && details.stdout.trim()) {
     return shorten(details.stdout.trim().split(/\r?\n/, 1)[0] ?? "", 220);

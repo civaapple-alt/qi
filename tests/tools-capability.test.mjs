@@ -814,11 +814,28 @@ test("git inspection covers log, rev-parse, show, branch, remote and rejects uns
     );
     await assert.rejects(
       () => run("status", { ref: "HEAD" }, "act_git_status_ref"),
-      (error) => error instanceof ToolFailure && error.code === "INVALID_GIT_ARGUMENT",
+      (error) =>
+        error instanceof ToolFailure
+        && error.code === "INVALID_GIT_ARGUMENT"
+        && error.message === "ref is only valid for rev-parse and show"
+        && error.details?.command === "git status · ref HEAD"
+        && error.details?.ref === "HEAD",
     );
     await assert.rejects(
       () => run("branch", { maxCount: 3 }, "act_git_branch_count"),
-      (error) => error instanceof ToolFailure && error.code === "INVALID_GIT_ARGUMENT",
+      (error) =>
+        error instanceof ToolFailure
+        && error.code === "INVALID_GIT_ARGUMENT"
+        && error.message === "maxCount is only valid for log"
+        && error.details?.command === "git branch · maxCount 3"
+        && error.details?.maxCount === 3,
+    );
+    await assert.rejects(
+      () => run("diff", { maxCount: 5 }, "act_git_diff_count"),
+      (error) =>
+        error instanceof ToolFailure
+        && error.code === "INVALID_GIT_ARGUMENT"
+        && error.details?.command === "git diff · maxCount 5",
     );
   });
 });

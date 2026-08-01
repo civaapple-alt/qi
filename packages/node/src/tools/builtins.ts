@@ -1019,15 +1019,48 @@ function assertSafeGitRef(ref: string): string {
   return trimmed;
 }
 
+/** Operator-visible request summary; includes rejected extras so failures show the full call. */
+function formatGitToolRequest(
+  operation: string,
+  options: { ref?: string; maxCount?: number },
+): string {
+  const parts = [`git ${operation}`];
+  if (options.ref !== undefined) parts.push(`ref ${options.ref}`);
+  if (options.maxCount !== undefined) parts.push(`maxCount ${options.maxCount}`);
+  return parts.join(" · ");
+}
+
+function gitFailureDetails(
+  operation: string,
+  options: { ref?: string; maxCount?: number },
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    command: formatGitToolRequest(operation, options),
+    operation,
+    ...(options.ref === undefined ? {} : { ref: options.ref }),
+    ...(options.maxCount === undefined ? {} : { maxCount: options.maxCount }),
+    ...extra,
+  };
+}
+
 function gitInspectionArgs(
   operation: GitReadOperation,
   options: { ref?: string; maxCount?: number },
 ): readonly string[] {
   if (options.ref !== undefined && !gitRefOperations.has(operation)) {
-    throw new ToolFailure("INVALID_GIT_ARGUMENT", `ref is only valid for rev-parse and show`);
+    throw new ToolFailure(
+      "INVALID_GIT_ARGUMENT",
+      `ref is only valid for rev-parse and show`,
+      gitFailureDetails(operation, options),
+    );
   }
   if (options.maxCount !== undefined && !gitMaxCountOperations.has(operation)) {
-    throw new ToolFailure("INVALID_GIT_ARGUMENT", `maxCount is only valid for log`);
+    throw new ToolFailure(
+      "INVALID_GIT_ARGUMENT",
+      `maxCount is only valid for log`,
+      gitFailureDetails(operation, options),
+    );
   }
   switch (operation) {
     case "status":
@@ -1084,22 +1117,51 @@ export const gitTool = defineTool({
   resources: () => ["vcs:."],
   async execute(input, context) {
     const request = input as { operation: GitReadOperation; ref?: string; maxCount?: number };
-    const git = await resolveTrustedExecutable("git", context.workspaceRoot);
-    const operationArgs = gitInspectionArgs(request.operation, {
+    const options = {
       ...(request.ref === undefined ? {} : { ref: request.ref }),
       ...(request.maxCount === undefined ? {} : { maxCount: request.maxCount }),
-    });
+    };
+    const git = await resolveTrustedExecutable("git", context.workspaceRoot);
+    let operationArgs: readonly string[];
+    try {
+      operationArgs = gitInspectionArgs(request.operation, options);
+    } catch (error) {
+      if (error instanceof ToolFailure && error.code === "INVALID_GIT_REF") {
+        throw new ToolFailure(
+          error.code,
+          error.message,
+          gitFailureDetails(request.operation, options),
+        );
+      }
+      throw error;
+    }
+    const argv = ["-c", "core.fsmonitor=false", "--no-pager", ...operationArgs];
+    const command = ["git", ...argv].join(" ");
     const result = await runProcess(
       git,
-      ["-c", "core.fsmonitor=false", "--no-pager", ...operationArgs],
+      argv,
       context.workspaceRoot,
       30_000,
       context.signal,
       { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat" },
     );
-    if (result.timedOut) throw new ToolFailure("GIT_TIMEOUT", "Git inspection exceeded 30 seconds");
+    if (result.timedOut) {
+      throw new ToolFailure(
+        "GIT_TIMEOUT",
+        "Git inspection exceeded 30 seconds",
+        gitFailureDetails(request.operation, options, { command, argv }),
+      );
+    }
     if (result.exitCode !== 0) {
-      throw new ToolFailure("GIT_FAILED", result.stderr.trim() || `Git exited with code ${result.exitCode}`);
+      throw new ToolFailure(
+        "GIT_FAILED",
+        result.stderr.trim() || `Git exited with code ${result.exitCode}`,
+        gitFailureDetails(request.operation, options, {
+          command,
+          argv,
+          exitCode: result.exitCode,
+        }),
+      );
     }
     return {
       operation: request.operation,

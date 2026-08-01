@@ -165,9 +165,10 @@ async function main(): Promise<void> {
           model: auth.config.model,
           wireApi: auth.config.wireApi,
           accountAlias: auth.config.accountAlias,
-          ...(auth.config.reasoningEffort === undefined
+          // Effective effort (model default when unset) so the statusline can show thinking intensity.
+          ...(authStatus.reasoningEffort === undefined
             ? {}
-            : { reasoningEffort: auth.config.reasoningEffort }),
+            : { reasoningEffort: authStatus.reasoningEffort }),
           ...(auth.config.baseURL === undefined ? {} : { baseURL: auth.config.baseURL }),
         },
       };
@@ -260,7 +261,16 @@ async function main(): Promise<void> {
   });
 
   presenter = new TuiPresenter(await launchInfo(
-    { ...options, timelineDensity: "standard" },
+    {
+      ...options,
+      timelineDensity: "standard",
+      provider: {
+        ...options.provider,
+        ...(authStatus.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: authStatus.reasoningEffort }),
+      },
+    },
     runtime,
     authStatus.authStatus,
   ));
@@ -835,6 +845,9 @@ async function launchInfo(
     dataRoot: options.dataRoot,
     provider: options.provider.provider,
     model: options.provider.model,
+    ...(options.provider.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: options.provider.reasoningEffort }),
     ...(options.provider.accountAlias === undefined ? {} : { accountAlias: options.provider.accountAlias }),
     ...(options.provider.baseURL === undefined ? {} : { baseURL: options.provider.baseURL }),
     wireApi: options.provider.wireApi,

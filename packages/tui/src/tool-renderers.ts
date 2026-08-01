@@ -254,7 +254,14 @@ function renderDiscovery(model: ToolCardModel, options: ToolCardOptions): string
   const output = model.output;
   const subject = discoverySubject(model.toolName, input);
   const result = discoveryResult(model.toolName, output) ?? model.errorCode;
-  if (options.summaryOnly) return [header(model, subject, result)];
+  if (options.summaryOnly) {
+    const lines = [header(model, subject, result)];
+    if (model.toolName === "git" && model.status === "failed") {
+      const message = gitFailureMessage(output);
+      if (message) lines.push(`  ${oneLine(message, 110)}`);
+    }
+    return lines;
+  }
   const lines = [header(model, subject, result)];
   // read stays header-only (path · N lines); never dump file contents into the transcript.
   if (model.toolName === "search" && Array.isArray(output?.matches) && output.matches.length > 0) {
@@ -269,8 +276,21 @@ function renderDiscovery(model: ToolCardModel, options: ToolCardOptions): string
     if (output.matches.length > limit) {
       lines.push(`  … ${output.matches.length - limit} more matches · Ctrl+O to expand`);
     }
-  } else if (model.toolName === "git" && typeof output?.output === "string" && output.output.trim()) {
-    appendBounded(lines, output.output, options.expanded ? 12 : 6, "output");
+  } else if (model.toolName === "git") {
+    if (model.status === "failed") {
+      const message = gitFailureMessage(output);
+      if (message) lines.push(`  ${oneLine(message, 110)}`);
+      const command = gitFailureCommand(output);
+      // Request already on the header when input is present; show spawned argv when available.
+      if (command && command !== subject) lines.push(`  ${oneLine(command, 110)}`);
+    } else {
+      const stream = typeof output?.stdout === "string" && output.stdout.trim()
+        ? output.stdout
+        : typeof output?.output === "string" && output.output.trim()
+          ? output.output
+          : undefined;
+      if (stream) appendBounded(lines, stream, options.expanded ? 12 : 6, "stdout");
+    }
   }
   return lines;
 }
@@ -627,8 +647,27 @@ function discoverySubject(tool: string, input: Record<string, unknown> | undefin
   if (!input) return tool;
   if (tool === "search") return `${String(input.query ?? input.pattern ?? "query")}${input.path ? ` · ${input.path}` : ""}`;
   if (tool === "find") return `${String(input.pattern ?? "paths")}${input.root ? ` · ${input.root}` : ""}`;
-  if (tool === "git") return String(input.operation ?? "status");
+  if (tool === "git") return formatGitToolRequest(input);
   return String(input.path ?? input.root ?? ".");
+}
+
+function formatGitToolRequest(input: Record<string, unknown>): string {
+  const parts = [`git ${String(input.operation ?? "status")}`];
+  if (input.ref !== undefined) parts.push(`ref ${String(input.ref)}`);
+  if (input.maxCount !== undefined) parts.push(`maxCount ${String(input.maxCount)}`);
+  return parts.join(" · ");
+}
+
+function gitFailureMessage(output: Record<string, unknown> | undefined): string | undefined {
+  if (typeof output?.message === "string" && output.message.trim()) return output.message.trim();
+  return undefined;
+}
+
+function gitFailureCommand(output: Record<string, unknown> | undefined): string | undefined {
+  const details = record(output?.details);
+  if (typeof details?.command === "string" && details.command.trim()) return details.command.trim();
+  if (typeof output?.command === "string" && output.command.trim()) return output.command.trim();
+  return undefined;
 }
 
 function discoveryResult(tool: string, output: Record<string, unknown> | undefined): string | undefined {
@@ -646,7 +685,14 @@ function discoveryResult(tool: string, output: Record<string, unknown> | undefin
   if (tool === "list") return Array.isArray(output.entries) ? `${output.entries.length} entries${output.truncated ? " · truncated" : ""}` : undefined;
   if (tool === "find") return Array.isArray(output.entries) ? `${output.entries.length} paths${output.truncated ? " · truncated" : ""}` : undefined;
   if (tool === "search") return Array.isArray(output.matches) ? `${output.matches.length} matches${output.truncated ? " · truncated" : ""}` : undefined;
-  if (tool === "git") return typeof output.output === "string" ? `${normalizedLines(output.output).filter(Boolean).length} lines` : undefined;
+  if (tool === "git") {
+    const stream = typeof output.stdout === "string"
+      ? output.stdout
+      : typeof output.output === "string"
+        ? output.output
+        : undefined;
+    return stream === undefined ? undefined : `${normalizedLines(stream).filter(Boolean).length} lines`;
+  }
   return undefined;
 }
 
