@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
 import { Type } from "@sinclair/typebox";
 import { ToolFailure, defineTool } from "@civaapple/qi-agent/tools";
 import {
@@ -79,7 +79,7 @@ export function createReadImageTool(options: ReadImageToolOptions) {
       if (magicType === undefined || declaredType !== magicType) {
         throw new ToolFailure("IMAGE_MEDIA_TYPE_MISMATCH", "Original image media type does not match its bytes");
       }
-      let metadata: sharp.Metadata;
+      let metadata: Metadata;
       try {
         metadata = await sharp(stored.content, {
           failOn: "error",

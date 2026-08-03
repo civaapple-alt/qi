@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type Metadata, type OutputInfo, type Sharp } from "sharp";
 import type { ArtifactStore } from "@civaapple/qi-agent/tools";
 import { ToolFailure } from "@civaapple/qi-agent/tools";
 import type { RunImagePart } from "@civaapple/qi-protocol";
@@ -175,7 +175,7 @@ export async function prepareImageBytes(
     );
   }
 
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharp(bytes, {
       animated: true,
@@ -248,7 +248,7 @@ export async function prepareImageBytes(
     | undefined;
 
   const consider = (
-    candidate: { data: Buffer; info: sharp.OutputInfo },
+    candidate: { data: Buffer; info: OutputInfo },
     candidateMediaType: SupportedImageMediaType,
   ): PreparedImage | undefined => {
     if (smallest === undefined || candidate.data.byteLength < smallest.bytes.byteLength) {
@@ -321,7 +321,7 @@ export function normalizeImageMediaType(value: string): SupportedImageMediaType 
     : undefined;
 }
 
-function imagePipeline(bytes: Uint8Array, edge: number, limitInputPixels: number): sharp.Sharp {
+function imagePipeline(bytes: Uint8Array, edge: number, limitInputPixels: number): Sharp {
   return sharp(bytes, { failOn: "error", limitInputPixels })
     .rotate()
     .resize({

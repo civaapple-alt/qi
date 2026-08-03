@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-protocol",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Durable Qi IDs and runtime-validated Session event schemas",
   "type": "module",
   "main": "./dist/index.js",

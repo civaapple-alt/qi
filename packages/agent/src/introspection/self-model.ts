@@ -10,8 +10,8 @@ const packablePreviewPackages = new Set([
 
 export const qiSelfModel: QiSelfModel = parseQiSelfModel({
   schemaVersion: 1,
-  release: "0.7.2",
-  generatedAt: "2026-07-30T00:00:00.000Z",
+  release: "0.7.3",
+  generatedAt: "2026-08-03T00:00:00.000Z",
   identity: {
     name: "Qi",
     purpose: "A local-first, event-driven, evidence-first Agent runtime for people and Agents to act in one observable, branchable, recoverable world.",

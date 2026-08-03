@@ -1,14 +1,14 @@
 {
   "ask": {
-    "sha256": "376dfba54826087af665c519fe927d18b4734a04eadf0b2226b9b25fb0b024c5",
-    "names": ["artifact", "find", "git", "list", "memory", "qi_introspect", "qi_session_inspect", "read", "search", "skill", "tree"]
+    "sha256": "5d50a1da4b37eb5acd1ed95f7a415e6424a6cbc6ff51691900878b797918eb07",
+    "names": ["artifact", "artifact_get", "find", "git", "list", "memory", "qi_introspect", "qi_session_inspect", "read", "search", "skill", "tree"]
   },
   "plan": {
-    "sha256": "aaa0d52088bdd46cda4bbf671e3adc01cbd1e17c680cde91f8a9977d63727c07",
-    "names": ["artifact", "find", "git", "list", "memory", "plan_document", "qi_introspect", "qi_session_inspect", "read", "search", "skill", "tree", "update_plan"]
+    "sha256": "93d34275c78e8c9b8ec829842b4cb716d8b5674f35ef8e4b6113fd61e6728125",
+    "names": ["artifact", "artifact_get", "find", "git", "list", "memory", "plan_document", "qi_introspect", "qi_session_inspect", "read", "search", "skill", "tree", "update_plan"]
   },
   "agent": {
-    "sha256": "c7ef56be1ddc4321233e60ebc2990ab801890aafaca0a284ea042436f82ac479",
-    "names": ["artifact", "find", "git", "list", "memory", "qi_introspect", "qi_session_inspect", "read", "read_image", "search", "skill", "tree", "update_plan"]
+    "sha256": "0ec8ce475152d9052bd82f9fbe68ef6cc8dc31588f292c7d247bdd1f8f8fe94c",
+    "names": ["artifact", "artifact_get", "find", "git", "list", "memory", "qi_introspect", "qi_session_inspect", "read", "read_image", "search", "skill", "tree", "update_plan"]
   }
 }

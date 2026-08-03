@@ -5,7 +5,9 @@ import {
   ConcurrencyError,
   StateTransitionError,
   applySessionEvent,
+  isBootstrapSessionTitle,
   replaySession,
+  sessionTitleFromUserInput,
   type EventStore,
   type EventStream,
   type SessionLifecycle,
@@ -26,6 +28,7 @@ interface SessionSummaryRow {
   version: number;
   updated_at: string;
   title: string | null;
+  first_user_input: string | null;
 }
 
 interface LifecycleRow {
@@ -173,8 +176,9 @@ export class SqliteEventStore implements EventStore {
   }
 
   /**
-   * Catalog listing without full Kernel replay. Title comes from `session.created`
-   * (derived titles appear after `load()`). Lifecycle is not included; use `peekLifecycle`.
+   * Catalog listing without full Kernel replay. Bootstrap titles are derived from the
+   * first user-triggered Run, matching the Kernel projection. Lifecycle is not included;
+   * use `peekLifecycle`.
    */
   listSessions(): SessionSummary[] {
     this.#assertOpen();
@@ -182,7 +186,16 @@ export class SqliteEventStore implements EventStore {
       SELECT streams.session_id,
              streams.version,
              json_extract(latest.event_json, '$.occurredAt') AS updated_at,
-             json_extract(created.event_json, '$.data.title') AS title
+             json_extract(created.event_json, '$.data.title') AS title,
+             (
+               SELECT json_extract(first_run.event_json, '$.data.input')
+               FROM session_events AS first_run
+               WHERE first_run.session_id = streams.session_id
+                 AND first_run.event_type = 'run.triggered'
+                 AND json_extract(first_run.event_json, '$.data.trigger') = 'user'
+               ORDER BY first_run.sequence ASC
+               LIMIT 1
+             ) AS first_user_input
       FROM session_streams AS streams
       JOIN session_events AS latest
         ON latest.session_id = streams.session_id AND latest.sequence = streams.version
@@ -193,10 +206,14 @@ export class SqliteEventStore implements EventStore {
     `).all() as unknown as SessionSummaryRow[];
     return rows.map((row) => {
       const sessionId = row.session_id as SessionId;
-      const title = typeof row.title === "string" && row.title.trim() !== "" ? row.title : sessionId;
+      let title = typeof row.title === "string" && row.title.trim() !== "" ? row.title : undefined;
+      if (isBootstrapSessionTitle(title) && typeof row.first_user_input === "string") {
+        const derived = sessionTitleFromUserInput(row.first_user_input);
+        if (derived) title = derived;
+      }
       return {
         sessionId,
-        title,
+        title: title ?? sessionId,
         version: row.version,
         updatedAt: row.updated_at,
       };

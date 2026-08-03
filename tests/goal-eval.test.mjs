@@ -164,7 +164,7 @@ test("a calibrated semantic evaluator can contribute trusted completion", async 
     falsePass: 0,
     falseReject: 1,
     measuredAt: "2026-07-01T00:00:00.000Z",
-    validUntil: "2026-08-01T00:00:00.000Z",
+    validUntil: "2099-08-01T00:00:00.000Z",
   });
   const semantic = new SemanticEvaluator(identity, async () => ({
     outcome: "pass",

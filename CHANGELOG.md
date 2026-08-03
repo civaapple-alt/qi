@@ -8,6 +8,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [0.7.3] - 2026-08-03
+
 ### Added
 
 - Settings → Subagent / delegate (`/subagent`, `/delegate`): user-config `[delegate]` envelope —
@@ -254,6 +258,7 @@ backup plus reset or a new data root rather than an automatic migration.
 - Write-capable Agent and Plan Runs fail closed on a present unsafe root `AGENTS.md`, read-only mounts no longer
   disclose absolute host paths to the model, and Workspace/Memory/Skill envelopes explicitly cannot grant
   capability or completion evidence.
+- Updated the direct `sharp` dependency to `0.35.3`, bringing the bundled libvips security fixes into the release.
 
 ### Documentation
 
