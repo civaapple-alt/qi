@@ -6,7 +6,7 @@ import test from "node:test";
 import { ScriptedModelPort } from "@civaapple/qi-ai";
 import { TuiRuntime } from "../apps/cli/dist/index.js";
 
-test("TUI advertises fetch only when network access is explicitly enabled", async () => {
+test("TUI advertises fetch and web_map only when network access is explicitly enabled", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-network-"));
   const withoutNetworkModel = responseModel();
   const withNetworkModel = responseModel();
@@ -21,6 +21,7 @@ test("TUI advertises fetch only when network access is explicitly enabled", asyn
     });
     await withoutNetwork.run("Can you fetch a website?");
     assert.equal(withoutNetworkModel.requests[0].tools.some((tool) => tool.name === "fetch"), false);
+    assert.equal(withoutNetworkModel.requests[0].tools.some((tool) => tool.name === "web_map"), false);
     await withoutNetwork.close();
     withoutNetwork = undefined;
 
@@ -33,6 +34,7 @@ test("TUI advertises fetch only when network access is explicitly enabled", asyn
     });
     await withNetwork.run("Fetch https://example.com/");
     assert.equal(withNetworkModel.requests[0].tools.some((tool) => tool.name === "fetch"), true);
+    assert.equal(withNetworkModel.requests[0].tools.some((tool) => tool.name === "web_map"), true);
   } finally {
     if (withoutNetwork) await withoutNetwork.close();
     if (withNetwork) await withNetwork.close();

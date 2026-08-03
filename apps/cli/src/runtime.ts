@@ -88,6 +88,7 @@ import {
   createVerifyTool,
   defaultVerificationManifestPath,
   fetchTool,
+  webMapTool,
   loadVerificationProfiles,
   prepareVerificationProfiles,
   prewarmTrustedExecutables,
@@ -947,8 +948,13 @@ export class TuiRuntime {
       );
     }
 
-    if (capabilities.network) this.#setOptionalTool("fetch", fetchTool);
-    else this.#closeOptionalTool("fetch");
+    if (capabilities.network) {
+      this.#setOptionalTool("fetch", fetchTool);
+      this.#setOptionalTool("web_map", webMapTool);
+    } else {
+      this.#closeOptionalTool("fetch");
+      this.#closeOptionalTool("web_map");
+    }
 
     if (capabilities.background) this.#setOptionalTool("task", this.#processTasks.tool());
     else this.#closeOptionalTool("task");
@@ -2246,7 +2252,7 @@ function grantOptionalRuntimeLeases(
     leases.push({
       leaseId: "lea_tui_network",
       subject,
-      tools: ["fetch"],
+      tools: ["fetch", "web_map"],
       effects: ["read"],
       resources: ["network:https://**", "network:http://**"],
       expiresAt,

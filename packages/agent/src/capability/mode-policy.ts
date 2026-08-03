@@ -9,6 +9,7 @@ const askTools = new Set([
   "tree",
   "git",
   "fetch",
+  "web_map",
   "skill",
   "artifact",
   "qi_introspect",

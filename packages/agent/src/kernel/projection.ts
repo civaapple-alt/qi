@@ -533,6 +533,7 @@ export const KERNEL_ASK_MODE_TOOLS = [
   "tree",
   "git",
   "fetch",
+  "web_map",
   "skill",
   "artifact",
   "qi_introspect",

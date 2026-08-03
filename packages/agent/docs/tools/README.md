@@ -23,8 +23,9 @@ Built-ins provide bounded directory listing and tree rendering, fd-accelerated f
 content search, whole-file or bounded line-range reads, file write/edit, fixed read-only Git inspection
 (`status` / diffs / `log` / `rev-parse` / `show` / `branch` / `remote`), controlled public HTTP(S) text retrieval,
 argument-vector `shell` (`shell-profile:direct`), explicit `script` profiles (`pwsh`/`cmd`/`bash`), and
-content-addressed artifact storage. `tree`, `find`, `list`, `read`, `search`, `git`, and `fetch` remain separate so
-local discovery, repository inspection, external evidence, and execution authority are explicit.
+content-addressed artifact storage. `tree`, `find`, `list`, `read`, `search`, `git`, `web_map`, and `fetch` remain
+separate so local discovery, repository inspection, site URL discovery, external evidence, and execution authority
+are explicit.
 
 Existing files have a dedicated `edit` operation: the caller supplies the hash returned by `read` and one or more
 `edits[]` hunks matched against the original file snapshot in a single atomic write. Prefer one multi-hunk call
@@ -77,9 +78,11 @@ automatic inference path, so a hand-picked manifest is exactly as trustworthy as
   branch, remote) and resolves Git outside the Workspace.
 - Verification accepts only frozen profile names, resolves executables outside the Workspace, and strips ambient
   provider credentials from the child environment.
-- Network fetch is absent by default, uses credential-free GET only, pins validated public DNS results through
-  connection, and revalidates every bounded redirect. Local/private targets and binary or oversized output fail
-  closed; returned page text remains explicitly untrusted.
+- Network tools (`web_map`, `fetch`) are absent by default, use credential-free GET only, pin validated public DNS
+  results through connection, and revalidate every bounded redirect. Local/private targets and binary or oversized
+  output fail closed; returned page text and discovered URLs remain explicitly untrusted. `web_map` discovers a
+  bounded same-origin URL list from sitemap/llms/robots/HTML (including nav); `fetch` retrieves one document and,
+  for HTML, includes a bounded same-origin `links` list extracted before nav/chrome stripping.
 - Shell arguments are not interpolated through an ambient shell and globs, pipes, and redirection are not
   expanded. Windows PATH/PATHEXT shims are resolved explicitly; `.cmd`/`.bat` invocation rejects shell
   metacharacters before entering the trusted command processor. Multiple `shell`/`script` Actions may share a
@@ -125,7 +128,7 @@ const registry = new ToolRegistry(new InMemoryCapabilityBroker());
 
 `defineTool()`, `ToolRegistry`, tool phase types, built-in tools, verification profile preparation/loading,
 verification candidate scanning (`scanVerificationCandidates()`, `writeVerificationManifest()`), artifact
-storage, controlled network fetch, and structured tool errors.
+storage, controlled network fetch/site mapping, and structured tool errors.
 
 ## Change guide
 
@@ -134,8 +137,8 @@ invalid, and effect-recovery tests where relevant.
 
 ## Verification
 
-Use `tests/tools-capability.test.mjs`, `tests/network-fetch.test.mjs`, `tests/workspace-safety.test.mjs`,
-`tests/turn-loop.test.mjs`, and `tests/verify-scan.test.mjs`.
+Use `tests/tools-capability.test.mjs`, `tests/network-fetch.test.mjs`, `tests/web-map.test.mjs`,
+`tests/workspace-safety.test.mjs`, `tests/turn-loop.test.mjs`, and `tests/verify-scan.test.mjs`.
 
 ## Further reading
 

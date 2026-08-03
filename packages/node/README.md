@@ -90,7 +90,7 @@ bounded to a 2000 px longest edge and 3.75 MiB; transparent images stay PNG, JPE
 ladders, and animated GIF/WebP passes only when already within limits. Both original and prepared bytes are
 content-addressed under the owning Session's `artifacts/`. Public URL reads reuse DNS pinning, private/local
 denial, default ports, redirect/HTTPS policy, cancellation, and timeout rules while retaining a separate image
-byte budget from the 1 MiB text `fetch` Tool.
+byte budget from the 1 MiB text `fetch` / `web_map` Tools.
 
 `SqliteEventStore` keeps a non-persistent, version-checked projection cache for the running process. Normal
 append validates only the new batch and advances that cache inside the existing transaction; restart, version

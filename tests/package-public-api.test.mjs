@@ -104,7 +104,7 @@ const expectedRuntimeExports = {
     "AuthorityDeniedError", "EffectReplayBlockedError", "FileArtifactStore",
     "SHELL_PROFILE_IDS", "StaleToolError", "ToolFailure", "ToolInputError",
     "ToolOutputError", "ToolRegistry", "artifactTool", "assertSensitiveContentAllowed", "builtinTools",
-    "cmdScriptHasNonAscii", "createFetchTool",
+    "cmdScriptHasNonAscii", "createFetchTool", "createWebMapTool",
     "createScriptTool", "createVerifyTool", "defaultVerificationManifestPath", "defineTool",
     "detectInstalledShellProfiles", "editTool", "fetchTool", "findTool", "findTrustedExecutable", "formatAccessiblePath",
     "formatCmdScriptContents", "formatCmdVersionLabel", "gitTool", "isRegularFile", "isSensitiveWorkspacePath",
@@ -115,7 +115,7 @@ const expectedRuntimeExports = {
     "readTool", "removeTool", "resolveAccessiblePath", "resolveShellConfig",
     "resolveShellExecutable", "resolveWorkspaceEntry", "resolveWorkspacePath", "scanVerificationCandidates",
     "searchTool", "sensitivePathGrantsFromContext", "sensitivePathPolicyFromContext", "shellProfileResource",
-    "shellTool", "treeTool", "verificationResource",
+    "shellTool", "treeTool", "verificationResource", "webMapTool",
     "textResponseLimitBytes", "windowsCommandInvocation", "writeCmdScriptFile", "writeTool", "writeVerificationManifest",
   ],
   "@civaapple/qi-node/media": [

@@ -194,17 +194,26 @@ produce a completed verification Action.
 
 ## Controlled network reading
 
-`fetch` is separate from both Workspace reads and host execution. The TUI registers it only under
-`--allow-network`, with `read` authority scoped to `network:http(s)://` resources. Its schema accepts one absolute
-URL and an optional bounded character limit; callers cannot supply methods, headers, credentials, request bodies,
-ports, timeouts, or redirect policy.
+`web_map` and `fetch` are separate from both Workspace reads and host execution. The TUI registers them only under
+`--allow-network`, with `read` authority scoped to `network:http(s)://` resources. Callers cannot supply methods,
+headers, credentials, request bodies, ports, timeouts, or redirect policy.
+
+`web_map` discovers a bounded same-origin URL list from a site entry: `sitemap.xml` (including one sitemap-index
+level), text/plain `llms.txt` (HTML responses are skipped), `robots.txt` Sitemap lines, then HTML anchors from the
+full document (including nav). Optional `pathPrefix` filters pathnames; `maxUrls` defaults to 100 and caps at 500.
+Prefer `web_map` before batching `fetch` on documentation sites.
+
+`fetch` retrieves one absolute URL with an optional bounded character limit. For HTML, it extracts a bounded
+same-origin `links` list before stripping nav/header/footer/aside for page `content`, so sidebar directories remain
+available without flooding the body text.
 
 Before each connection, the target host resolves to addresses that must all be public. The chosen address is
 pinned into the HTTP/TLS connection so a second DNS answer cannot redirect the executor into a private network.
 Every redirect repeats validation, HTTPS cannot downgrade to HTTP, and redirect count, duration, raw bytes, output
-characters, content types, and encodings are hard-bounded. The output reports the raw response SHA-256 and labels
-extracted text as untrusted; fetched page content cannot grant authority or override runtime instructions.
+characters, content types, and encodings are hard-bounded. Outputs label network content as untrusted; fetched
+pages and discovered URLs cannot grant authority or override runtime instructions.
 
-Tests in `tests/network-fetch.test.mjs` cover default denial, permitted public retrieval, literal/DNS private
-targets, private redirects, credentials, ports, binary media, response limits, extraction, evidence, and
-truncation. `tests/tui-network.test.mjs` proves the tool is absent unless explicitly enabled.
+Tests in `tests/network-fetch.test.mjs` and `tests/web-map.test.mjs` cover default denial, permitted public
+retrieval, sitemap/llms/robots/HTML discovery, pathPrefix filtering, literal/DNS private targets, private
+redirects, credentials, ports, binary media, response limits, extraction, evidence, and truncation.
+`tests/tui-network.test.mjs` proves both tools are absent unless explicitly enabled.

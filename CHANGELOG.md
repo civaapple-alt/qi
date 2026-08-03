@@ -10,6 +10,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- `web_map` network tool: discover a bounded same-origin URL list from `sitemap.xml`, text/plain `llms.txt`,
+  `robots.txt` Sitemap lines, or HTML anchors (including nav). Registered with `fetch` under the network
+  capability; same public-DNS / no-credentials boundary. Prefer `web_map` before batching `fetch` on docs sites.
+
 - Statusline and `/context` surface provider prompt-cache hit rate as `CH%`
   (Run-cumulative `sum(cachedInputTokens)/sum(inputTokens)`; `/context` also shows the latest Step). See
   ADR-0034.
@@ -53,6 +57,9 @@ backup plus reset or a new data root rather than an automatic migration.
   Action summaries — so continue-after-failure does not require chaining runs/steps/actions.
 
 ### Changed
+
+- `fetch` HTML responses now include an optional bounded same-origin `links` list (url + anchor text) extracted
+  before nav/header/footer/aside stripping, so sidebar directories remain available without flooding page `content`.
 
 - TurnLoop lays out each Step as stable prefix → append-only conversation → control trailer so automatic
   provider prompt caches (DeepSeek V4 Flash and similar) can retain long prefixes across Steps. Work Plan,
