@@ -722,8 +722,10 @@ Decision:
   via `/settings` → Subagent or `/subagent`; batch max 4 and depth 1 remain fixed.
 - Return path: `summaryRef` / inline `summary` stay short previews; `resultRef` stores the full child deliverable
   text (hard-capped). Parents read Artifact store content with read-effect `artifact_get`, never workspace `read`
-  on `artifact://`. Child briefs and the `delegate` tool description expose the actual envelope so parents size
-  `tasks[]` to fit (one document surface/theme per child); no automatic complexity scoring.
+  on `artifact://`. `qi_session_inspect` projects Subagent Task refs (`operation=delegations`, Run/recovery
+  facts) but does not inline full child text — parents still load `resultRef` via `artifact_get`. Child briefs
+  and the `delegate` tool description expose the actual envelope so parents size `tasks[]` to fit (one document
+  surface/theme per child); no automatic complexity scoring.
 - TUI timeline Tasks block is a count strip (plus currently running rows); full history and Brief live under
   `/tasks`.
 - Formal Plan accept → Agent handoff is unchanged (ADR-0011). Multi-Agent default-on and depth>1 remain deferred.
@@ -734,7 +736,8 @@ complexity scoring or dynamic wall extension.
 
 Compatibility: `/tasks stop` for ProcessTasks moves to `/jobs stop`; a short notice redirects mistaken use.
 Required evidence: coordinator batch / full-resultRef tests; CLI delegate envelope/lease tests; TUI Jobs vs Tasks
-panel and collapsed timeline tests; `artifact_get` capability tests.
+panel and collapsed timeline tests; `artifact_get` capability tests; `qi_session_inspect` / extract-session
+delegation projection tests.
 
 ## Changing a decision
 

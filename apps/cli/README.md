@@ -370,7 +370,8 @@ remains capability-checked and Effect-Journaled.
 The same dedicated `skill` Tool can export an existing Workspace Skill to a new ordinary draft directory and
 publish a digest-guarded update. Ordinary file tools still cannot access `.qi`. The read-only
 `qi_session_inspect` Tool lets Ask, Plan, and Agent inspect bounded Session projections from the current project
-EventStore; this capability adds no TUI command, panel, or query API.
+EventStore (including Subagent `operation=delegations` / `resultRef` pointers for `artifact_get`); this
+capability adds no TUI command, panel, or query API.
 
 See [the interaction contract](docs/interaction-model.md) for projection and rendering boundaries.
 The cross-package timeline and attention decision is

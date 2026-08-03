@@ -89,6 +89,11 @@ backup plus reset or a new data root rather than an automatic migration.
 - TUI timeline Tasks block collapses to a count header (plus currently running rows); finished Subagent detail
   stays on `/tasks`.
 
+- `qi_session_inspect` surfaces Subagent Tasks: `operation=delegations`, Run `delegationCount` /
+  `delegationFacts` (detail lists refs), recovery `problemDelegations`, and `delegate` Action detail with
+  `resultRef` / `summaryRef`. Guidance steers parents to `artifact_get(resultRef)` instead of child
+  `last-step` modelText.
+
 ### Fixed
 
 - Live TUI now receives parent `delegation.created` / `delegation.returned` while `delegate` is still running

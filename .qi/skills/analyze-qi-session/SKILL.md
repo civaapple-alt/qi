@@ -61,10 +61,10 @@ compact the source database.
 
 The default output is the Session summary plus a bounded newest-first Run list. The extractor directly reuses
 `@civaapple/qi-introspection` for the same projection used by the model-facing `qi_session_inspect` Tool.
-Always list Runs first, then request `--problems`, `--last-step`, or one explicit Step/Action. Use `--detail`
-only after narrowing the entity. The legacy bounded full report is available only with explicit `--all`.
-Unknown IDs, mutually exclusive selectors, and Run/entity ownership mismatches fail with a diagnostic; they
-never fall back to full output.
+Always list Runs first, then request `--problems`, `--delegations` (Subagent Tasks), `--last-step`, or one
+explicit Step/Action. Use `--detail` only after narrowing the entity. The legacy bounded full report is available
+only with explicit `--all`. Unknown IDs, mutually exclusive selectors, and Run/entity ownership mismatches fail
+with a diagnostic; they never fall back to full output.
 
 **Diagnostic fields to expect** (inspect queries and `--all`):
 
@@ -76,11 +76,14 @@ never fall back to full output.
   persistence and Work Plan updates are private/runtime state, not project-file evidence. These detailed counts
   are available through explicit inspection; automatic Runtime-owned restored-history context exposes only a
   coarse write settlement class and no durable IDs or counts.
+- Run `delegationCount` / `delegationFacts` / `delegations` — depth-1 Subagent Tasks with `resultRef` /
+  `summaryRef`. Full child deliverables stay in the Artifact store (`artifact_get`); do not treat child
+  `last-step` `modelText` as the research return.
 - Session / Run `workPlan` — Plan or Agent `update_plan` snapshot (`currentWorkPlanId`); Action detail may
   include `workPlanItems`. Ask mode never authors Work Plans.
 - Step `modelReasoning` — Thinking text; intent only, never proof of execution.
-- Action `gitWorkspaceChange` / `diffKind` / `process` — distinguish file-tool diffs from Git fingerprint changes
-  and process exit summaries.
+- Action `gitWorkspaceChange` / `diffKind` / `process` / `delegate` refs — distinguish file-tool diffs from Git
+  fingerprint changes, process exit summaries, and Subagent `resultRef` / `summaryRef` / `parentHint`.
 
 If execution or local-network authority is unavailable, state the missing capability and ask for the extractor
 JSON or exported event history. Do not infer a trace from a screenshot alone.

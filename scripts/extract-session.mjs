@@ -29,7 +29,7 @@ async function main(argv) {
   node scripts/extract-session.mjs --session SESSION_ID --workspace-root WORKSPACE
   node scripts/extract-session.mjs --session SESSION_ID --db SQLITE_PATH
   node scripts/extract-session.mjs --session SESSION_ID --project PROJECT_ID
-  [--list-runs] [--run ID|last] [--problems|--last-step|--step ID|--action ID] [--detail]
+  [--list-runs] [--run ID|last] [--problems|--delegations|--last-step|--step ID|--action ID] [--detail]
   [--all]  Legacy bounded full report (explicit opt-in)
 
 Do NOT write:  node --workspace-root DIR scripts/extract-session.mjs
@@ -79,7 +79,14 @@ Or set QI_WORKSPACE to the Workspace root instead of passing --workspace-root.
 export function parseArguments(args, environment = process.env) {
   const values = new Map();
   const flags = new Set();
-  const booleanOptions = new Set(["--list-runs", "--problems", "--last-step", "--detail", "--all"]);
+  const booleanOptions = new Set([
+    "--list-runs",
+    "--problems",
+    "--delegations",
+    "--last-step",
+    "--detail",
+    "--all",
+  ]);
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index];
     if (item === "--help" || item === "-h") return { help: true, environment };
@@ -135,6 +142,7 @@ export function parseArguments(args, environment = process.env) {
   const selectors = [
     flags.has("--list-runs") ? "--list-runs" : undefined,
     flags.has("--problems") ? "--problems" : undefined,
+    flags.has("--delegations") ? "--delegations" : undefined,
     flags.has("--last-step") ? "--last-step" : undefined,
     values.has("--step") ? "--step" : undefined,
     values.has("--action") ? "--action" : undefined,
@@ -157,6 +165,7 @@ export function parseArguments(args, environment = process.env) {
     environment,
     listRuns: flags.has("--list-runs"),
     problems: flags.has("--problems"),
+    delegations: flags.has("--delegations"),
     lastStep: flags.has("--last-step"),
     detail: flags.has("--detail"),
     all: flags.has("--all"),
@@ -168,6 +177,7 @@ export function parseArguments(args, environment = process.env) {
 
 export function selectedOperation(options) {
   if (options.problems) return "problems";
+  if (options.delegations) return "delegations";
   if (options.lastStep) return "last-step";
   if (options.step) return "step";
   if (options.action) return "action";
@@ -429,6 +439,17 @@ function createReport(bundle, workspace) {
       endSequence: run.endSequence,
       durationMs: run.durationMs,
       summary: run.summary,
+      delegations: Object.values(bundle.view.runs?.[run.runId]?.delegations ?? {}).map((delegation) => ({
+        delegationId: delegation.delegationId,
+        childSessionId: delegation.childSessionId,
+        status: delegation.status,
+        outcome: boundString(delegation.outcome, 500),
+        resultRef: delegation.resultRef,
+        summaryRef: delegation.summaryRef,
+        evidenceRefCount: delegation.evidenceRefs?.length ?? 0,
+        coordinationWallTimeMs: delegation.coordinationWallTimeMs,
+        reasons: (delegation.reasons ?? []).slice(0, 8).map((reason) => boundString(reason, 500)),
+      })),
       compactions: events.filter((event) => event.type === "context.compacted" && event.data.runId === run.runId)
         .map((event) => ({ sequence: event.sequence, ...event.data })),
       evaluations: events.filter((event) => event.type === "evaluation.completed" && event.data.runId === run.runId)

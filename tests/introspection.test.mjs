@@ -453,6 +453,163 @@ test("Session inspection recovery prefers interrupted image Runs and falls back 
   assert.match(recovered.items[0].guidance, /operation=recovery|Do not chain runs/i);
 });
 
+test("Session inspection projects Subagent delegations and delegate Action refs", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = createId("ses");
+  const childSessionId = createId("ses");
+  const runId = createId("run");
+  const delegationId = "dlg_inspect_sub_001";
+  const stepId = "stp_inspect_delegate";
+  const actionId = "act_inspect_delegate";
+  const resultRef = `artifact://${"f".repeat(64)}`;
+  const summaryRef = `artifact://${"e".repeat(64)}`;
+  const control = new HumanControlService({ eventStore: store });
+  control.ensureSession(sessionId, "Inspect Subagents", "plan");
+  const writer = new EventWriter(store, sessionId);
+  const actor = { kind: "user", id: "tester" };
+  const runtime = { kind: "runtime", id: "test" };
+
+  writer.append("run.triggered", {
+    runId,
+    trigger: "user",
+    input: "Research two vendors with Subagents",
+  }, actor);
+  writer.append("run.started", { runId }, runtime);
+  writer.append("delegation.created", {
+    runId,
+    delegationId,
+    childSessionId,
+    outcome: "Survey DeepSeek OpenAI SDK docs",
+    returnPolicy: "result",
+    depth: 1,
+    receiptId: "rcp_inspect_delegate",
+    parentLeaseId: "lea_tui_delegate_scope",
+    childLeaseId: "lea_inspect_child",
+    childSubject: "agent_child",
+    contextRefs: [],
+    contractRef: `artifact://${"c".repeat(64)}`,
+    resourceEnvelope: { maxSteps: 8, contextTokens: 40_000, wallTimeMs: 300_000 },
+  }, runtime);
+  writer.append("delegation.returned", {
+    runId,
+    delegationId,
+    childSessionId,
+    outcome: "accepted",
+    resultRef,
+    summaryRef,
+    evidenceRefs: [],
+    coordinationWallTimeMs: 12_000,
+    reasons: ["schema-valid"],
+  }, runtime);
+  writer.append("step.started", { runId, stepId }, runtime);
+  writer.append("model.completed", {
+    runId,
+    stepId,
+    requestId: "req_inspect_delegate",
+    provider: "test",
+    model: "deterministic",
+    finishReason: "actions",
+    text: "Delegating research.",
+    actionCalls: [{ callId: "call_delegate", name: "delegate", input: { objective: "Survey docs" } }],
+  }, runtime);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId,
+    toolName: "delegate",
+    input: { objective: "Survey DeepSeek OpenAI SDK docs" },
+    resources: ["delegation:local"],
+    effect: "read",
+  }, runtime);
+  writer.append("authority.requested", { runId, stepId, actionId }, runtime);
+  writer.append("authority.granted", { runId, stepId, actionId, leaseId: "lea_inspect_delegate" }, runtime);
+  writer.append("action.started", { runId, stepId, actionId }, runtime);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        accepted: true,
+        results: [{
+          accepted: true,
+          outcome: "accepted",
+          delegationId,
+          childSessionId,
+          summary: "Short preview only.",
+          summaryRef,
+          resultRef,
+          reasons: [],
+        }],
+        delegationId,
+        childSessionId,
+        summary: "Short preview only.",
+        summaryRef,
+        resultRef,
+        reasons: [],
+        parentHint: "Full child deliverable text is at each resultRef. Use artifact_get(resultRef).",
+      }),
+    }],
+  }, runtime);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, runtime);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, runtime);
+
+  const runs = inspectQiSession(store, {
+    operation: "runs",
+    sessionId,
+    detail: "detail",
+  });
+  const run = runs.items.find((item) => item.runId === runId);
+  assert.equal(run.delegationCount, 1);
+  assert.deepEqual(run.delegationFacts, {
+    running: 0,
+    accepted: 1,
+    rejected: 0,
+    cancelled: 0,
+    timed_out: 0,
+    failed: 0,
+  });
+  assert.equal(run.delegations.length, 1);
+  assert.equal(run.delegations[0].resultRef, resultRef);
+  assert.equal(run.delegations[0].summaryRef, summaryRef);
+  assert.match(run.delegationGuidance, /artifact_get/);
+
+  const listed = inspectQiSession(store, {
+    operation: "delegations",
+    sessionId,
+    runId,
+    detail: "detail",
+  });
+  assert.equal(listed.items.length, 1);
+  assert.equal(listed.items[0].kind, "delegation");
+  assert.equal(listed.items[0].childSessionId, childSessionId);
+  assert.equal(listed.items[0].status, "accepted");
+  assert.equal(listed.items[0].resultRef, resultRef);
+  assert.match(listed.items[0].guidance, /artifact_get/);
+  assert.equal(listed.items[0].resourceEnvelope.wallTimeMs, 300_000);
+
+  const action = inspectQiSession(store, {
+    operation: "action",
+    sessionId,
+    actionId,
+    detail: "detail",
+  }).items[0];
+  assert.equal(action.delegations.length, 1);
+  assert.equal(action.delegations[0].resultRef, resultRef);
+  assert.match(action.parentHint, /artifact_get/);
+  assert.match(action.delegationGuidance, /never workspace read/);
+
+  const recovered = inspectQiSession(store, {
+    operation: "recovery",
+    sessionId,
+    detail: "summary",
+  });
+  assert.equal(recovered.items[0].run.delegationCount, 1);
+  assert.equal(recovered.items[0].run.delegationFacts.accepted, 1);
+  assert.match(recovered.items[0].guidance, /operation=delegations|artifact_get/);
+});
+
 test("Session inspection projects Formal Plan titles, reasoning, actionFacts, and tool summaries", () => {
   const store = new InMemoryEventStore();
   const sessionId = createId("ses");
@@ -510,7 +667,7 @@ test("Session inspection projects Formal Plan titles, reasoning, actionFacts, an
       ],
     },
     resources: ["work-plan:current"],
-    effect: "write",
+    effect: "read",
   }, actor);
   writer.append("action.proposed", {
     runId,
@@ -622,14 +779,14 @@ test("Session inspection projects Formal Plan titles, reasoning, actionFacts, an
   assert.equal(run.formalPlan.title, "Inspect feature");
   assert.equal(run.formalPlan.path, "/tmp/inspect-feature.md");
   assert.deepEqual(run.actionFacts, {
-    writeCompleted: 3,
+    writeCompleted: 2,
     writeFailed: 0,
-    readCompleted: 0,
+    readCompleted: 1,
     workspaceWriteCompleted: 1,
     workspaceWriteFailed: 0,
     artifactWriteCompleted: 1,
     artifactWriteFailed: 0,
-    otherWriteCompleted: 1,
+    otherWriteCompleted: 0,
     otherWriteFailed: 0,
   });
 

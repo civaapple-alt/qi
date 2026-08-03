@@ -42,8 +42,9 @@ Session completed; trusted completion remains an Eval/integration responsibility
 
 CLI `runDelegatedTurn` stores a short preview in `summaryRef` and the full child deliverable text in `resultRef`
 (hard-capped). Parents should load Artifact store content with a dedicated read tool (`artifact_get`), not
-workspace `read` on `artifact://` paths. See ADR-0035 for Plan fan-out, Jobs vs Tasks, and user `[delegate]`
-envelope overrides.
+workspace `read` on `artifact://` paths. `qi_session_inspect` `operation=delegations` (and Run/recovery
+projections) expose those refs for diagnostics; they intentionally omit full child deliverable text. See
+ADR-0035 for Plan fan-out, Jobs vs Tasks, and user `[delegate]` envelope overrides.
 
 ```text
 parent contract + receipt -> isolated child work -> evidence-gated submission -> parent decision

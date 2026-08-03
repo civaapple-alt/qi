@@ -43,22 +43,29 @@ Register `createQiIntrospectionTool()` through an ordinary `ToolRegistry`. Execu
 matching read lease for `qi:self-model:<section>`.
 
 `inspectQiSession(source, query)` lists project Sessions or narrows one Session to Runs, a selected/latest Run,
-problems, recovery, the last Step, or one Step/Action. It is a lifecycle diagnostic probe, not a substitute for
-restored conversation history (including interrupted-run narrative wrappers and Work Plan navigation ContextBlocks
-from ADR 0032). Prefer restored history for ordinary continue; use `operation=recovery` when the prior terminal
-state, settlement, or `imageAttachments.originalArtifactRef` is unclear. Summary and detail projections retain
-IDs, event sequence bounds, status, error codes, and any durable edit freshness rebase while bounding text,
-results, and lists and reporting every omission.
+problems, recovery, Subagent `delegations`, the last Step, or one Step/Action. It is a lifecycle diagnostic
+probe, not a substitute for restored conversation history (including interrupted-run narrative wrappers and Work
+Plan navigation ContextBlocks from ADR 0032). Prefer restored history for ordinary continue; use
+`operation=recovery` when the prior terminal state, settlement, or `imageAttachments.originalArtifactRef` is
+unclear. For Plan depth-1 research returns use `operation=delegations` (or Run `detail`) then
+`artifact_get(resultRef)` — not child `last-step` `modelText`. Summary and detail projections retain IDs, event
+sequence bounds, status, error codes, and any durable edit freshness rebase while bounding text, results, and
+lists and reporting every omission.
 
 Diagnostic fields (not Evidence):
 
 - `recovery` selects the newest interrupted user Run (`failed` / `cancelled` / `parked`), else the newest
   completed user Run, and returns one item with fixed `guidance`, run status/terminal fields,
-  `imageAttachments`, bounded `lastStep`, and problem Action summaries — prefer this over chaining
+  `imageAttachments`, bounded `lastStep`, problem Action summaries, and when present Subagent
+  `delegationCount` / `delegationFacts` plus problem `problemDelegations` — prefer this over chaining
   `runs` → `last-step` → `step` → `action` when continuing after an unclear terminal state.
+- `delegations` lists bounded Subagent Task rows for the selected/latest Run (`delegationId`,
+  `childSessionId`, `status`, short `outcome`, `resultRef` / `summaryRef`, wall/reasons in detail). Full child
+  deliverable text stays in the Artifact store; load it with `artifact_get(resultRef)`.
 - Run `displayTitle`, `imageCount` / `imageAttachments` (source, dimensions, `originalArtifactRef` /
   `preparedArtifactRef` when the Run carried pasted/path/URL images), light `planBinding`, detail `formalPlan`
-  (`title` / `revision` / `path`), and `actionFacts`. Legacy totals remain `writeCompleted` / `writeFailed` /
+  (`title` / `revision` / `path`), `actionFacts`, and `delegationCount` / `delegationFacts` (detail also lists
+  bounded `delegations`). Legacy totals remain `writeCompleted` / `writeFailed` /
   `readCompleted`; scoped fields separate `workspaceWriteCompleted` / `workspaceWriteFailed`,
   `artifactWriteCompleted` / `artifactWriteFailed`, and `otherWriteCompleted` / `otherWriteFailed`. Use the
   Workspace fields for project-mutation claims. These detailed diagnostic counts are available only through
@@ -67,8 +74,8 @@ Diagnostic fields (not Evidence):
   transcripts. For clipboard screenshots, prefer `read_image` with `originalArtifactRef` over searching mounts.
 - Session header `currentWorkPlanId` and compact `workPlan` snapshot when present.
 - Step `modelReasoning` beside `modelText`.
-- Action detail summaries for `update_plan` (`workPlanItems`), process tools (`process`), and
-  `diffKind` (`file` | `git`) with a bounded `diff` preview.
+- Action detail summaries for `update_plan` (`workPlanItems`), `delegate` (`delegations` refs + `parentHint`),
+  process tools (`process`), and `diffKind` (`file` | `git`) with a bounded `diff` preview.
 
 `createQiSessionInspectionTool(source, currentSessionId)` exposes the same semantics as `qi_session_inspect`.
 The CLI injects only its current project EventStore; callers cannot supply a database path or cross-project root.

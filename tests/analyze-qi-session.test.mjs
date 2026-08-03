@@ -29,12 +29,17 @@ test("analyze-qi-session defaults to bounded Runs and validates narrow query sel
   assert.equal(selectedOperation(parseArguments(base)), "runs");
   assert.equal(selectedOperation(parseArguments([...base, "--run", "last"])), "run");
   assert.equal(selectedOperation(parseArguments([...base, "--run", "run_123", "--problems"])), "problems");
+  assert.equal(selectedOperation(parseArguments([...base, "--run", "last", "--delegations"])), "delegations");
   assert.equal(selectedOperation(parseArguments([...base, "--last-step"])), "last-step");
   assert.equal(selectedOperation(parseArguments([...base, "--step", "stp_123", "--detail"])), "step");
   assert.equal(selectedOperation(parseArguments([...base, "--action", "act_123"])), "action");
   assert.equal(parseArguments([...base, "--all"]).all, true);
   assert.throws(
     () => parseArguments([...base, "--problems", "--last-step"]),
+    /mutually exclusive/,
+  );
+  assert.throws(
+    () => parseArguments([...base, "--delegations", "--problems"]),
     /mutually exclusive/,
   );
   assert.throws(

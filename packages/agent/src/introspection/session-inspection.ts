@@ -19,6 +19,7 @@ export type QiSessionInspectionOperation =
   | "run"
   | "problems"
   | "recovery"
+  | "delegations"
   | "last-step"
   | "step"
   | "action";
@@ -44,6 +45,7 @@ export interface QiSessionInspectionOmissions {
   runs: number;
   steps: number;
   actions: number;
+  delegations: number;
   listItems: number;
   textCharacters: number;
   resultCharacters: number;
@@ -130,6 +132,11 @@ export function inspectQiSession(
       [projectRun(view, stream.events, run.runId, detail, omissions)],
       omissions,
     );
+  }
+
+  if (query.operation === "delegations") {
+    const items = projectDelegations(run, detail, omissions, limit);
+    return finish(query.operation, detail, sessionId, session, items, omissions);
   }
 
   if (query.operation === "last-step") {
@@ -231,6 +238,7 @@ const SessionInspectionInputSchema = Type.Object({
     Type.Literal("run"),
     Type.Literal("problems"),
     Type.Literal("recovery"),
+    Type.Literal("delegations"),
     Type.Literal("last-step"),
     Type.Literal("step"),
     Type.Literal("action"),
@@ -247,9 +255,14 @@ const recoveryGuidance = [
   "Prefer restored conversation history and already-attached images over this diagnostic projection.",
   "Use recovery only when the prior Run terminal state is unclear (failed/cancelled/parked) or you need imageAttachments.originalArtifactRef.",
   "Do not chain runs→last-step→step→action for ordinary continue.",
+  "For Subagent research returns use operation=delegations (or run detail) then artifact_get(resultRef); do not harvest child last-step modelText for full deliverables.",
   "For a closer crop call read_image with originalArtifactRef; do not search mounts or the Workspace for the same clipboard/path screenshot.",
   "Fields here are diagnostic only — not Evidence of task completion.",
 ].join(" ");
+
+const delegationGuidance =
+  "Subagent Task refs only — summary/summaryRef are short previews; full deliverable text is at resultRef via artifact_get (never workspace read on artifact://). " +
+  "Do not fan out extract/补齐 Subagents because inspect text is truncated. Child last-step modelText is not a substitute for resultRef.";
 
 export function createQiSessionInspectionTool(
   source: QiSessionInspectionSource,
@@ -259,10 +272,11 @@ export function createQiSessionInspectionTool(
     description:
       "Bounded Session lifecycle diagnostics for the current Qi project — not a substitute for restored conversation history. " +
       "Prefer already-restored user/assistant messages and attached images when the user says continue. " +
-      "Use this tool for failed/cancelled/parked Runs, write-settlement disputes, Formal Plan binding, or when you need imageAttachments.originalArtifactRef. " +
-      "When the prior Run terminal state is unclear, call operation=recovery once (status, terminalReason, imageAttachments, lastStep, problem Action summaries) instead of chaining runs→last-step→step→action. " +
+      "Use this tool for failed/cancelled/parked Runs, write-settlement disputes, Formal Plan binding, Subagent Task refs, or when you need imageAttachments.originalArtifactRef. " +
+      "When the prior Run terminal state is unclear, call operation=recovery once (status, terminalReason, imageAttachments, lastStep, problem Action summaries, Subagent facts) instead of chaining runs→last-step→step→action. " +
+      "For Plan depth-1 research, call operation=delegations (runId=last or explicit) to list childSessionId / status / resultRef / summaryRef; load full child deliverables with artifact_get(resultRef) or pass resultRef as contextRefs — never workspace-read artifact:// and never rely on child last-step modelText (bounded/truncated). " +
       "For a closer crop use read_image with originalArtifactRef; do not search mounts for a clipboard/path screenshot. " +
-      "Formal Plan, Work Plan, and reasoning fields are diagnostic only — not Evidence. Cannot accept a database path or read another project.",
+      "Formal Plan, Work Plan, Subagent titles, and reasoning fields are diagnostic only — not Evidence. Cannot accept a database path or read another project.",
     input: SessionInspectionInputSchema,
     output: Type.Unknown(),
     effect: () => "read",
@@ -348,6 +362,7 @@ function projectRun(
   ).length + run.stepOrder.filter((stepId) => run.steps[stepId]?.finishReason === "error").length;
   const formalPlan = projectFormalPlanMeta(view, run.planBinding);
   const imageAttachments = projectImageAttachments(run.content);
+  const delegationList = Object.values(run.delegations);
   const base: Record<string, unknown> = {
     kind: "run",
     runId,
@@ -361,6 +376,8 @@ function projectRun(
       : boundedText(run.input?.trim() || `${run.trigger} Run`, summaryTextLimit, omissions, "textCharacters"),
     stepCount: run.stepOrder.length,
     actionCount: Object.keys(run.actions).length,
+    delegationCount: delegationList.length,
+    delegationFacts: countDelegationFacts(delegationList),
     problemCount: problems,
     actionFacts: countActionFacts(run),
     terminalReason: run.terminal?.reason,
@@ -376,6 +393,10 @@ function projectRun(
     omissions.steps += run.stepOrder.length - stepIds.length;
     base.stepIds = stepIds;
     if (formalPlan) base.formalPlan = formalPlan;
+    if (delegationList.length > 0) {
+      base.delegations = projectDelegations(run, "summary", omissions, listLimit);
+      base.delegationGuidance = delegationGuidance;
+    }
   }
   return base;
 }
@@ -427,6 +448,13 @@ function projectRecovery(
   const lastStep = lastStepId === undefined
     ? undefined
     : projectStep(view, events, runId, lastStepId, detail === "detail" ? "detail" : "summary", omissions);
+  const allDelegations = Object.values(run.delegations);
+  const problemDelegations = allDelegations
+    .filter((delegation) => ["running", "timed_out", "failed", "cancelled", "rejected"].includes(delegation.status))
+    .slice(0, Math.min(limit, listLimit));
+  omissions.delegations += Math.max(0, allDelegations.filter((delegation) =>
+    ["running", "timed_out", "failed", "cancelled", "rejected"].includes(delegation.status)
+  ).length - problemDelegations.length);
   return {
     kind: "recovery",
     guidance: recoveryGuidance,
@@ -441,6 +469,8 @@ function projectRecovery(
       terminalDetail: projected.terminalDetail,
       problemCount: projected.problemCount,
       actionFacts: projected.actionFacts,
+      delegationCount: projected.delegationCount,
+      delegationFacts: projected.delegationFacts,
       ...(imageAttachments.length > 0
         ? { imageCount: imageAttachments.length, imageAttachments }
         : {}),
@@ -458,6 +488,14 @@ function projectRecovery(
       errorCode: actionErrorCode(action.status, undefined),
       terminalDetail: boundedText(action.terminalDetail, summaryTextLimit, omissions, "textCharacters"),
     })),
+    ...(allDelegations.length > 0
+      ? {
+        delegationGuidance,
+        problemDelegations: problemDelegations.map((delegation) =>
+          projectDelegation(delegation, detail === "detail" ? "detail" : "summary", omissions)
+        ),
+      }
+      : {}),
   };
 }
 
@@ -494,6 +532,79 @@ function projectFormalPlanMeta(
     title: revision.title,
     path: revision.path,
   };
+}
+
+type RunDelegation = NonNullable<SessionView["runs"][string]>["delegations"][string];
+
+function countDelegationFacts(delegations: readonly RunDelegation[]): {
+  running: number;
+  accepted: number;
+  rejected: number;
+  cancelled: number;
+  timed_out: number;
+  failed: number;
+} {
+  const facts = {
+    running: 0,
+    accepted: 0,
+    rejected: 0,
+    cancelled: 0,
+    timed_out: 0,
+    failed: 0,
+  };
+  for (const delegation of delegations) {
+    facts[delegation.status] += 1;
+  }
+  return facts;
+}
+
+function projectDelegations(
+  run: NonNullable<SessionView["runs"][string]>,
+  detail: "summary" | "detail",
+  omissions: QiSessionInspectionOmissions,
+  limit: number,
+): Record<string, unknown>[] {
+  const all = Object.values(run.delegations);
+  const selected = all.slice(0, Math.min(limit, listLimit));
+  omissions.delegations += all.length - selected.length;
+  return selected.map((delegation) => projectDelegation(delegation, detail, omissions));
+}
+
+function projectDelegation(
+  delegation: RunDelegation,
+  detail: "summary" | "detail",
+  omissions: QiSessionInspectionOmissions,
+): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    kind: "delegation",
+    delegationId: delegation.delegationId,
+    childSessionId: delegation.childSessionId,
+    status: delegation.status,
+    outcome: boundedText(delegation.outcome, summaryTextLimit, omissions, "textCharacters"),
+    depth: delegation.depth,
+    ...(delegation.resultRef === undefined ? {} : { resultRef: delegation.resultRef }),
+    ...(delegation.summaryRef === undefined ? {} : { summaryRef: delegation.summaryRef }),
+    evidenceRefCount: delegation.evidenceRefs.length,
+    ...(delegation.coordinationWallTimeMs === undefined
+      ? {}
+      : { coordinationWallTimeMs: delegation.coordinationWallTimeMs }),
+  };
+  if (detail === "detail") {
+    base.returnPolicy = delegation.returnPolicy;
+    base.contractRef = delegation.contractRef;
+    base.contextRefs = delegation.contextRefs.slice(0, listLimit);
+    omissions.listItems += Math.max(0, delegation.contextRefs.length - listLimit);
+    base.resourceEnvelope = { ...delegation.resourceEnvelope };
+    if (delegation.reasons && delegation.reasons.length > 0) {
+      const reasons = delegation.reasons.slice(0, listLimit).map((reason) =>
+        boundedText(reason, summaryTextLimit, omissions, "textCharacters")
+      );
+      omissions.listItems += Math.max(0, delegation.reasons.length - listLimit);
+      base.reasons = reasons;
+    }
+    base.guidance = delegationGuidance;
+  }
+  return base;
 }
 
 function countActionFacts(run: NonNullable<SessionView["runs"][string]>): {
@@ -650,6 +761,16 @@ function enrichActionDetail(
       base.workPlanItems = selected;
     }
   }
+  if (toolName === "delegate") {
+    const delegated = extractDelegateResults(result, omissions);
+    if (delegated) {
+      base.delegations = delegated.results;
+      if (delegated.parentHint) {
+        base.parentHint = boundedText(delegated.parentHint, summaryTextLimit, omissions, "textCharacters");
+      }
+      base.delegationGuidance = delegationGuidance;
+    }
+  }
   if (toolName === "shell" || toolName === "script" || toolName === "verify") {
     base.process = extractProcessSummary(toolName, input, result);
   }
@@ -659,6 +780,52 @@ function enrichActionDetail(
     base.diff = boundedText(diffFields.diff, resultTextLimit, omissions, "resultCharacters");
     if (diffFields.diffTruncated) base.diffTruncated = true;
   }
+}
+
+function extractDelegateResults(
+  result: unknown,
+  omissions: QiSessionInspectionOmissions,
+): { results: Array<Record<string, unknown>>; parentHint?: string } | undefined {
+  const value = record(result);
+  if (!value) return undefined;
+  const rawResults = Array.isArray(value.results) ? value.results : [value];
+  const mapped = rawResults
+    .map(record)
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .filter((item) =>
+      typeof item.delegationId === "string"
+      || typeof item.childSessionId === "string"
+      || typeof item.resultRef === "string"
+      || typeof item.summaryRef === "string"
+    )
+    .map((item) => ({
+      ...(typeof item.delegationId === "string" ? { delegationId: item.delegationId } : {}),
+      ...(typeof item.childSessionId === "string" ? { childSessionId: item.childSessionId } : {}),
+      ...(typeof item.outcome === "string"
+        ? { outcome: boundedText(item.outcome, summaryTextLimit, omissions, "textCharacters") }
+        : {}),
+      ...(typeof item.accepted === "boolean" ? { accepted: item.accepted } : {}),
+      ...(typeof item.summary === "string"
+        ? { summary: boundedText(item.summary, summaryTextLimit, omissions, "textCharacters") }
+        : {}),
+      ...(typeof item.summaryRef === "string" ? { summaryRef: item.summaryRef } : {}),
+      ...(typeof item.resultRef === "string" ? { resultRef: item.resultRef } : {}),
+      ...(Array.isArray(item.reasons)
+        ? {
+          reasons: item.reasons
+            .filter((reason): reason is string => typeof reason === "string")
+            .slice(0, listLimit)
+            .map((reason) => boundedText(reason, summaryTextLimit, omissions, "textCharacters")),
+        }
+        : {}),
+    }));
+  if (mapped.length === 0) return undefined;
+  const selected = mapped.slice(0, listLimit);
+  omissions.delegations += mapped.length - selected.length;
+  return {
+    results: selected,
+    ...(typeof value.parentHint === "string" ? { parentHint: value.parentHint } : {}),
+  };
 }
 
 function extractWorkPlanItems(source: unknown): Array<{ workItemId?: string; step: string; status: string }> | undefined {
@@ -878,6 +1045,7 @@ function emptyOmissions(): QiSessionInspectionOmissions {
     runs: 0,
     steps: 0,
     actions: 0,
+    delegations: 0,
     listItems: 0,
     textCharacters: 0,
     resultCharacters: 0,
