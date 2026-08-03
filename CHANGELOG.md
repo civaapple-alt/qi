@@ -8,7 +8,12 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+### Fixed
+
+- Depth-1 Subagent wall-time limits now keep their abort timer alive until child settlement, avoiding
+  unsettled Runs on Node 22 when the model stream has no other active handles.
+- TUI CodeAct capability discovery is settled before the first Run builds its tool catalog, so a slow
+  Docker/Podman probe cannot make an available `codeact` tool disappear from the initial request.
 
 ## [0.7.3] - 2026-08-03
 

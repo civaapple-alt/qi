@@ -91,7 +91,12 @@ async function executeDelegatedHandle(
   options: DelegationRunnerOptions & { input: string },
 ): Promise<DelegationRunResult> {
   const wallTimeMs = contract.resourceEnvelope.wallTimeMs;
-  const timeout = AbortSignal.timeout(wallTimeMs);
+  // AbortSignal.timeout() uses an unref'ed timer. That lets Node exit while a child model
+  // stream is still awaiting the abort, which leaves the test runner (and callers) with an
+  // unsettled Promise on Node 22. Keep this timer referenced until the child settles.
+  const timeoutController = new AbortController();
+  const timeoutTimer = setTimeout(() => timeoutController.abort(), wallTimeMs);
+  const timeout = timeoutController.signal;
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
 
   const contextBlocks = [
@@ -131,6 +136,7 @@ async function executeDelegatedHandle(
       signal,
     });
   } catch (error) {
+    clearTimeout(timeoutTimer);
     const { outcome, reasons } = classifyAbort(timeout, options.signal, wallTimeMs, error);
     const settlement = options.coordinator.return(handle, {
       outcome,
@@ -190,6 +196,8 @@ async function executeDelegatedHandle(
             : [`Child Run ended as ${turn.status}`],
         }),
   });
+
+  clearTimeout(timeoutTimer);
 
   return {
     handle,

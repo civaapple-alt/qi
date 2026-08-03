@@ -1650,6 +1650,10 @@ export class TuiRuntime {
     const controller = new AbortController();
     this.#activeController = controller;
     try {
+      // Capability application starts the container probe in the background so runtime creation
+      // stays responsive. Before building the model catalog, wait for that probe to settle so the
+      // first Run cannot observe a stale CodeAct tool list on hosts where probing is slower.
+      if (this.#codeactProbe) await this.#codeactProbe.catch(() => undefined);
       await this.ensureProjectMemoryReady();
       this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
       this.syncMountEvents();
