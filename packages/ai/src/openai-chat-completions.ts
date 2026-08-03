@@ -160,8 +160,11 @@ export class OpenAIChatCompletionsModelPort implements ModelPort {
       throwIfAborted(signal);
       const choice = chunk.choices[0];
       if (chunk.usage) {
-        const cached = (chunk.usage as { prompt_tokens_details?: { cached_tokens?: number } })
-          .prompt_tokens_details?.cached_tokens;
+        const details = chunk.usage as {
+          prompt_tokens_details?: { cached_tokens?: number };
+          prompt_cache_hit_tokens?: number;
+        };
+        const cached = details.prompt_tokens_details?.cached_tokens ?? details.prompt_cache_hit_tokens;
         usage = {
           inputTokens: chunk.usage.prompt_tokens ?? 0,
           outputTokens: chunk.usage.completion_tokens ?? 0,

@@ -107,6 +107,8 @@ export interface StatuslineModel {
   readonly wireApi?: string;
   readonly reasoningEffort?: string;
   readonly contextPercent?: number;
+  /** Latest Step provider prompt-cache hit rate (`cachedInputTokens / inputTokens`). */
+  readonly cacheHitPercent?: number;
   readonly filesChanged: number;
   readonly workspace: string;
   readonly branch?: string;
@@ -653,6 +655,9 @@ export class TuiPresenter {
     const contextPercent = step?.context
       ? Math.round((step.context.estimatedTokens / step.context.budgetTokens) * 100)
       : undefined;
+    // Prefer Run-cumulative CH%: latest-step alone is misleading when the final Step
+    // misses after a high-hit tool loop (provider prompt-cache units).
+    const cacheHitPercent = cacheHitPercentForRun(active ?? this.selectedRun());
     const filesChanged = this.#actionIndex.filesChangedByRun.get(active?.runId ?? this.selectedRun()?.runId ?? "") ?? 0;
     const runningTasks = (this.#view?.taskOrder ?? [])
       .map((id) => this.#view?.tasks[id])
@@ -665,6 +670,7 @@ export class TuiPresenter {
         ? {}
         : { reasoningEffort: this.launch.reasoningEffort }),
       ...(contextPercent === undefined ? {} : { contextPercent }),
+      ...(cacheHitPercent === undefined ? {} : { cacheHitPercent }),
       filesChanged,
       workspace: this.launch.workspaceRoot,
       ...(this.launch.branch === undefined ? {} : { branch: this.launch.branch }),
@@ -684,6 +690,7 @@ export class TuiPresenter {
       model.wireApi,
       model.reasoningEffort,
       model.contextPercent === undefined ? undefined : `${model.contextPercent}%`,
+      model.cacheHitPercent === undefined ? undefined : `CH${model.cacheHitPercent.toFixed(1)}%`,
       model.filesChanged > 0 ? `${model.filesChanged} files` : undefined,
       model.activeTasks > 0 ? `tasks ${model.activeTasks}` : undefined,
     ].filter((field): field is string => Boolean(field)).join(" · ");
@@ -1116,6 +1123,13 @@ export class TuiPresenter {
     const includedBlockCount = blockStats.reduce((sum, item) => sum + item.includedCount, 0);
     const omittedBlockCount = blockStats.reduce((sum, item) => sum + item.omittedCount, 0);
     const nonBlockTokens = Math.max(0, context.estimatedTokens - includedBlockTokens);
+    const providerUsage = step.model?.usage;
+    const stepCacheHit = providerUsage
+      && providerUsage.inputTokens > 0
+      && providerUsage.cachedInputTokens !== undefined
+      ? Math.round((providerUsage.cachedInputTokens / providerUsage.inputTokens) * 1000) / 10
+      : undefined;
+    const runCacheHit = cacheHitPercentForRun(run);
     lines.push(
       `  Step        ${position(run.stepOrder, step.stepId)} · ${short(step.stepId)}`,
       `  usage       ${formatTokens(context.estimatedTokens)} / ${formatTokens(context.budgetTokens)} · ${Math.round(ratio * 100)}% ${progressBar(ratio, 20)}`,
@@ -1124,6 +1138,18 @@ export class TuiPresenter {
       `  history     newest completed turns, capped at ${formatTokens(this.launch.historyBudgetTokens)} per new Run`,
       `  compaction  ${step.compactions?.length ? `${step.compactions.length} settled exchange(s), ${formatTokens(step.compactions.reduce((sum, item) => sum + item.originalEstimatedTokens - item.compactedEstimatedTokens, 0))} reclaimed` : context.omittedBlockIds.some((id) => id.startsWith("history:")) ? "older Session turns were omitted" : "not triggered for this Step"}`,
       `  boundary    safe between Steps; parks if required context still exceeds ${formatTokens(context.budgetTokens)}`,
+      providerUsage
+        ? `  provider    ↑${formatTokens(providerUsage.inputTokens)} ↓${formatTokens(providerUsage.outputTokens)}${
+          providerUsage.cachedInputTokens === undefined
+            ? ""
+            : ` · cache ${formatTokens(providerUsage.cachedInputTokens)}${
+              stepCacheHit === undefined ? "" : ` · step CH${stepCacheHit.toFixed(1)}%`
+            }`
+        }`
+        : "  provider    usage not reported for this Step",
+      runCacheHit === undefined
+        ? "  run cache  not reported"
+        : `  run cache  CH${runCacheHit.toFixed(1)}% cumulative cachedInput/input`,
     );
     if (blockStats.length > 0) {
       lines.push(
@@ -2452,6 +2478,25 @@ function progressBar(ratio: number, width: number): string {
   const bounded = Math.max(0, Math.min(1, ratio));
   const filled = Math.round(bounded * width);
   return `[${"█".repeat(filled)}${"░".repeat(width - filled)}]`;
+}
+
+/** Cumulative provider prompt-cache hit rate across Steps that reported usage. */
+function cacheHitPercentForRun(run: RunView | undefined): number | undefined {
+  if (!run) return undefined;
+  let inputTokens = 0;
+  let cachedInputTokens = 0;
+  let sawCached = false;
+  for (const stepId of run.stepOrder) {
+    const usage = run.steps[stepId]?.model?.usage;
+    if (!usage || usage.inputTokens <= 0) continue;
+    inputTokens += usage.inputTokens;
+    if (usage.cachedInputTokens !== undefined) {
+      cachedInputTokens += usage.cachedInputTokens;
+      sawCached = true;
+    }
+  }
+  if (!sawCached || inputTokens <= 0) return undefined;
+  return Math.round((cachedInputTokens / inputTokens) * 1000) / 10;
 }
 
 function boundedTailLines(value: string, limit: number): string[] {

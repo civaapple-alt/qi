@@ -136,6 +136,65 @@ test("Context Compiler keeps required blocks and spends remaining budget by prio
   assert.deepEqual(compiled.messages.map((message) => message.role), ["system", "system"]);
 });
 
+test("Context Compiler pins optional blocks across a shrinking budget", () => {
+  const estimator = { estimate: (text) => Number(text) };
+  const blocks = [
+    {
+      id: "constitution",
+      kind: "constitution",
+      source: "agent.md",
+      role: "system",
+      content: "4",
+      priority: 100,
+      required: true,
+      retentionReason: "Identity",
+    },
+    {
+      id: "memory:context",
+      kind: "memory",
+      source: "memory",
+      role: "user",
+      content: "5",
+      priority: 50,
+      required: false,
+      retentionReason: "Pinned memory",
+    },
+    {
+      id: "skills:index",
+      kind: "skill",
+      source: "skills",
+      role: "user",
+      content: "3",
+      priority: 40,
+      required: false,
+      retentionReason: "Optional skill index",
+    },
+  ];
+  const first = compileContext({ blocks, budgetTokens: 12, estimator });
+  assert.deepEqual(first.included.map((block) => block.id), [
+    "constitution",
+    "memory:context",
+    "skills:index",
+  ]);
+  const second = compileContext({
+    blocks,
+    budgetTokens: 9,
+    estimator,
+    pinnedOptionalIds: ["memory:context"],
+  });
+  assert.deepEqual(second.included.map((block) => block.id), ["constitution", "memory:context"]);
+  assert.deepEqual(second.omitted.map((block) => block.id), ["skills:index"]);
+  assert.throws(
+    () => compileContext({
+      blocks,
+      budgetTokens: 9,
+      estimator,
+      pinnedOptionalIds: ["memory:context", "skills:index"],
+    }),
+    (error) => error instanceof ContextBudgetError && error.requiredTokens === 12,
+  );
+});
+
 test("Context Compiler fails closed when required context exceeds budget", () => {
   assert.throws(
     () =>

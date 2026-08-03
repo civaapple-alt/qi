@@ -46,8 +46,20 @@ before selecting whole restored turns. Optional Workspace, Memory, and Skill blo
 deterministically by priority. Old turns and optional omission hints may yield under pressure. Formal Plan
 Executors continue to use `historyBudgetTokens: 0`.
 
+Within one Run, model input is **stable prefix → append-only conversation → control trailer** (ADR-0034):
+
+- Prefix: Run recipe blocks plus restored-history facts/omission notices. Optional membership freezes after the
+  first successful compile of the Run.
+- Conversation: grows only by appending assistant/tool/user turns for the active Run.
+- Trailer: Work Plan navigation, Goal contracts, and budget warning/handoff. Trailer messages use the **user**
+  role and **freeze after first inclusion** in the Run (live status / `consumed` updates and mid-Run removal do
+  not rewrite them). Fresh plan/goal state remains available from settled tool results. Formal Plan Markdown is
+  not a trailer block: accept freezes a revision into that Run's user input (`<accepted-plan>`), and
+  `plan_document` edits only append tool results.
+
 `context.compiled` records IDs, budgets, and aggregate kind/token statistics, never block payloads. Provider usage
-may calibrate estimators offline but does not rewrite Session truth.
+(including `cachedInputTokens`) projects for operator diagnostics; statusline `CH%` is Run-cumulative
+`sum(cachedInputTokens)/sum(inputTokens)`. Usage does not rewrite Session authority.
 
 ## Regression evidence
 

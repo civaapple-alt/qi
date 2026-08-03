@@ -52,7 +52,8 @@ the six coordinated public packages.
 1. [system-design §5](system-design.md#5-context-models-and-memory)
 2. `packages/ai/README.md`
 3. `packages/ai/docs/context/compiler.md`
-4. `packages/agent/docs/memory/README.md`
+4. [ADR-0034](decisions.md#adr-0034-keep-provider-prompt-cache-prefixes-stable-within-a-run) (prompt-cache layout)
+5. `packages/agent/docs/memory/README.md`
 
 For image input, continue with
 [ADR-0028](decisions.md#adr-0028-persist-ordered-media-references-and-materialize-provider-payloads-late),

@@ -10,6 +10,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Statusline and `/context` surface provider prompt-cache hit rate as `CH%`
+  (Run-cumulative `sum(cachedInputTokens)/sum(inputTokens)`; `/context` also shows the latest Step). See
+  ADR-0034.
+
 - Settings → Providers → **Add OpenAI-compatible provider**: enter name, API key, base URL, wire API
   (`chat.completions` / `responses`), thinking dialect / Chat output field, plus separate **Model ID**,
   **Context window**, and **Output reserve** fields (token counts accept `256k` / `32k`), then write
@@ -49,6 +53,12 @@ backup plus reset or a new data root rather than an automatic migration.
   Action summaries — so continue-after-failure does not require chaining runs/steps/actions.
 
 ### Changed
+
+- TurnLoop lays out each Step as stable prefix → append-only conversation → control trailer so automatic
+  provider prompt caches (DeepSeek V4 Flash and similar) can retain long prefixes across Steps. Work Plan,
+  Goal, and budget warning/handoff move to a user-role trailer that freezes after first inclusion in the Run
+  (live status/`consumed` updates do not rewrite it); optional Memory/Skills freeze after the first compile.
+  See ADR-0034.
 
 - CLI and `qi-web` first paint no longer full-replay every Session for catalog/recovery: `peekLifecycle` and
   cheap `listSessions`/`listCatalog` read lifecycle (and `session.created` titles) from SQLite without building

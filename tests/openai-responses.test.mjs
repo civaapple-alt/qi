@@ -175,6 +175,34 @@ test("OpenAI adapter maps portable history and completed tool calls without prov
   ]);
 });
 
+test("Responses tolerates missing input_tokens_details in usage", async () => {
+  const client = {
+    responses: {
+      create() {
+        return asyncEvents([{
+          type: "response.completed",
+          sequence_number: 1,
+          response: completedResponse({
+            usage: {
+              input_tokens: 12,
+              output_tokens: 3,
+              total_tokens: 15,
+            },
+          }),
+        }]);
+      },
+    },
+  };
+  const port = new OpenAIResponsesModelPort(client, { providerNames: ["openai"] });
+  const events = [];
+  for await (const event of port.stream(request({ tools: [] }))) events.push(event);
+  assert.deepEqual(events.find((event) => event.type === "usage"), {
+    type: "usage",
+    inputTokens: 12,
+    outputTokens: 3,
+  });
+});
+
 test("Responses preserves the assembled Qi block role and order", async () => {
   let captured;
   const client = {

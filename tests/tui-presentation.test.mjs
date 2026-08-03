@@ -2040,6 +2040,14 @@ test("statusline shows thinking effort between model and context percent", () =>
             stepId: "step_1",
             status: "running",
             context: { estimatedTokens: 31_457, budgetTokens: 983_040 },
+            model: {
+              requestId: "req_1",
+              provider: "deepseek",
+              model: "deepseek-v4-flash",
+              finishReason: "stop",
+              text: "ok",
+              usage: { inputTokens: 10_000, outputTokens: 40, cachedInputTokens: 9_870 },
+            },
           },
         },
         actions: {},
@@ -2059,7 +2067,8 @@ test("statusline shows thinking effort between model and context percent", () =>
     presence: { state: "active", reason: "run" },
   });
   const status = presenter.formatStatusline(true, 120).join("\n");
-  assert.match(status, /deepseek\/deepseek-v4-flash · high · 3%/);
+  // Statusline CH% is Run-cumulative (same as a single completed Step here).
+  assert.match(status, /deepseek\/deepseek-v4-flash · high · 3% · CH98\.7%/);
   assert.match(status, /Agent/);
 
   presenter.patchAuthLaunch({
@@ -2071,7 +2080,7 @@ test("statusline shows thinking effort between model and context percent", () =>
   });
   assert.match(
     presenter.formatStatusline(true, 120).join("\n"),
-    /deepseek\/deepseek-v4-flash · responses · max · 3%/,
+    /deepseek\/deepseek-v4-flash · responses · max · 3% · CH98\.7%/,
   );
 
   presenter.patchAuthLaunch({
@@ -2093,6 +2102,87 @@ test("statusline shows thinking effort between model and context percent", () =>
     authStatus: "ready",
   });
   assert.doesNotMatch(presenter.formatStatusline(true, 120).join("\n"), /\b(high|max|low|none)\b/);
+});
+
+test("statusline CH% is Run-cumulative so a final Step miss does not hide the loop hit rate", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    reasoningEffort: "high",
+    capabilities: [],
+    contextWindowTokens: 1_048_576,
+    contextBudgetTokens: 983_040,
+    outputReserveTokens: 65_536,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  presenter.update([], {
+    sessionId: "ses_cache_cum",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: ["run_1"],
+    currentRunId: "run_1",
+    runs: {
+      run_1: {
+        runId: "run_1",
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "hello",
+        stepOrder: ["step_1", "step_2"],
+        steps: {
+          step_1: {
+            stepId: "step_1",
+            status: "completed",
+            finishReason: "actions",
+            context: { estimatedTokens: 31_457, budgetTokens: 983_040 },
+            model: {
+              requestId: "req_1",
+              provider: "deepseek",
+              model: "deepseek-v4-flash",
+              finishReason: "actions",
+              text: "ok",
+              usage: { inputTokens: 10_000, outputTokens: 40, cachedInputTokens: 9_870 },
+            },
+          },
+          step_2: {
+            stepId: "step_2",
+            status: "completed",
+            finishReason: "response",
+            context: { estimatedTokens: 40_000, budgetTokens: 983_040 },
+            model: {
+              requestId: "req_2",
+              provider: "deepseek",
+              model: "deepseek-v4-flash",
+              finishReason: "stop",
+              text: "done",
+              usage: { inputTokens: 10_000, outputTokens: 20, cachedInputTokens: 780 },
+            },
+          },
+        },
+        actions: {},
+        delegations: {},
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "idle", reason: "completed" },
+  });
+  // Latest Step alone would be CH7.8%; cumulative is (9870+780)/20000 = 53.3%.
+  assert.match(presenter.formatStatusline(false, 120).join("\n"), /CH53\.3%/);
+  assert.doesNotMatch(presenter.formatStatusline(false, 120).join("\n"), /CH7\.8%/);
 });
 
 test("renderPanel exposes config for temporary panels", () => {

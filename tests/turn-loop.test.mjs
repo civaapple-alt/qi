@@ -149,6 +149,7 @@ test("TurnLoop completes a response-only Run with durable context and model boun
     ]);
     assert.equal(step.model.text, "A grounded answer");
     assert.equal(step.model.reasoning, "A short reason");
+    assert.deepEqual(step.model.usage, { inputTokens: 24, outputTokens: 4 });
     assert.deepEqual(
       activities.map((activity) => [activity.type, activity.text]),
       [
@@ -156,6 +157,197 @@ test("TurnLoop completes a response-only Run with durable context and model boun
         ["model.text", "A grounded answer"],
       ],
     );
+  });
+});
+
+test("TurnLoop keeps prompt-cache prefix stable when Work Plan trailer changes", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const sessionId = "ses_prompt_cache_prefix";
+    const control = new HumanControlService({ eventStore: store });
+    const broker = new InMemoryCapabilityBroker();
+    broker.grant({
+      leaseId: "lea_prompt_cache_prefix",
+      subject: "agent_main",
+      tools: ["update_plan"],
+      effects: ["read"],
+      resources: ["work-plan:**"],
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const registry = new ToolRegistry(broker);
+    registry.register("update_plan", defineTool({
+      description: "test work plan",
+      input: Type.Object({
+        workPlanId: Type.Optional(Type.String()),
+        plan: Type.Array(Type.Object({
+          workItemId: Type.Optional(Type.String()),
+          step: Type.String(),
+          status: Type.Union([
+            Type.Literal("pending"),
+            Type.Literal("in_progress"),
+            Type.Literal("completed"),
+          ]),
+        }, { additionalProperties: false }), { minItems: 1 }),
+      }, { additionalProperties: false }),
+      output: Type.Object({
+        workPlanId: Type.String(),
+        revision: Type.Integer(),
+        plan: Type.Array(Type.Object({
+          workItemId: Type.String(),
+          step: Type.String(),
+          status: Type.String(),
+        }, { additionalProperties: false })),
+      }, { additionalProperties: false }),
+      effect: () => "read",
+      resources: (input) => [`work-plan:${input.workPlanId ?? "new"}`],
+      execute: async (input, context) => {
+        const view = control.recordWorkPlanUpdate(
+          context.sessionId,
+          {
+            runId: context.runId,
+            stepId: context.stepId,
+            actionId: context.actionId,
+          },
+          {
+            ...(input.workPlanId === undefined ? {} : { workPlanId: input.workPlanId }),
+            plan: input.plan.map((item) => ({
+              ...(item.workItemId === undefined ? {} : { workItemId: item.workItemId }),
+              step: item.step,
+              status: item.status,
+            })),
+          },
+        );
+        const workPlanId = input.workPlanId ?? view.currentWorkPlanId;
+        const workPlan = workPlanId ? view.workPlans[workPlanId] : undefined;
+        const revision = workPlan?.latestRevision;
+        const snapshot = revision === undefined ? undefined : workPlan?.revisions[revision];
+        if (!workPlanId || !revision || !snapshot) throw new Error("missing work plan");
+        return { workPlanId, revision, plan: snapshot.items };
+      },
+    }));
+    let createdItems;
+    const model = new ScriptedModelPort([
+      [
+        {
+          type: "action.requested",
+          callId: "call_create_plan",
+          name: "update_plan",
+          input: {
+            plan: [
+              { step: "Stable prefix", status: "in_progress" },
+              { step: "Trailer only", status: "pending" },
+            ],
+          },
+        },
+        { type: "usage", inputTokens: 100, outputTokens: 20, cachedInputTokens: 0 },
+        { type: "completed", finishReason: "actions" },
+      ],
+      (request) => {
+        const navIndex = request.messages.findIndex((message) =>
+          message.content.some((part) => part.type === "text" && part.text.includes("Work Plan navigation"))
+        );
+        const taskUserIndex = request.messages.findIndex((message) =>
+          message.role === "user"
+          && message.content.some((part) =>
+            part.type === "text" && part.text.includes("Keep the prompt-cache prefix stable")
+          )
+        );
+        assert.ok(navIndex >= 0);
+        assert.ok(taskUserIndex >= 0);
+        assert.equal(request.messages[navIndex].role, "user");
+        assert.ok(taskUserIndex < navIndex, "Work Plan trailer must follow conversation user turns");
+        createdItems = store.read(sessionId).events
+          .find((event) => event.type === "work.plan.updated")
+          ?.data.items;
+        assert.ok(createdItems);
+        return [
+          {
+            type: "action.requested",
+            callId: "call_update_plan",
+            name: "update_plan",
+            input: {
+              plan: createdItems.map((item) => ({
+                workItemId: item.workItemId,
+                step: item.step,
+                status: item.status === "in_progress" ? "completed" : "in_progress",
+              })),
+            },
+          },
+          { type: "usage", inputTokens: 200, outputTokens: 20, cachedInputTokens: 160 },
+          { type: "completed", finishReason: "actions" },
+        ];
+      },
+      () => {
+        assert.ok(createdItems);
+        return [
+          {
+            type: "action.requested",
+            callId: "call_finish_plan",
+            name: "update_plan",
+            input: {
+              plan: createdItems.map((item) => ({
+                workItemId: item.workItemId,
+                step: item.step,
+                status: "completed",
+              })),
+            },
+          },
+          { type: "usage", inputTokens: 260, outputTokens: 12, cachedInputTokens: 220 },
+          { type: "completed", finishReason: "actions" },
+        ];
+      },
+      [
+        { type: "text.delta", delta: "Prefix stayed stable." },
+        { type: "usage", inputTokens: 300, outputTokens: 8, cachedInputTokens: 270 },
+        { type: "completed", finishReason: "stop" },
+      ],
+    ]);
+    const loop = new TurnLoop({ eventStore: store, modelPort: model, toolRegistry: registry });
+    const result = await loop.run(turnRequest(root, artifactStore, {
+      sessionId,
+      input: "Keep the prompt-cache prefix stable",
+      maxSteps: 5,
+    }));
+    assert.equal(result.status, "completed");
+    assert.equal(model.requests.length, 4);
+
+    function splitAtFirstUser(messages) {
+      const userIndex = messages.findIndex((message) => message.role === "user");
+      assert.ok(userIndex >= 0);
+      return {
+        prefix: messages.slice(0, userIndex),
+        rest: messages.slice(userIndex),
+      };
+    }
+    function workPlanTrailers(messages) {
+      return messages.filter((message) =>
+        message.content.some((part) => part.type === "text" && part.text.includes("Work Plan navigation"))
+      );
+    }
+
+    const first = splitAtFirstUser(model.requests[0].messages);
+    const second = splitAtFirstUser(model.requests[1].messages);
+    const third = splitAtFirstUser(model.requests[2].messages);
+    const fourth = splitAtFirstUser(model.requests[3].messages);
+    assert.deepEqual(second.prefix, first.prefix);
+    assert.deepEqual(third.prefix, first.prefix);
+    assert.deepEqual(fourth.prefix, first.prefix);
+    assert.equal(workPlanTrailers(first.rest).length, 0);
+    assert.equal(workPlanTrailers(second.rest).length, 1);
+    assert.equal(workPlanTrailers(third.rest).length, 1);
+    assert.equal(workPlanTrailers(fourth.rest).length, 1);
+    // Run-frozen trailer must not rewrite when update_plan changes statuses or completes.
+    assert.deepEqual(workPlanTrailers(second.rest), workPlanTrailers(third.rest));
+    assert.deepEqual(workPlanTrailers(third.rest), workPlanTrailers(fourth.rest));
+    assert.match(workPlanTrailers(fourth.rest)[0].content[0].text, /status=in_progress/);
+
+    const lastStep = result.view.runs[result.runId].steps[result.view.runs[result.runId].stepOrder.at(-1)];
+    assert.deepEqual(lastStep.model.usage, {
+      inputTokens: 300,
+      outputTokens: 8,
+      cachedInputTokens: 270,
+    });
+    assert.equal(lastStep.context.includedBlockIds.includes("work-plan:current"), true);
   });
 });
 
@@ -1710,7 +1902,6 @@ test("TurnLoop injects unfinished Work Plan navigation and continues current pla
       [{ type: "text.delta", delta: "Plan recorded." }, { type: "completed", finishReason: "stop" }],
       (request) => {
         const nav = request.messages
-          .filter((message) => message.role === "system")
           .flatMap((message) => message.content)
           .find((part) => part.type === "text" && part.text.includes("Work Plan navigation"))
           ?.text;
@@ -1718,6 +1909,12 @@ test("TurnLoop injects unfinished Work Plan navigation and continues current pla
         assert.match(nav, /workPlanId=wpl_/);
         assert.match(nav, /Wire runtime/);
         assert.match(nav, /navigation only, not completion evidence/i);
+        assert.equal(
+          request.messages.find((message) =>
+            message.content.some((part) => part.type === "text" && part.text.includes("Work Plan navigation"))
+          )?.role,
+          "user",
+        );
         createdItems = store.read(sessionId).events
           .find((event) => event.type === "work.plan.updated")
           ?.data.items;
@@ -1852,12 +2049,17 @@ test("TurnLoop injects unfinished Work Plan navigation in Plan mode", async () =
       [{ type: "text.delta", delta: "Seeded Work Plan." }, { type: "completed", finishReason: "stop" }],
       (request) => {
         const nav = request.messages
-          .filter((message) => message.role === "system")
           .flatMap((message) => message.content)
           .find((part) => part.type === "text" && part.text.includes("Work Plan navigation"))
           ?.text;
         assert.ok(nav);
         assert.match(nav, /Survey codebase/);
+        assert.equal(
+          request.messages.find((message) =>
+            message.content.some((part) => part.type === "text" && part.text.includes("Work Plan navigation"))
+          )?.role,
+          "user",
+        );
         return [{ type: "text.delta", delta: "Still researching in Plan." }, { type: "completed", finishReason: "stop" }];
       },
     ]);

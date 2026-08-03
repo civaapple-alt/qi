@@ -93,6 +93,11 @@ export interface CompileContextInput {
   blocks: readonly ContextBlock[];
   budgetTokens: number;
   estimator?: TokenEstimator;
+  /**
+   * Optional block IDs that must stay included when present (Run-scoped freeze).
+   * Unknown IDs are ignored. Pinned blocks count against the budget like required blocks.
+   */
+  pinnedOptionalIds?: readonly string[];
 }
 
 export function compileContext(input: CompileContextInput): CompiledContext {
@@ -100,6 +105,7 @@ export function compileContext(input: CompileContextInput): CompiledContext {
     throw new RangeError("budgetTokens must be a positive integer");
   }
   const estimator = input.estimator ?? approximateTokenEstimator;
+  const pinnedOptionalIds = new Set(input.pinnedOptionalIds ?? []);
   const ids = new Set<string>();
   const estimated = input.blocks.map((block, index) => {
     if (!block.id) throw new TypeError(`Context block at index ${index} has no id`);
@@ -113,17 +119,16 @@ export function compileContext(input: CompileContextInput): CompiledContext {
     return { ...block, estimatedTokens, index };
   });
 
-  const requiredTokens = estimated
-    .filter((block) => block.required)
-    .reduce((total, block) => total + block.estimatedTokens, 0);
-  if (requiredTokens > input.budgetTokens) {
-    throw new ContextBudgetError(requiredTokens, input.budgetTokens);
+  const forced = estimated.filter((block) => block.required || pinnedOptionalIds.has(block.id));
+  const forcedTokens = forced.reduce((total, block) => total + block.estimatedTokens, 0);
+  if (forcedTokens > input.budgetTokens) {
+    throw new ContextBudgetError(forcedTokens, input.budgetTokens);
   }
 
-  const selected = new Set(estimated.filter((block) => block.required).map((block) => block.id));
-  let used = requiredTokens;
+  const selected = new Set(forced.map((block) => block.id));
+  let used = forcedTokens;
   const optional = estimated
-    .filter((block) => !block.required)
+    .filter((block) => !selected.has(block.id))
     .sort((left, right) => right.priority - left.priority || left.index - right.index);
 
   for (const block of optional) {

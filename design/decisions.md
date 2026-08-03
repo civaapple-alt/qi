@@ -673,6 +673,33 @@ bounded Runs without inventing a second truth source or turning one Run into an 
   indeterminate ⇒ blocked; unfinished Goals block archive/reset; TurnLoop Goal ContextBlock without tool
   transcripts; resume demote; portable settle helper.
 
+## ADR-0034: keep provider prompt-cache prefixes stable within a Run
+
+- DeepSeek and similar OpenAI-compatible providers cache **automatic prompt prefixes from token 0**. Cache-hit
+  input is billed far below cache-miss input. Qi does not own a local prompt KV; operator “cache hit %” is the
+  provider `cachedInputTokens / inputTokens` ratio.
+- Within one Run, model input is laid out as **stable prefix → append-only conversation → control trailer**.
+  Required recipe blocks, restored-history facts/omission notices, and optional blocks frozen after the first
+  successful compile of the Run form the prefix. Work Plan navigation, Goal contracts, and budget
+  warning/handoff blocks are trailer-only.
+- Trailer bytes are **frozen after first inclusion in the Run** (status/`consumed` updates and mid-Run removal
+  are ignored). Trailer messages use the **user** role so providers that promote `system` messages ahead of the
+  dialogue cannot place live control text into the cached prefix. Live plan/goal state remains available from
+  settled tool results in the conversation.
+- Optional Memory/Skills membership must not flicker solely because remaining budget shrinks later in the same
+  Run. Compaction may still rewrite conversation and intentionally invalidate the prefix.
+- Tool catalog membership/order stays stable for non-handoff Steps; the final reserved handoff Step may clear
+  tools. Provider `usage.cachedInputTokens` projects into SessionView for statusline/diagnostics and does not
+  grant authority or rewrite Session event truth. Statusline `CH%` is **Run-cumulative**
+  `sum(cachedInputTokens)/sum(inputTokens)`, not only the latest Step.
+- Rejected for this stage: Anthropic `cache_control` breakpoints, client-side prompt buffers, and Goal token
+  accounting that discounts cached tokens.
+- Formal Plan Markdown is not a trailer block: accept freezes a revision into Executor Run input
+  (`<accepted-plan>`); `plan_document` create/edit only appends tool results. Goal live counters are trailer-
+  frozen the same way as Work Plan navigation.
+- Required evidence: TurnLoop prefix stable and trailer frozen across `update_plan` status changes; statusline
+  cumulative `CH%`; adapter mapping of DeepSeek/Responses cached fields.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

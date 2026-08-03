@@ -77,6 +77,11 @@ export interface StepView {
     finishReason: "stop" | "actions" | "length";
     text: string;
     reasoning?: string;
+    usage?: {
+      inputTokens: number;
+      outputTokens: number;
+      cachedInputTokens?: number;
+    };
   };
   rejectedActionCalls?: Array<{
     callId: string;
@@ -1682,6 +1687,7 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
         finishReason: event.data.finishReason,
         text: event.data.text,
         ...(event.data.reasoning === undefined ? {} : { reasoning: event.data.reasoning }),
+        ...(event.data.usage === undefined ? {} : { usage: event.data.usage }),
       };
       break;
     }

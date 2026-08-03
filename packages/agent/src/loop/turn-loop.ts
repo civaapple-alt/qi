@@ -13,6 +13,7 @@ import {
   compileContext,
   estimateSerializedTokens,
   type ContextBlock,
+  type ContextBlockStats,
   type TokenEstimator,
 } from "@civaapple/qi-ai/context";
 import { GoalEngine } from "@civaapple/qi-agent/eval";
@@ -345,6 +346,14 @@ export class TurnLoop {
     ];
     const settledExchanges: SettledActionExchange[] = [];
     let finalText = "";
+    /** Optional prefix block IDs included on the first successful compile of this Run. */
+    let frozenOptionalIds: string[] | undefined;
+    /**
+     * Trailer snapshots frozen for this Run. DeepSeek (and similar) may promote `system`
+     * messages ahead of the dialogue; mutating or removing trailer text then busts the
+     * whole conversation cache. Freeze bytes after first inclusion and keep them for the Run.
+     */
+    const frozenTrailerBlocks = new Map<string, ContextBlock>();
 
     for (let stepNumber = 1; stepNumber <= request.maxSteps; stepNumber += 1) {
       if (
@@ -370,15 +379,21 @@ export class TurnLoop {
       const goalBlock = frozenGoalBinding
         ? createGoalContextBlockForView(writer.view, frozenGoalBinding.goalId)
         : undefined;
-      const stepContextBlocks = [
+      // ADR-0034: stable prefix before conversation; control trailer after it.
+      // Trailer uses user role + Run freeze so provider system-prefix promotion cannot
+      // place live Work Plan / Goal counters ahead of the growing dialogue.
+      const prefixBlocks = [
         ...request.contextBlocks,
         ...(history.factsBlock ? [history.factsBlock] : []),
         ...(history.omissionBlock ? [history.omissionBlock] : []),
+      ];
+      const liveTrailerBlocks = [
         ...(workPlanBlock ? [workPlanBlock] : []),
         ...(goalBlock ? [goalBlock] : []),
         ...(budgetWarningStep ? [createBudgetWarningBlock(stepNumber, request.maxSteps)] : []),
         ...(finalHandoffStep ? [createBudgetHandoffBlock(stepNumber, request.maxSteps)] : []),
       ];
+      const trailerBlocks = freezeTrailerBlocks(liveTrailerBlocks, frozenTrailerBlocks);
       const stepId = createId("stp") as StepId;
       writer.append("step.started", { runId, stepId }, { kind: "runtime", id: "qi" });
       const modeTools = toolsForMode(frozenMode, registeredNames);
@@ -387,11 +402,15 @@ export class TurnLoop {
         : modeTools;
       const catalog = finalHandoffStep ? [] : this.#toolRegistry.catalog({ tools: allowlist });
       const toolCatalogTokens = estimateToolCatalog(catalog.map((tool) => tool.model), estimator);
+      const trailer = materializeTrailerBlocks(trailerBlocks, estimator);
 
       let compiled;
       try {
         const pressureThreshold = Math.floor(request.contextBudgetTokens * contextPressureRatio);
-        if (estimateMessages(conversation, estimator) + toolCatalogTokens > pressureThreshold) {
+        if (
+          estimateMessages(conversation, estimator) + toolCatalogTokens + trailer.estimatedTokens
+            > pressureThreshold
+        ) {
           await this.#compactExchanges({
             writer,
             request,
@@ -401,14 +420,26 @@ export class TurnLoop {
             settledExchanges,
             targetTokens: Math.max(
               1,
-              Math.floor(request.contextBudgetTokens * contextPressureTargetRatio) - toolCatalogTokens,
+              Math.floor(request.contextBudgetTokens * contextPressureTargetRatio)
+                - toolCatalogTokens
+                - trailer.estimatedTokens,
             ),
             includeUnconsumed: false,
             reason: "pressure",
           });
         }
+        const compileOptions = {
+          trailerTokens: trailer.estimatedTokens,
+          ...(frozenOptionalIds === undefined ? {} : { pinnedOptionalIds: frozenOptionalIds }),
+        };
         try {
-          compiled = compileTurnContext(request, conversation, toolCatalogTokens, stepContextBlocks);
+          compiled = compileTurnContext(
+            request,
+            conversation,
+            toolCatalogTokens,
+            prefixBlocks,
+            compileOptions,
+          );
         } catch (error) {
           if (!(error instanceof ContextBudgetError)) throw error;
           const compacted = await this.#compactExchanges({
@@ -420,13 +451,26 @@ export class TurnLoop {
             settledExchanges,
             targetTokens: Math.max(
               1,
-              Math.floor(request.contextBudgetTokens * contextPressureTargetRatio) - toolCatalogTokens,
+              Math.floor(request.contextBudgetTokens * contextPressureTargetRatio)
+                - toolCatalogTokens
+                - trailer.estimatedTokens,
             ),
             includeUnconsumed: true,
             reason: "hard-limit",
           });
           if (!compacted) throw error;
-          compiled = compileTurnContext(request, conversation, toolCatalogTokens, stepContextBlocks);
+          compiled = compileTurnContext(
+            request,
+            conversation,
+            toolCatalogTokens,
+            prefixBlocks,
+            compileOptions,
+          );
+        }
+        if (frozenOptionalIds === undefined) {
+          frozenOptionalIds = compiled.included
+            .filter((block) => !block.required)
+            .map((block) => block.id);
         }
         const conversationTokens = estimateMessages(conversation, estimator);
         writer.append(
@@ -440,13 +484,15 @@ export class TurnLoop {
               ...conversation.map((_, index) => index < historyConversation.length
                 ? `history:${index}`
                 : `conversation:${index - historyConversation.length}`),
+              ...trailer.included.map((block) => block.id),
             ],
             omittedBlockIds: [
               ...compiled.omitted.map((block) => block.id),
               ...history.omittedRunIds.map((omittedRunId) => `history:omitted:${omittedRunId}`),
             ],
-            blockStats: compiled.blockStats,
-            estimatedTokens: compiled.estimatedTokens + conversationTokens + toolCatalogTokens,
+            blockStats: mergeBlockStats(compiled.blockStats, trailer.included),
+            estimatedTokens:
+              compiled.estimatedTokens + conversationTokens + toolCatalogTokens + trailer.estimatedTokens,
             budgetTokens: request.contextBudgetTokens,
           },
           { kind: "runtime", id: "context_compiler" },
@@ -495,7 +541,11 @@ export class TurnLoop {
       const requestId = `request-${randomUUID()}`;
       let modelResult: AggregatedModelResult;
       try {
-        const modelInput = redactSensitiveValue([...compiled.messages, ...conversation]);
+        const modelInput = redactSensitiveValue([
+          ...compiled.messages,
+          ...conversation,
+          ...trailer.messages,
+        ]);
         this.#recordRedactions(writer, "model-input", modelInput.redactions, { runId, stepId });
         const materializedMessages = await materializeArtifactImages(
           modelInput.value,
@@ -1647,16 +1697,88 @@ function compileTurnContext(
   conversation: readonly ModelMessage[],
   toolCatalogTokens: number,
   blocks: readonly ContextBlock[] = request.contextBlocks,
+  options?: {
+    pinnedOptionalIds?: readonly string[];
+    trailerTokens?: number;
+  },
 ) {
   const estimator = request.tokenEstimator ?? approximateTokenEstimator;
-  const fixedTokens = estimateMessages(conversation, estimator) + toolCatalogTokens;
+  const trailerTokens = options?.trailerTokens ?? 0;
+  const fixedTokens = estimateMessages(conversation, estimator) + toolCatalogTokens + trailerTokens;
   const remaining = request.contextBudgetTokens - fixedTokens;
   if (remaining <= 0) throw new ContextBudgetError(fixedTokens, request.contextBudgetTokens);
   return compileContext({
     blocks,
     budgetTokens: remaining,
     estimator,
+    ...(options?.pinnedOptionalIds === undefined
+      ? {}
+      : { pinnedOptionalIds: options.pinnedOptionalIds }),
   });
+}
+
+/**
+ * Keep trailer membership/content stable for the Run after first inclusion.
+ * Live updates (Work Plan status, Goal consumed) are ignored; removals are ignored.
+ * Budget warning/handoff may still appear once when their Step arrives (new id).
+ */
+function freezeTrailerBlocks(
+  liveBlocks: readonly ContextBlock[],
+  frozen: Map<string, ContextBlock>,
+): ContextBlock[] {
+  for (const block of liveBlocks) {
+    if (!frozen.has(block.id)) {
+      // User role keeps these after the dialogue even if a provider promotes `system` ahead.
+      frozen.set(block.id, { ...block, role: "user" });
+    }
+  }
+  return [...frozen.values()];
+}
+
+function materializeTrailerBlocks(
+  blocks: readonly ContextBlock[],
+  estimator: TokenEstimator,
+): {
+  messages: ModelMessage[];
+  included: Array<ContextBlock & { estimatedTokens: number }>;
+  estimatedTokens: number;
+} {
+  const included = blocks.map((block) => {
+    const estimatedTokens = estimator.estimate(block.content);
+    if (!Number.isSafeInteger(estimatedTokens) || estimatedTokens <= 0) {
+      throw new TypeError(`Token estimator returned an invalid value for Context block ${block.id}`);
+    }
+    return { ...block, estimatedTokens };
+  });
+  return {
+    messages: included.map((block) => ({
+      role: block.role,
+      content: [{ type: "text" as const, text: block.content }],
+    })),
+    included,
+    estimatedTokens: included.reduce((total, block) => total + block.estimatedTokens, 0),
+  };
+}
+
+function mergeBlockStats(
+  base: ContextBlockStats[],
+  trailer: ReadonlyArray<ContextBlock & { estimatedTokens: number }>,
+): ContextBlockStats[] {
+  if (trailer.length === 0) return base;
+  const byKind = new Map(base.map((stats) => [stats.kind, { ...stats }]));
+  for (const block of trailer) {
+    const current = byKind.get(block.kind) ?? {
+      kind: block.kind,
+      includedCount: 0,
+      includedEstimatedTokens: 0,
+      omittedCount: 0,
+      omittedEstimatedTokens: 0,
+    };
+    current.includedCount += 1;
+    current.includedEstimatedTokens += block.estimatedTokens;
+    byKind.set(block.kind, current);
+  }
+  return [...byKind.values()];
 }
 
 function createBudgetWarningBlock(stepNumber: number, maxSteps: number): ContextBlock {

@@ -118,6 +118,44 @@ test("Chat Completions adapter streams text and releases tool calls only after f
   assert.equal(events[3].finishReason, "actions");
 });
 
+test("Chat Completions maps DeepSeek prompt_cache_hit_tokens", async () => {
+  const client = {
+    chat: {
+      completions: {
+        create() {
+          return asyncEvents([{
+            id: "chatcmpl_cache",
+            choices: [{ index: 0, delta: { content: "ok" }, finish_reason: null }],
+          }, {
+            id: "chatcmpl_cache",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 2,
+              total_tokens: 102,
+              prompt_cache_hit_tokens: 80,
+            },
+          }]);
+        },
+      },
+    },
+  };
+  const port = new OpenAIChatCompletionsModelPort(client, { providerNames: ["deepseek"] });
+  const events = [];
+  for await (const event of port.stream(request({
+    model: { provider: "deepseek", model: "deepseek-v4-pro" },
+    tools: [],
+  }))) {
+    events.push(event);
+  }
+  assert.deepEqual(events.find((event) => event.type === "usage"), {
+    type: "usage",
+    inputTokens: 100,
+    outputTokens: 2,
+    cachedInputTokens: 80,
+  });
+});
+
 test("Chat Completions preserves the assembled Qi block role and order", async () => {
   let captured;
   const client = {

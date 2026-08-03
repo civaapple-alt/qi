@@ -108,6 +108,11 @@ and the model may receive an optional Runtime block with only `olderTurnsOmitted
 remains. Agent Runs with
 an unfinished Session Work Plan also receive an optional navigation ContextBlock listing `workPlanId`,
 `revision`, and item `workItemId` / `step` / `status` — navigation handles, not completion evidence.
+That Work Plan block (and Goal / budget warning blocks) is placed in a **user-role control trailer after** the
+append-only conversation and is **frozen for the Run** after first inclusion, so provider prompt-cache prefixes
+stay stable across `update_plan` / Goal `consumed` updates
+([ADR 0034](../../../design/decisions.md#adr-0034-keep-provider-prompt-cache-prefixes-stable-within-a-run)).
+Accepted Formal Plan Markdown is bound into Executor Run input, not this trailer.
 
 Formal Plan acceptance still starts the Executor with `historyBudgetTokens: 0` and the accepted Markdown
 envelope only; planning conversation is never restored into that Run

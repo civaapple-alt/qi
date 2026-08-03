@@ -372,11 +372,12 @@ function toActionEvent(item: ResponseFunctionToolCall): ModelEvent {
 function toUsageEvent(response: Response): ModelEvent {
   const usage = response.usage;
   if (!usage) throw new TypeError("Response has no usage information");
+  const cached = usage.input_tokens_details?.cached_tokens;
   return {
     type: "usage",
     inputTokens: usage.input_tokens,
     outputTokens: usage.output_tokens,
-    cachedInputTokens: usage.input_tokens_details.cached_tokens,
+    ...(typeof cached === "number" ? { cachedInputTokens: cached } : {}),
   };
 }
 

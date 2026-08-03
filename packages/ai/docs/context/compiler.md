@@ -16,11 +16,14 @@ selection semantics.
 
 1. Reject duplicate block IDs.
 2. Estimate every block with the same estimator.
-3. Include all required blocks or throw `ContextBudgetError`.
-4. Order optional blocks deterministically by policy.
+3. Include all required blocks and any `pinnedOptionalIds` that are present, or throw `ContextBudgetError`.
+4. Order remaining optional blocks deterministically by policy.
 5. Include optional blocks while budget remains.
 6. Return included blocks, omitted blocks, total estimated cost, and per-kind included/omitted count/token
    aggregates.
+
+`pinnedOptionalIds` supports Run-scoped freeze so optional Memory/Skills membership does not flicker solely
+because remaining budget shrinks on a later Step (ADR-0034).
 
 ## Integration rules
 
@@ -29,8 +32,10 @@ selection semantics.
 - Skill and MCP details remain progressively disclosed.
 - Provider-specific token counting can implement `TokenEstimator` without changing selection semantics.
 - A Turn integration must use the same estimator for ContextBlocks, portable messages, and advertised Tool
-  schemas. It reserves current input, required control/policy, and Tool schemas before selecting whole restored
-  turns and optional blocks.
+  schemas. It reserves current input, required control/policy, Tool schemas, and any control trailer before
+  selecting whole restored turns and optional prefix blocks. Work Plan / Goal / budget control belong in the
+  TurnLoop trailer (outside this compiler's optional pick), not as mid-prefix system text that rewrites each Step
+  (ADR-0034).
 - Runtime-owned blocks are allowlisted disclosure views, not serialized projections. Their caller must define the
   model decision being supported, use the least precise bounded value sufficient for it, and omit internal
   Session/Run/Step/Action IDs and unrelated telemetry unless the owning ADR explicitly requires one.

@@ -31,8 +31,9 @@ Reusable Qi-specific terminal presentation and control components built on
   expose bounded process failure evidence instead of hiding it inside the ToolFailure envelope.
 - Project failed `git` cards with the full request (`git status · ref HEAD`, `git diff · maxCount 5`) and the
   validation message, not only `INVALID_GIT_ARGUMENT`.
-- Include effective thinking effort on the statusline between model and context % when launch info supplies it,
-  and the selected model's wire API (`responses` / `chat.completions`) when launch info supplies it.
+- Include effective thinking effort and the selected model's wire API (`responses` / `chat.completions`) on the
+  statusline when launch info supplies them, and show Run-cumulative provider prompt-cache hit rate as `CH%`
+  (`sum(cachedInputTokens)/sum(inputTokens)`). `/context` also shows the latest Step's cache line.
 - For indeterminate Actions, surface the durable settlement reason (and reconciliation hint) on the tool card
   and enrich parked-run handoff text beyond the generic "settlement could not be confirmed" phrase.
 - Provide reusable composer, follow-up queue, selection/form/scroll panels, themes, and layout helpers.
