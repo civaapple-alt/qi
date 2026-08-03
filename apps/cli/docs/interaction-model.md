@@ -74,10 +74,13 @@ failure/cancellation notices do not time out; they remain until the operator sta
 the Runtime explicitly clears the outcome.
 
 `/settings` opens a multi-level panel stack (Mode, Permissions, Shell, Step budget, Per-Step Action limit,
-Providers, Config, Context, Theme, Language, Timeline density). Density changes are local presentation state;
-only an explicit “save user default” choice writes `[ui].timeline_density` to user config. Step budget persists
-`max_steps` to user config and hot-applies on the next Run; `/max-steps` opens the same panel. Per-Step Action
-limit persists `max_actions_per_step` (1–32, default 6); `/max-actions-per-step` opens the same panel.
+Subagent / delegate, Providers, Config, Context, Theme, Language, Timeline density). Density changes are local
+presentation state; only an explicit “save user default” choice writes `[ui].timeline_density` to user config.
+Step budget persists `max_steps` to user config and hot-applies on the next Run; `/max-steps` opens the same
+panel. Per-Step Action limit persists `max_actions_per_step` (1–32, default 6); `/max-actions-per-step` opens
+the same panel. Subagent / delegate persists `[delegate]` (`wall_time_ms` default 5m, `max_steps_percent` /
+`context_tokens_percent` default 50%); `/subagent` (alias `/delegate`) opens the same hub and shows fixed batch
+max 4 and depth 1.
 `/providers` and empty `/login` open the provider list; selecting a provider offers API-key form or Kimi device
 login without writing secrets into Session events or TOML. Esc pops one panel level; an empty stack restores the
 composer.
@@ -108,8 +111,8 @@ Provider login details:
   `/login kimi device model <id> effort <level> context <tokens>`.
 
 Primary slash commands are intentionally few: overlapping inspect entries live under `/settings`, mount
-operations under `/mounts`, capability grants under `/permissions`, skill/task management under `/skills` and
-`/tasks`, Session history under `/runs` (height-paged, bounded type-to-search selection; no `/run N` style selectors), and Workspace
+operations under `/mounts`, capability grants under `/permissions`, skill/Job/Subagent management under `/skills`,
+`/jobs`, and `/tasks`, Session history under `/runs` (height-paged, bounded type-to-search selection; no `/run N` style selectors), and Workspace
 Session resume under `/sessions` (about 3–5 multi-line Session cards visible by default, capped at 5; ↑↓
 scrolls the full list). `/model` reconfigures provider, model, thinking effort, context window, and max output
 tokens (output reserve) without re-login (scope chosen in the panel). Account save may write
@@ -197,12 +200,20 @@ every column useful, the renderer switches to a per-row vertical field layout so
 - Consecutive same-Step read-only discovery Actions (`read/list/tree/find/search/git`) settle as
   `Explored N actions`. Expansion and the History Center preserve every durable child. Any failed, denied,
   cancelled, or indeterminate child expands the group automatically.
-- Delegate: parent timeline shows a Subagents progress block (`Running` / `Finished` per depth-1 delegation) with
-  child context tokens on each Subagent row; the sticky Running strip keeps parent-agent tokens only
-  (`waiting on subagent` while `delegate` is in flight). Child transcripts stay in the child Session
-  (`runtime.childView` / `/runs` → Agents). Inspect panels (`/help`, …) dismiss with Esc and must not cancel the parent
-  Run or in-flight Subagents. The UI never invents parallel fan-out beyond durable running delegations
-  (Plan Subagents remain serial).
+- Delegate: parent timeline shows a Tasks progress block (`Running` / `Finished` per depth-1 delegation) with
+  child context tokens on each row; the sticky Running strip keeps parent-agent tokens only
+  (`waiting on subagent` / `waiting on N subagents` while `delegate` is in flight). Child transcripts stay in the
+  child Session (`runtime.childView` / `/tasks` / `/runs` → Agents). Inspect panels (`/help`, …) dismiss with Esc
+  and must not cancel the parent Run or in-flight Subagents. Plan may fan out up to four durable depth-1 research
+  delegations in one Step (`delegate` `tasks[]` or concurrent read Actions); the UI only lists rows that exist as
+  `delegation.created` facts ([ADR-0035](../../../design/decisions.md#adr-0035-plan-parallel-depth-1-research-and-jobstasks-operator-surfaces)).
+  Children get explore tools plus `fetch`/`web_map` only when the parent has network; budgets default to half the
+  parent context/max-steps with a 5-minute wall clock (exposed in the `delegate` tool description and child brief
+  Constraints so parents size each task to fit). Return path: short `summary`/`summaryRef` plus full `resultRef`;
+  parents use `artifact_get` (not workspace `read`) for Artifact refs. The timeline Tasks strip shows counts and
+  running rows; `/tasks` holds the full list. Child prompts are Cursor-style briefs (objective + Focus +
+  Return + Constraints); `delegate` may supply `focus[]` / `returns[]` / `constraints[]`, otherwise research
+  defaults fill those sections. `/tasks` detail shows the full brief from the child Run input.
 - Legacy Plan Todo: historical item revisions still project progress and `/next`; Formal Plans never derive Todo
   from Markdown sections.
 - Network, Skill, Artifact, and ProcessTask Actions use separate compact card grammars. One card changes lifecycle
@@ -229,16 +240,18 @@ while a Run is active, `ctrl+c to stop|quit` on the right) with a **static** rev
 letter after `→` (e.g. `A` in Add); the terminal hardware cursor stays hidden so it does not blink as a second
 vertical bar while typing. A fixed two-line
 statusline under the editor reports model, thinking effort (when the active model advertises one), context %,
-changed files, active ProcessTask count, mode, and workspace.
+changed files, active Job count, mode, and workspace.
 
 Finite `shell` Actions wait for exit. Long-lived servers and watchers require the separate `background`
-capability and `task` tool. `task.started`, `task.stop.requested`, `task.exited`, and `task.lost` make ownership and
-recovery durable while output remains a bounded live/log channel. `/tasks` opens an interactive list: Enter
-stops the selected running task, while terminal tasks remain visible and disabled. `/tasks stop <N|ID>` is the
-non-interactive equivalent. Stop waits for process-tree exit and escalates after a bounded graceful wait; it
-reports `lost` rather than claiming success if exit still cannot be confirmed. Tasks have a hard expiry and
-runtime-owned tasks stop on TUI exit. See
-[ADR 0006](../../../design/decisions.md#adr-0006-represent-long-lived-processes-as-bounded-processtasks).
+capability and `task` tool (operator surface: **Jobs**). `task.started`, `task.stop.requested`, `task.exited`, and
+`task.lost` make ownership and recovery durable while output remains a bounded live/log channel. `/jobs` opens an
+interactive list: Enter stops the selected running Job, while terminal Jobs remain visible and disabled.
+`/jobs stop <N|ID>` is the non-interactive equivalent. `/tasks` tracks depth-1 Subagent research for the selected
+Run (not ProcessTasks). Stop waits for process-tree exit and escalates after a bounded graceful wait; it reports
+`lost` rather than claiming success if exit still cannot be confirmed. Jobs have a hard expiry and runtime-owned
+Jobs stop on TUI exit. See
+[ADR 0006](../../../design/decisions.md#adr-0006-represent-long-lived-processes-as-bounded-processtasks) and
+[ADR-0035](../../../design/decisions.md#adr-0035-plan-parallel-depth-1-research-and-jobstasks-operator-surfaces).
 
 The Kernel still records response-only terminal Runs as `run.completed` with `completionKind: response`. The TUI
 renders this as `responded`, not `completed`; `verified` is reserved for evidence-backed completion.

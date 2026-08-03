@@ -14,11 +14,20 @@ import { SHELL_PROFILE_IDS, type ShellProfileId } from "@civaapple/qi-node/tools
 import type { ProcessTaskView } from "@civaapple/qi-agent/kernel";
 import type { AuthSession } from "../auth.js";
 import {
+  DELEGATE_BATCH_MAX,
+  DELEGATE_DEPTH,
+  DELEGATE_PERCENT_PRESETS,
+  DELEGATE_WALL_TIME_PRESETS_MS,
+  DEFAULT_DELEGATE_CONTEXT_TOKENS_PERCENT,
+  DEFAULT_DELEGATE_MAX_STEPS_PERCENT,
+  DEFAULT_DELEGATE_WALL_TIME_MS,
   defaultUserConfigPath,
   loadUserConfig,
   type CompatibleEndpoint,
   type QiCapabilityConfig,
+  type QiDelegateConfig,
   type QiShellConfig,
+  type ResolvedDelegateConfig,
 } from "../config.js";
 import { t, type Locale, type MessageKey } from "../i18n.js";
 import type { TuiPresenter } from "../presenter.js";
@@ -117,7 +126,7 @@ export interface PanelFlowContext {
       contextWindowTokens?: number;
     },
   ) => void;
-  readonly openInspect: (panel: "overview" | "config" | "context" | "runs" | "steps" | "actions" | "agents" | "skills" | "tasks" | "providers", title: string) => void;
+  readonly openInspect: (panel: "overview" | "config" | "context" | "runs" | "steps" | "actions" | "agents" | "skills" | "jobs" | "tasks" | "providers", title: string) => void;
   readonly openHistoryList: (kind: "runs" | "steps" | "actions" | "agents") => void;
   readonly addMount: (path: string) => void;
   readonly removeMount: (mountId: string) => void;
@@ -128,6 +137,8 @@ export interface PanelFlowContext {
   readonly saveMaxSteps: (maxSteps: number) => void;
   readonly currentMaxActionsPerStep: () => number;
   readonly saveMaxActionsPerStep: (maxActionsPerStep: number) => void;
+  readonly currentDelegateConfig: () => ResolvedDelegateConfig;
+  readonly saveDelegateConfig: (patch: QiDelegateConfig) => void;
   readonly applyVerificationSetup: (selected: readonly VerificationCandidate[]) => void;
   readonly installSkill: (source: string, scope: "user" | "workspace") => void;
   readonly listTasks: () => ProcessTaskView[];
@@ -179,6 +190,11 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
         label: t(locale, "settings.max-actions-per-step"),
         description: t(locale, "settings.max-actions-per-step.desc"),
       },
+      {
+        id: "subagent",
+        label: t(locale, "settings.subagent"),
+        description: t(locale, "settings.subagent.desc"),
+      },
       { id: "providers", label: t(locale, "settings.providers"), description: t(locale, "settings.providers.desc") },
       { id: "config", label: t(locale, "settings.config"), description: t(locale, "settings.config.desc") },
       { id: "context", label: t(locale, "settings.context"), description: t(locale, "settings.context.desc") },
@@ -210,6 +226,10 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
       }
       if (item.id === "max-actions-per-step") {
         openMaxActionsPerStepPanel(ctx);
+        return;
+      }
+      if (item.id === "subagent") {
+        openSubagentSettingsPanel(ctx);
         return;
       }
       if (item.id === "providers") {
@@ -883,6 +903,173 @@ export function openMaxStepsPanel(ctx: PanelFlowContext): void {
   }));
 }
 
+export function openSubagentSettingsPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const config = ctx.currentDelegateConfig();
+  const enabled = ctx.effectiveCapabilities().includes("delegate");
+  const wallLabel = formatDelegateWall(config.wallTimeMs, locale);
+  const defaultWall = formatDelegateWall(DEFAULT_DELEGATE_WALL_TIME_MS, locale);
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "subagent.title"),
+    hints: t(locale, "settings.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items: [
+      {
+        id: "enabled",
+        label: t(locale, "subagent.enabled"),
+        description: enabled
+          ? t(locale, "subagent.enabled.on")
+          : t(locale, "subagent.enabled.off"),
+        current: enabled,
+      },
+      {
+        id: "wall",
+        label: t(locale, "subagent.wall"),
+        description: t(locale, "subagent.wall.desc", {
+          value: wallLabel,
+          default: defaultWall,
+        }),
+      },
+      {
+        id: "max-steps-percent",
+        label: t(locale, "subagent.max_steps_percent"),
+        description: t(locale, "subagent.max_steps_percent.desc", {
+          value: String(config.maxStepsPercent),
+          default: String(DEFAULT_DELEGATE_MAX_STEPS_PERCENT),
+        }),
+      },
+      {
+        id: "context-percent",
+        label: t(locale, "subagent.context_tokens_percent"),
+        description: t(locale, "subagent.context_tokens_percent.desc", {
+          value: String(config.contextTokensPercent),
+          default: String(DEFAULT_DELEGATE_CONTEXT_TOKENS_PERCENT),
+        }),
+      },
+      {
+        id: "batch-max",
+        label: t(locale, "subagent.batch_max"),
+        description: t(locale, "subagent.batch_max.desc", { value: String(DELEGATE_BATCH_MAX) }),
+      },
+      {
+        id: "depth",
+        label: t(locale, "subagent.depth"),
+        description: t(locale, "subagent.depth.desc", { value: String(DELEGATE_DEPTH) }),
+      },
+      {
+        id: "tasks",
+        label: t(locale, "subagent.open_tasks"),
+        description: t(locale, "subagent.open_tasks.desc"),
+      },
+    ],
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      if (item.id === "enabled") {
+        openPermissionsPanel(ctx);
+        return;
+      }
+      if (item.id === "wall") {
+        openSubagentWallPanel(ctx);
+        return;
+      }
+      if (item.id === "max-steps-percent") {
+        openSubagentPercentPanel(ctx, "maxStepsPercent");
+        return;
+      }
+      if (item.id === "context-percent") {
+        openSubagentPercentPanel(ctx, "contextTokensPercent");
+        return;
+      }
+      if (item.id === "tasks") {
+        ctx.panels.closeAll();
+        openSubagentTasksHubPanel(ctx);
+        return;
+      }
+      // Fixed product constants — keep the hub open (no stack push).
+    },
+  }));
+}
+
+function formatDelegateWall(wallTimeMs: number, locale: Locale): string {
+  const minutes = Math.max(1, Math.round(wallTimeMs / 60_000));
+  return locale === "zh" ? `${minutes} 分钟` : `${minutes}m`;
+}
+
+export function openSubagentWallPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const current = ctx.currentDelegateConfig().wallTimeMs;
+  const presets = (DELEGATE_WALL_TIME_PRESETS_MS as readonly number[]).includes(current)
+    ? [...DELEGATE_WALL_TIME_PRESETS_MS]
+    : [...DELEGATE_WALL_TIME_PRESETS_MS, current].sort((left, right) => left - right);
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "subagent.wall.title"),
+    hints: t(locale, "settings.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items: presets.map((ms) => ({
+      id: String(ms),
+      label: formatDelegateWall(ms, locale),
+      description: ms === DEFAULT_DELEGATE_WALL_TIME_MS
+        ? (ms === current
+          ? t(locale, "subagent.value.current_default")
+          : t(locale, "subagent.value.default"))
+        : (ms === current
+          ? t(locale, "subagent.value.current")
+          : t(locale, "subagent.wall.item_desc")),
+      current: ms === current,
+    })),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      ctx.panels.closeAll();
+      ctx.saveDelegateConfig({ wallTimeMs: Number(item.id) });
+    },
+  }));
+}
+
+export function openSubagentPercentPanel(
+  ctx: PanelFlowContext,
+  field: "maxStepsPercent" | "contextTokensPercent",
+): void {
+  const locale = ctx.locale();
+  const config = ctx.currentDelegateConfig();
+  const current = config[field];
+  const defaultValue = field === "maxStepsPercent"
+    ? DEFAULT_DELEGATE_MAX_STEPS_PERCENT
+    : DEFAULT_DELEGATE_CONTEXT_TOKENS_PERCENT;
+  const titleKey = field === "maxStepsPercent"
+    ? "subagent.max_steps_percent.title"
+    : "subagent.context_tokens_percent.title";
+  const presets = (DELEGATE_PERCENT_PRESETS as readonly number[]).includes(current)
+    ? [...DELEGATE_PERCENT_PRESETS]
+    : [...DELEGATE_PERCENT_PRESETS, current].sort((left, right) => left - right);
+  ctx.panels.push(new ListPanel({
+    title: t(locale, titleKey),
+    hints: t(locale, "settings.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items: presets.map((percent) => ({
+      id: String(percent),
+      label: `${percent}%`,
+      description: percent === defaultValue
+        ? (percent === current
+          ? t(locale, "subagent.value.current_default")
+          : t(locale, "subagent.value.default"))
+        : (percent === current
+          ? t(locale, "subagent.value.current")
+          : t(locale, "subagent.percent.item_desc")),
+      current: percent === current,
+    })),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      ctx.panels.closeAll();
+      const value = Number(item.id);
+      ctx.saveDelegateConfig(
+        field === "maxStepsPercent"
+          ? { maxStepsPercent: value }
+          : { contextTokensPercent: value },
+      );
+    },
+  }));
+}
+
 export function openMaxActionsPerStepPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   const current = ctx.currentMaxActionsPerStep();
@@ -1095,22 +1282,23 @@ function openSkillInstallForm(ctx: PanelFlowContext, scope: "user" | "workspace"
   }));
 }
 
-export function openTasksHubPanel(ctx: PanelFlowContext): void {
+/** Background ProcessTasks (operator surface: Jobs). */
+export function openJobsHubPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
-  const tasks = ctx.listTasks().sort((left, right) => {
+  const jobs = ctx.listTasks().sort((left, right) => {
     const leftActive = left.status === "running" ? 0 : left.status === "stopping" ? 1 : 2;
     const rightActive = right.status === "running" ? 0 : right.status === "stopping" ? 1 : 2;
     return leftActive - rightActive || right.startedAt.localeCompare(left.startedAt);
   });
-  if (tasks.length === 0) {
-    ctx.presenter.setNotice(t(locale, "tasks.empty"));
+  if (jobs.length === 0) {
+    ctx.presenter.setNotice(t(locale, "jobs.empty"));
     ctx.render();
     return;
   }
   ctx.panels.push(new ListPanel({
-    title: t(locale, "tasks.title"),
-    hints: t(locale, "tasks.hints"),
-    items: tasks.map((task) => ({
+    title: t(locale, "jobs.title"),
+    hints: t(locale, "jobs.hints"),
+    items: jobs.map((task) => ({
       id: task.taskId,
       label: `${task.status === "running" ? "●" : task.status === "stopping" ? "◐" : "○"} ${[task.command, ...task.args].join(" ")}`,
       description: `${task.status} · pid ${task.pid} · cwd ${task.workdir}${task.terminalReason ? ` · ${task.terminalReason}` : ""}`,
@@ -1121,6 +1309,39 @@ export function openTasksHubPanel(ctx: PanelFlowContext): void {
     onSelect: (item) => {
       ctx.panels.closeAll();
       ctx.stopTask(item.id);
+    },
+  }));
+}
+
+/** @deprecated Use openJobsHubPanel — ProcessTasks moved to /jobs (ADR-0035). */
+export function openTasksHubPanel(ctx: PanelFlowContext): void {
+  openJobsHubPanel(ctx);
+}
+
+/** Subagent research Tasks for the selected/current Run. */
+export function openSubagentTasksHubPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const items = ctx.presenter.historyAgentItems();
+  if (items.length === 0) {
+    ctx.presenter.setNotice(t(locale, "tasks.empty"));
+    ctx.render();
+    return;
+  }
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "tasks.title"),
+    hints: t(locale, "tasks.hints"),
+    items: items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      description: item.description,
+      current: item.current,
+    })),
+    maxVisible: maxVisible(ctx.terminalRows),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      ctx.panels.closeAll();
+      ctx.presenter.selectDelegation(item.id);
+      ctx.openInspect("tasks", "/tasks");
     },
   }));
 }

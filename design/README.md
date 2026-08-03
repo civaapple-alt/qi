@@ -80,8 +80,10 @@ then `packages/node/README.md` (`./media`) and the provider adapter tests.
 ### Extensions
 
 1. [system-design §8](system-design.md#8-extensions-skills-mcp-codeact-graph-delegation-scheduling-and-introspection)
-2. `packages/agent/docs/` for portable contracts or `packages/node/docs/` for Node adapters
-3. the matching section in [decisions.md](decisions.md)
+2. [ADR-0008](decisions.md#adr-0008-limit-subagent-delegation-to-one-isolated-layer) and
+   [ADR-0035](decisions.md#adr-0035-plan-parallel-depth-1-research-and-jobstasks-operator-surfaces) for Plan fan-out /
+   Jobs vs Tasks
+3. `packages/agent/docs/` for portable contracts or `packages/node/docs/` for Node adapters
 4. the package's focused tests
 
 ## Sources of truth

@@ -14,6 +14,7 @@ import {
   ToolFailure,
   ToolInputError,
   ToolRegistry,
+  artifactGetTool,
   artifactTool,
   createVerifyTool,
   editTool,
@@ -69,7 +70,17 @@ function grant(broker, overrides = {}) {
     subject: "agent_main",
     tools: ["*"],
     effects: ["read", "write", "execute"],
-    resources: ["file:**", "tree:**", "vcs:**", "host-process:**", "host-workspace:**", "shell-profile:**", "artifact-store:**", "verification:**"],
+    resources: [
+      "file:**",
+      "tree:**",
+      "vcs:**",
+      "host-process:**",
+      "host-workspace:**",
+      "shell-profile:**",
+      "artifact-store:**",
+      "artifact:**",
+      "verification:**",
+    ],
     expiresAt: "2099-01-01T00:00:00.000Z",
     ...overrides,
   });
@@ -166,6 +177,43 @@ test("Capability Broker denies by default and Registry never enters the executor
     await assert.rejects(
       registry.execute("read", identity(registry, "read"), { path: "secret.txt" }, context(root, artifactStore)),
       (error) => error instanceof AuthorityDeniedError,
+    );
+  });
+});
+
+test("artifact_get reads Artifact store content; read rejects artifact:// paths", async () => {
+  await withWorkspace(async ({ root, artifactStore }) => {
+    const broker = new InMemoryCapabilityBroker();
+    grant(broker);
+    const registry = new ToolRegistry(broker);
+    registry.register("read", readTool);
+    registry.register("artifact", artifactTool);
+    registry.register("artifact_get", artifactGetTool);
+
+    const stored = await registry.execute(
+      "artifact",
+      identity(registry, "artifact"),
+      { content: "delegate-full-result", mediaType: "text/plain; charset=utf-8" },
+      context(root, artifactStore, "act_artifact_put"),
+    );
+    const got = await registry.execute(
+      "artifact_get",
+      identity(registry, "artifact_get"),
+      { ref: stored.output.ref },
+      context(root, artifactStore, "act_artifact_get"),
+    );
+    assert.equal(got.output.content, "delegate-full-result");
+    assert.equal(got.output.truncated, false);
+    assert.equal(got.output.ref, stored.output.ref);
+
+    await assert.rejects(
+      registry.execute(
+        "read",
+        identity(registry, "read"),
+        { path: stored.output.ref },
+        context(root, artifactStore, "act_read_artifact"),
+      ),
+      (error) => error instanceof ToolFailure && error.code === "ARTIFACT_REF_NOT_WORKSPACE_PATH",
     );
   });
 });

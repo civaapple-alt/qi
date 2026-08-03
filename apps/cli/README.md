@@ -72,7 +72,8 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | Command | Purpose |
 | --- | --- |
 | `/help [command\|advanced]` | Shortcuts + common commands; `advanced` lists aliases |
-| `/settings` | Settings hub: mode, **permissions**, **shell**, **Step budget**, providers, config, context, theme, language, **timeline density** |
+| `/settings` | Settings hub: mode, **permissions**, **shell**, **Step budget**, **Per-Step Action limit**, **Subagent / delegate**, providers, config, context, theme, language, **timeline density** |
+| `/subagent` | Subagent / `delegate` budget hub (wall, maxSteps/context %, fixed batch/depth); writes `[delegate]` to user config |
 | `/memory [list\|remember\|accept\|correct\|forget\|promote\|pin\|unpin]` | Inspect actual Run injection, pending candidates, Project/User boundaries and provenance; explicitly manage the full Memory lifecycle |
 | `/goal [prompt]` | Session-local 追寻: `/goal <objective>` creates and starts; bare `/goal` opens status + actions (Continue starts immediately; Continue with guidance… and Accept notes are optional / Pause / Resume / Accept / Re-evaluate… / Cancel). Status shows Goal progress and **Evidence Ledger** gaps (diagnostics ≠ ledger). Accept/pass may leave gaps open; Re-evaluate requires rationale only for fail/unknown. Default Goal `attempts` equals current `maxSteps`; only Steps with non-read Actions consume attempts. Formal Plan / Work Plan are orthogonal (`/plan` / `update_plan`); neither auto-creates from Goal. Session resume demotes active Goals to paused |
 | `/mode [ask\|plan\|agent]` | Show or switch Session mode (`Shift+Tab` cycles when idle) |
@@ -81,7 +82,8 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
 | `/skills` | Skills hub: list discovered Skills, or Install → scope → name/path form |
-| `/tasks [stop …]` | Interactive background-task list; select a running task and press Enter to stop it |
+| `/tasks` | List depth-1 Subagent research Tasks for the selected Run; Enter opens tracking |
+| `/jobs [stop …]` | Interactive background Job list; select a running Job and press Enter to stop it |
 | `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path form) / unmount (picker); slash args still work |
 | `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `policy.toml`) |
 | `/shell` | Select global shell profiles (`direct` / `pwsh` / `cmd` / `bash`; applies immediately and writes `$QI_HOME/config.toml`) |
@@ -103,8 +105,8 @@ send-now (promote to front), Esc to cancel; after the Run ends, Qi starts the ne
 Slash commands and `/steer` are unchanged.
 
 Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, `/max-steps`,
-`/max-actions-per-step`, `/providers`, `/add-dir`, `/unmount`, `/skill`, `/task`, `/exit`, plus unimplemented
-`/coord` `/work` `/gate` `/extensions`.
+`/max-actions-per-step`, `/subagent`, `/delegate`, `/providers`, `/add-dir`, `/unmount`, `/skill`, `/task`,
+`/exit`, plus unimplemented `/coord` `/work` `/gate` `/extensions`.
 Typing `/steps`, `/actions`, or `/agents` redirects to the `/runs` hub with a notice to use the hub instead.
 
 UI language defaults to Chinese. Set `language = "zh"` or `language = "en"` in `~/.qi/config.toml`, or
@@ -141,7 +143,7 @@ Agent replies (narration before tools when the model requested Actions), and a l
 `rg` / `fd`; when missing, a dim Tip / 提示 recommends installing them (Node fallback remains active). After
 `开始实现`, Plan Todo
 (`✔` / `◐` / `○`) appears in the chat transcript (not sticky above the composer). Primary slash inspect commands
-(`/settings`, `/plan`, `/skills`, `/tasks`, `/mounts`, `/permissions`, `/shell`, `/runs`, `/sessions`, `/help`) open temporary panels over the
+(`/settings`, `/plan`, `/skills`, `/tasks`, `/jobs`, `/mounts`, `/permissions`, `/shell`, `/runs`, `/sessions`, `/help`) open temporary panels over the
 composer (Esc closes / pops a level); they do not write Session events or append into the chat timeline, and
 dismissing them does not cancel an active Run or Subagent. Unknown slash commands keep the chat open and show a
 short notice (they do not open `/help`). When a Run fails with `INVALID_MODEL_ACTION` because the model called an
@@ -278,21 +280,36 @@ written. Applying the selection writes `.qi/qi.verify.json` through the same val
 inference and, when Verify authority is already granted, immediately refreshes the live `verify` tool.
 
 Long-lived commands do not use an implicit detached shell mode. With a separate `background` capability, the
-model receives a `task` tool for bounded servers and watchers. Each ProcessTask links to its originating
-Session/Run/Step/Action, has a hard expiry, stores a redacted private log under `dataRoot/tasks`, survives Run
-completion as visible state, and can be stopped by selecting it in `/tasks` and pressing Enter or through
-`/tasks stop <N|ID>`. Stop waits for confirmed process-tree exit and escalates after a bounded graceful wait;
+model receives a `task` tool for bounded servers and watchers (operator surface: **Jobs**). Each ProcessTask links
+to its originating Session/Run/Step/Action, has a hard expiry, stores a redacted private log under
+`dataRoot/tasks`, survives Run completion as visible state, and can be stopped by selecting it in `/jobs` and
+pressing Enter or through `/jobs stop <N|ID>`. `/tasks` tracks Subagent research, not background processes.
+Stop waits for confirmed process-tree exit and escalates after a bounded graceful wait;
 terminal tasks remain visible but cannot be selected again. Restarted runtimes mark unowned live-task
 records `lost`; normal TUI shutdown stops tasks it owns.
 
 With a separate `delegate` capability (`--allow-delegate` or `capabilities.delegate`), the model may call
-`delegate` for a depth-1 isolated Subagent. The child Session receives only an objective plus allowlisted Artifact
-context, never the parent transcript, and cannot delegate further. The parent tool result is a short summary plus
-Artifact refs. The sticky Running strip shows parent tokens (`waiting on subagent`); child token counts appear on the Subagents
-transcript block. Subagent summaries return as `artifact://…` refs stored under `dataRoot/artifacts/` (not in
-SQLite). Esc/`ctrl+c` on `/help` and other inspect panels only dismiss the panel — they do not cancel the parent
-Run or in-flight Subagent. Unsettled delegations cancel on Session recovery before the parent Run parks
-([ADR 0008](../../design/decisions.md#adr-0008-limit-subagent-delegation-to-one-isolated-layer)).
+`delegate` for a depth-1 isolated Subagent (Plan may fan out `tasks[]` 1–4). The child Session receives a
+Cursor-style brief (objective + Focus / Return / Constraints) plus allowlisted Artifact `contextRefs`, never the
+parent transcript, and cannot delegate further. Defaults: child `maxSteps` / context at 50% of the parent Run,
+5-minute wall (`maxUses = childMaxSteps × maxActionsPerStep`). Override via `/settings` → **Subagent** or
+`/subagent` (persists `[delegate]` in `~/.qi/config.toml`):
+
+```toml
+[delegate]
+wall_time_ms = 300000
+max_steps_percent = 50
+context_tokens_percent = 50
+```
+
+The parent tool result is a short `summary` / `summaryRef` preview plus a full `resultRef`. Use read-effect
+`artifact_get` for Artifact store content; workspace `read` rejects `artifact://` paths. The timeline Tasks strip
+shows counts and running rows; `/tasks` holds the full list and Brief. The sticky Running strip shows parent
+tokens (`waiting on subagent`); child token counts appear on running Task rows. Esc/`ctrl+c` on `/help` and other
+inspect panels only dismiss the panel — they do not cancel the parent Run or in-flight Subagent. Unsettled
+delegations cancel on Session recovery before the parent Run parks
+([ADR 0008](../../design/decisions.md#adr-0008-limit-subagent-delegation-to-one-isolated-layer),
+[ADR 0035](../../design/decisions.md#adr-0035-plan-parallel-depth-1-research-and-jobstasks-operator-surfaces)).
 
 User TOML may set `context_window_tokens` and `output_reserve_tokens`. `/model` edits both (Max output tokens =
 the next-response reserve / API `max_output_tokens`, including thinking where the provider counts it). The reserve
@@ -337,6 +354,9 @@ Each Step executes at most `max_actions_per_step` model Action proposals (defaul
 `/settings` → **Per-Step Action limit** and `/max-actions-per-step` share presets 2 / 4 / 6 / 8 / 12 / 16,
 persist to `~/.qi/config.toml`, and apply on the next Run. Extra tool calls in the same Step settle as
 `ACTION_BATCH_LIMIT`.
+
+`/settings` → **Subagent / delegate** and `/subagent` (alias `/delegate`) edit the child envelope above;
+batch fan-out max **4** and depth **1** are fixed product limits shown in the hub.
 
 The Skill catalog combines `<workspace>/.qi/skills` and `$QI_HOME/resources/skills`; Workspace wins on a name
 collision. Only independently omittable metadata entries enter initial model context, plus a short required

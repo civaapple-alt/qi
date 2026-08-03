@@ -33,7 +33,7 @@ import {
   commandHelp,
   parseMountsCommand,
   parseSkillInstallCommand,
-  parseTaskStopCommand,
+  parseJobStopCommand,
   parseTuiCommand,
   autocompleteSlashCommands,
   tuiCommands,
@@ -48,6 +48,7 @@ import {
   findCompatibleEndpoint,
   removeCompatibleEndpoint,
   type QiCapabilityConfig,
+  type QiDelegateConfig,
 } from "./config.js";
 import { ComposerComponent } from "./composer.js";
 import { FollowUpQueue } from "./follow-ups.js";
@@ -77,6 +78,7 @@ import {
   openMaxActionsPerStepPanel,
   openMaxStepsPanel,
   openModePanel,
+  openSubagentSettingsPanel,
   openModelConfigurationPanel,
   openMountsPanel,
   openPermissionsPanel,
@@ -86,7 +88,8 @@ import {
   openSessionsPanel,
   openSettingsPanel,
   openSkillsHubPanel,
-  openTasksHubPanel,
+  openJobsHubPanel,
+  openSubagentTasksHubPanel,
   openVerifySetupPanel,
   PanelHost,
   QuestionPanel,
@@ -1390,6 +1393,21 @@ export class InteractiveTui {
     }, "Action batch");
   }
 
+  #saveDelegateConfig(patch: QiDelegateConfig): void {
+    this.#startManagementTask(async () => {
+      const configPath = this.#presenter.launch.configPath ?? defaultUserConfigPath();
+      const applied = await this.#runtime.applyDelegateConfig(patch, { configPath });
+      const locale = this.#presenter.locale();
+      const wallMinutes = Math.max(1, Math.round(applied.config.wallTimeMs / 60_000));
+      this.#presenter.setNotice(t(locale, "subagent.saved", {
+        wall: locale === "zh" ? `${wallMinutes} 分钟` : `${wallMinutes}m`,
+        steps: String(applied.config.maxStepsPercent),
+        context: String(applied.config.contextTokensPercent),
+        path: applied.configPath,
+      }));
+    }, "Subagent budget");
+  }
+
   #installSkill(source: string, scope: "user" | "workspace"): void {
     if (this.#runtime.active) {
       this.#presenter.setNotice("Cannot install a Skill while a Run is active.");
@@ -1422,19 +1440,19 @@ export class InteractiveTui {
     }
   }
 
-  #stopTaskFromArgument(argument: string, reopenTaskPicker = false): void {
+  #stopJobFromArgument(argument: string, reopenJobPicker = false): void {
     try {
-      const token = parseTaskStopCommand(argument);
-      const tasks = this.#runtime.tasks();
-      const numeric = /^\d+$/.test(token) ? tasks[Number(token) - 1]?.taskId : undefined;
+      const token = parseJobStopCommand(argument);
+      const jobs = this.#runtime.tasks();
+      const numeric = /^\d+$/.test(token) ? jobs[Number(token) - 1]?.taskId : undefined;
       const taskId = numeric ?? token;
       this.#startManagementTask(async () => {
         await this.#runtime.stopTask(taskId);
         this.#presenter.update(this.#runtime.events(), this.#runtime.view());
-        this.#presenter.setNotice(t(this.#presenter.locale(), "tasks.stop.success", { taskId }));
-        if (reopenTaskPicker) openTasksHubPanel(this.#panelFlow());
-        else this.#openInspectPanel("tasks", "/tasks");
-      }, "ProcessTask");
+        this.#presenter.setNotice(t(this.#presenter.locale(), "jobs.stop.success", { taskId }));
+        if (reopenJobPicker) openJobsHubPanel(this.#panelFlow());
+        else this.#openInspectPanel("jobs", "/jobs");
+      }, "Job");
     } catch (error) {
       this.#presenter.setNotice(message(error));
       this.#render();
@@ -1586,10 +1604,12 @@ export class InteractiveTui {
       saveMaxSteps: (maxSteps) => this.#saveMaxSteps(maxSteps),
       currentMaxActionsPerStep: () => this.#runtime.maxActionsPerStep(),
       saveMaxActionsPerStep: (maxActionsPerStep) => this.#saveMaxActionsPerStep(maxActionsPerStep),
+      currentDelegateConfig: () => this.#runtime.delegateConfig(),
+      saveDelegateConfig: (patch) => this.#saveDelegateConfig(patch),
       applyVerificationSetup: (selected) => this.#applyVerificationSetup(selected),
       installSkill: (source, scope) => this.#installSkill(source, scope),
       listTasks: () => this.#runtime.tasks(),
-      stopTask: (taskId) => this.#stopTaskFromArgument(`stop ${taskId}`, true),
+      stopTask: (taskId) => this.#stopJobFromArgument(`stop ${taskId}`, true),
       listSessions: () => buildSessionEntries(this.#runtime.listSessionCatalog(), {
         workspaceRoot: this.#presenter.launch.workspaceRoot,
         readEvents: (sessionId) => this.#runtime.readSessionEvents(sessionId),
@@ -2346,19 +2366,35 @@ export class InteractiveTui {
     }
     if (name === "tasks") {
       if (/^stop\b/i.test(argument.trim())) {
-        this.#stopTaskFromArgument(argument);
+        this.#presenter.setNotice(t(this.#presenter.locale(), "tasks.moved_to_jobs"));
+        this.#render();
+        return;
+      }
+      // Refresh from durable store so mid-flight delegation.created is visible even if a paint was missed.
+      this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+      openSubagentTasksHubPanel(this.#panelFlow());
+      return;
+    }
+    if (name === "jobs") {
+      if (/^stop\b/i.test(argument.trim())) {
+        this.#stopJobFromArgument(argument);
         return;
       }
       if (!argument.trim()) {
-        openTasksHubPanel(this.#panelFlow());
+        openJobsHubPanel(this.#panelFlow());
         return;
       }
-      this.#presenter.setNotice(t(this.#presenter.locale(), "tasks.stop.usage"));
+      this.#presenter.setNotice(t(this.#presenter.locale(), "jobs.stop.usage"));
       this.#render();
       return;
     }
+    if (name === "job") {
+      this.#stopJobFromArgument(argument.startsWith("stop") ? argument : `stop ${argument}`);
+      return;
+    }
     if (name === "task") {
-      this.#stopTaskFromArgument(argument.startsWith("stop") ? argument : `stop ${argument}`);
+      this.#presenter.setNotice(t(this.#presenter.locale(), "tasks.moved_to_jobs"));
+      this.#render();
       return;
     }
     if (name === "runs") {
@@ -2394,6 +2430,15 @@ export class InteractiveTui {
         return;
       }
       openMaxActionsPerStepPanel(this.#panelFlow());
+      return;
+    }
+    if (name === "subagent" || name === "delegate") {
+      if (argument.trim()) {
+        this.#presenter.setNotice(t(this.#presenter.locale(), "subagent.use_panel"));
+        this.#render();
+        return;
+      }
+      openSubagentSettingsPanel(this.#panelFlow());
       return;
     }
     if (name === "reset-workspace") {
@@ -2984,7 +3029,7 @@ function styleLine(line: string): string {
   if (line.startsWith("Tip:") || line.trimStart().startsWith("Tip:") || line.trimStart().startsWith("提示:")) {
     return theme.fg("textDim", line);
   }
-  if (/^(Effective configuration|Context|Runs |Steps |Actions |Subagents |Skills |ProcessTasks |Diff |Plan |Todo |Status|Keyboard shortcuts|Slash commands|常用 Slash 命令|键盘快捷键|高级 \/ 别名命令|── Handoff|Run  |Action  |Plan Review|Next Run)/.test(line)) {
+  if (/^(Effective configuration|Context|Runs |Steps |Actions |Subagents |Tasks |Jobs |Skills |ProcessTasks |Diff |Plan |Todo |Status|Keyboard shortcuts|Slash commands|常用 Slash 命令|键盘快捷键|高级 \/ 别名命令|── Handoff|Run  |Action  |Plan Review|Next Run)/.test(line)) {
     return theme.bold(line);
   }
   if (/^\s*✔ /.test(line)) return theme.fg("success", line);

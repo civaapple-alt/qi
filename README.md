@@ -97,10 +97,18 @@ execute = false
 background = false
 delegate = false
 
+[delegate]
+wall_time_ms = 300000
+max_steps_percent = 50
+context_tokens_percent = 50
+
 [memory]
 enabled = true
 auto_accept_project = true
 ```
+
+`[delegate]` is optional; omitted keys use the defaults above (5-minute wall, 50% of parent maxSteps/context).
+Edit under `/settings` → Subagent or `/subagent`. Batch max 4 and depth 1 stay fixed.
 
 `ui.timeline_density` accepts `compact`, `standard`, or `diagnostic`. It changes only the local projection:
 no Session event or execution target is written. The rich TTY keeps committed conversation in a bounded

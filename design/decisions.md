@@ -112,6 +112,8 @@ After a crash, only committed events and Artifacts are reconstructed.
 - The parent receives structured deliverables and a short summary Artifact, not the child transcript.
 - Contracts, resource envelopes, and settlement are durable.
 - Recovery cancels unsettled delegation before parking the parent; child work is not automatically retried.
+- Plan may fan out multiple depth-1 research children in one Step; see ADR-0035 for operator surfaces and CLI
+  child budgets. Depth remains exactly one.
 
 Multi-Agent execution remains opt-in and the parent remains responsible for integration and verification.
 
@@ -699,6 +701,40 @@ bounded Runs without inventing a second truth source or turning one Run into an 
   frozen the same way as Work Plan navigation.
 - Required evidence: TurnLoop prefix stable and trailer frozen across `update_plan` status changes; statusline
   cumulative `CH%`; adapter mapping of DeepSeek/Responses cached fields.
+
+## ADR-0035: Plan parallel depth-1 research and Jobs/Tasks operator surfaces
+
+Pressure: Cursor-style Plan research fans out several explore Subagents with a Tasks tracker, then synthesizes a
+Formal Plan. Qi already has depth-1 Coordinator + read-effect concurrent Actions, but the product surface treated
+Plan Subagents as serial, overloaded `/tasks` for ProcessTasks, and gave children a fixed tiny envelope with no
+network even when the parent had `capabilities.network`.
+
+Decision:
+
+- Plan mode may run multiple depth-1 **read-only** research delegations in one parent Step (batch fan-out up to
+  four, or concurrent read `delegate` Actions). Child Sessions remain isolated; recursive `delegate` stays denied.
+- Operator naming: background ProcessTasks use **`/jobs`** (statusline `jobs N`); Subagent research tracking uses
+  **`/tasks`**. Protocol events stay `task.*` / `delegation.*`; the model tool name for ProcessTasks remains `task`.
+- CLI child scope uses a synthetic parent lease (`lea_tui_delegate_scope`): explore tools always; `fetch` /
+  `web_map` only when the parent already has network. Defaults: `contextTokens` and `maxSteps` at 50% of the
+  parent Run budget, `wallTimeMs` 5 minutes, `maxUses = childMaxSteps × parentMaxActionsPerStep`. User config
+  `[delegate]` (`wall_time_ms`, `max_steps_percent`, `context_tokens_percent`) may override those ratios/wall
+  via `/settings` → Subagent or `/subagent`; batch max 4 and depth 1 remain fixed.
+- Return path: `summaryRef` / inline `summary` stay short previews; `resultRef` stores the full child deliverable
+  text (hard-capped). Parents read Artifact store content with read-effect `artifact_get`, never workspace `read`
+  on `artifact://`. Child briefs and the `delegate` tool description expose the actual envelope so parents size
+  `tasks[]` to fit (one document surface/theme per child); no automatic complexity scoring.
+- TUI timeline Tasks block is a count strip (plus currently running rows); full history and Brief live under
+  `/tasks`.
+- Formal Plan accept → Agent handoff is unchanged (ADR-0011). Multi-Agent default-on and depth>1 remain deferred.
+
+Rejected: renaming wire `task.*` events; giving children write/execute/Jobs/`delegate`; dividing per-child budget
+by fan-out count N; inventing parallel fan-out in the UI without durable `delegation.created` rows; automatic
+complexity scoring or dynamic wall extension.
+
+Compatibility: `/tasks stop` for ProcessTasks moves to `/jobs stop`; a short notice redirects mistaken use.
+Required evidence: coordinator batch / full-resultRef tests; CLI delegate envelope/lease tests; TUI Jobs vs Tasks
+panel and collapsed timeline tests; `artifact_get` capability tests.
 
 ## Changing a decision
 

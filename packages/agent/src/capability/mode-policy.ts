@@ -12,6 +12,7 @@ const askTools = new Set([
   "web_map",
   "skill",
   "artifact",
+  "artifact_get",
   "qi_introspect",
   "qi_session_inspect",
   "memory",

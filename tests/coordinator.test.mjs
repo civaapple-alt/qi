@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
-import { Coordinator, MultiAgentBaselineGate, runDelegatedTurn } from "@civaapple/qi-agent/extensions";
+import {
+  Coordinator,
+  DELEGATED_SUMMARY_PREVIEW_CHARS,
+  MultiAgentBaselineGate,
+  runDelegatedBatch,
+  runDelegatedTurn,
+} from "@civaapple/qi-agent/extensions";
 import { GoalEngine } from "@civaapple/qi-agent/eval";
 import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
 import { EventWriter, SessionSupervisor, TurnLoop } from "@civaapple/qi-agent/loop";
@@ -127,7 +133,7 @@ test("Coordinator creates an isolated child Session with a narrowed lease and ev
       traceRef: "artifact://trace",
       evidence: [{ kind: "deterministic", ref: "artifact://test" }],
     });
-    assert.deepEqual(returned, { accepted: true, reasons: [] });
+    assert.deepEqual(returned, { accepted: true, outcome: "accepted", reasons: [] });
     const delegation = store.load("ses_parent_001").runs.run_parent_001.delegations[handle.delegationId];
     assert.equal(delegation.status, "accepted");
     assert.deepEqual(delegation.evidenceRefs.sort(), ["artifact://test", "artifact://trace"]);
@@ -244,6 +250,234 @@ test("runDelegatedTurn executes an isolated child Turn and returns summary Artif
       store.load("ses_parent_001").runs.run_parent_001.delegations[result.handle.delegationId].status,
       "accepted",
     );
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("runDelegatedTurn stores full child text in resultRef and a short preview in summaryRef", async () => {
+  const { store, broker, artifactStore, artifactRoot } = setup();
+  try {
+    const contextBody = await artifactStore.put(Buffer.from("only this context", "utf8"), "text/plain");
+    const receiptId = grantDelegationReceipt(store);
+    const registry = new ToolRegistry(broker);
+    registry.register("read", builtinTools.read);
+    const longAnswer = `${"section\n".repeat(400)}tail-marker`;
+    assert.ok(longAnswer.length > DELEGATED_SUMMARY_PREVIEW_CHARS);
+    const modelPort = {
+      async *stream() {
+        yield { type: "text.delta", delta: longAnswer };
+        yield { type: "completed", finishReason: "stop" };
+      },
+    };
+    const turnLoop = new TurnLoop({ eventStore: store, modelPort, toolRegistry: registry });
+    const coordinator = new Coordinator({
+      store,
+      broker,
+      parentSessionId: "ses_parent_001",
+      runId: "run_parent_001",
+      artifactStore,
+    });
+    const result = await runDelegatedTurn(
+      contract({
+        contextRefs: [contextBody.ref],
+        deliverableSchema: Type.Object({
+          summary: Type.String(),
+          status: Type.String(),
+        }, { additionalProperties: false }),
+        evidenceRequired: [],
+        returnPolicy: "result",
+        resourceEnvelope: { contextTokens: 2_000, maxSteps: 1, wallTimeMs: 10_000 },
+      }),
+      { receiptId, parentSubject: "agent_parent" },
+      {
+        coordinator,
+        turnLoop,
+        model: { provider: "test", model: "mock" },
+        workspaceRoot: artifactRoot,
+        artifactStore,
+        toolRegistry: registry,
+        input: "Summarize the allowlisted context.",
+      },
+    );
+    const summary = Buffer.from((await artifactStore.get(result.summaryRef)).content).toString("utf8");
+    const stored = JSON.parse(Buffer.from((await artifactStore.get(result.resultRef)).content).toString("utf8"));
+    assert.equal(summary.length, DELEGATED_SUMMARY_PREVIEW_CHARS);
+    assert.equal(summary, longAnswer.slice(0, DELEGATED_SUMMARY_PREVIEW_CHARS));
+    assert.equal(stored.summary, longAnswer);
+    assert.equal(stored.status, "completed");
+    assert.equal(stored.truncated, undefined);
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("Coordinator onEvent forwards parent delegation.created while the child is still running", async () => {
+  const { store, broker, artifactStore, artifactRoot } = setup();
+  try {
+    const contextBody = await artifactStore.put(Buffer.from("only this context", "utf8"), "text/plain");
+    const receiptId = grantDelegationReceipt(store);
+    const seen = [];
+    const coordinator = new Coordinator({
+      store,
+      broker,
+      parentSessionId: "ses_parent_001",
+      runId: "run_parent_001",
+      artifactStore,
+      onEvent: (event) => seen.push(event.type),
+    });
+    const handle = await coordinator.delegate(
+      contract({ contextRefs: [contextBody.ref] }),
+      { receiptId, parentSubject: "agent_parent" },
+    );
+    assert.ok(seen.includes("delegation.created"));
+    assert.equal(
+      store.load("ses_parent_001").runs.run_parent_001.delegations[handle.delegationId].status,
+      "running",
+    );
+    coordinator.return(handle, {
+      outcome: "cancelled",
+      evidence: [],
+      reasons: ["test teardown"],
+    });
+    assert.ok(seen.includes("delegation.returned"));
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("child wall-time abort settles as timed_out rather than cancelled", async () => {
+  const { store, broker, artifactStore, artifactRoot } = setup();
+  try {
+    const contextBody = await artifactStore.put(Buffer.from("slow context", "utf8"), "text/plain");
+    const receiptId = grantDelegationReceipt(store);
+    const registry = new ToolRegistry(broker);
+    registry.register("read", builtinTools.read);
+    const modelPort = {
+      async *stream(_request, signal) {
+        await new Promise((_, reject) => {
+          if (signal?.aborted) {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            return;
+          }
+          signal?.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          }, { once: true });
+        });
+      },
+    };
+    const turnLoop = new TurnLoop({ eventStore: store, modelPort, toolRegistry: registry });
+    const coordinator = new Coordinator({
+      store,
+      broker,
+      parentSessionId: "ses_parent_001",
+      runId: "run_parent_001",
+      artifactStore,
+    });
+    const result = await runDelegatedTurn(
+      contract({
+        contextRefs: [contextBody.ref],
+        deliverableSchema: Type.Object({
+          summary: Type.String(),
+          status: Type.String(),
+        }, { additionalProperties: false }),
+        evidenceRequired: [],
+        returnPolicy: "result",
+        resourceEnvelope: { contextTokens: 2_000, maxSteps: 1, wallTimeMs: 30 },
+      }),
+      { receiptId, parentSubject: "agent_parent" },
+      {
+        coordinator,
+        turnLoop,
+        model: { provider: "test", model: "mock" },
+        workspaceRoot: artifactRoot,
+        artifactStore,
+        toolRegistry: registry,
+        input: "Work until wall time.",
+      },
+    );
+    assert.equal(result.settlement.accepted, false);
+    assert.equal(result.settlement.outcome, "timed_out");
+    assert.match(result.settlement.reasons.join(" "), /wallTimeMs 30 elapsed/);
+    assert.equal(
+      store.load("ses_parent_001").runs.run_parent_001.delegations[result.handle.delegationId].status,
+      "timed_out",
+    );
+  } finally {
+    rmSync(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("runDelegatedBatch creates all handles then settles concurrent depth-1 children", async () => {
+  const { store, broker, artifactStore, artifactRoot } = setup();
+  try {
+    const contextA = await artifactStore.put(Buffer.from("context-a", "utf8"), "text/plain");
+    const contextB = await artifactStore.put(Buffer.from("context-b", "utf8"), "text/plain");
+    const receiptId = grantDelegationReceipt(store);
+    const registry = new ToolRegistry(broker);
+    registry.register("read", builtinTools.read);
+    let streamCalls = 0;
+    const modelPort = {
+      async *stream() {
+        streamCalls += 1;
+        yield { type: "text.delta", delta: `child-${streamCalls}` };
+        yield { type: "completed", finishReason: "stop" };
+      },
+    };
+    const turnLoop = new TurnLoop({ eventStore: store, modelPort, toolRegistry: registry });
+    const coordinator = new Coordinator({
+      store,
+      broker,
+      parentSessionId: "ses_parent_001",
+      runId: "run_parent_001",
+      artifactStore,
+    });
+    const base = {
+      deliverableSchema: Type.Object({
+        summary: Type.String(),
+        status: Type.String(),
+      }, { additionalProperties: false }),
+      evidenceRequired: [],
+      returnPolicy: "result",
+      resourceEnvelope: { contextTokens: 2_000, maxSteps: 1, wallTimeMs: 10_000 },
+      parentLeaseId: "lea_parent_001",
+      childLease: {
+        tools: ["read"],
+        effects: ["read"],
+        resources: ["file:**"],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        maxUses: 2,
+      },
+    };
+    const results = await runDelegatedBatch(
+      [
+        {
+          contract: { ...base, outcome: "Explore A", contextRefs: [contextA.ref] },
+          input: "Summarize A",
+        },
+        {
+          contract: { ...base, outcome: "Explore B", contextRefs: [contextB.ref] },
+          input: "Summarize B",
+        },
+      ],
+      { receiptId, parentSubject: "agent_parent" },
+      {
+        coordinator,
+        turnLoop,
+        model: { provider: "test", model: "mock" },
+        workspaceRoot: artifactRoot,
+        artifactStore,
+        toolRegistry: registry,
+      },
+    );
+    assert.equal(results.length, 2);
+    assert.equal(streamCalls, 2);
+    const run = store.load("ses_parent_001").runs.run_parent_001;
+    assert.equal(Object.keys(run.delegations).length, 2);
+    for (const result of results) {
+      assert.equal(result.settlement.accepted, true);
+      assert.equal(run.delegations[result.handle.delegationId].status, "accepted");
+    }
   } finally {
     rmSync(artifactRoot, { recursive: true, force: true });
   }

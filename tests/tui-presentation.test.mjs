@@ -18,10 +18,10 @@ import {
   MultiSelectPanel,
   QuestionPanel,
   loadProjectConfig,
-  openTasksHubPanel,
+  openJobsHubPanel,
   parseMountsCommand,
   parseSkillInstallCommand,
-  parseTaskStopCommand,
+  parseJobStopCommand,
   parseTuiCommand,
   primarySlashCommands,
   autocompleteSlashCommands,
@@ -107,7 +107,7 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   });
   assert.throws(() => parseSkillInstallCommand("install"), /Usage/);
   assert.deepEqual(parseMountsCommand("add D:/docs"), { mode: "add", argument: "D:/docs" });
-  assert.equal(parseTaskStopCommand("stop abc"), "abc");
+  assert.equal(parseJobStopCommand("stop abc"), "abc");
 });
 
 test("attention policy protects active input and orders Ctrl+G gates", () => {
@@ -2533,11 +2533,11 @@ test("background ProcessTasks remain visible after their Run and can be stopped 
       maxActionsPerStep: 6,
     });
     presenter.update(runtime.events(), runtime.view());
-    presenter.pushInspection("tasks");
-    const tasksView = presenter.render().join("\n");
-    assert.match(tasksView, /ProcessTasks 1/);
-    assert.match(tasksView, /\/tasks → Enter · \/tasks stop tsk_/);
-    assert.match(presenter.formatStatusline(false, 120).join("\n"), /tasks 1/);
+    presenter.pushInspection("jobs");
+    const jobsView = presenter.render().join("\n");
+    assert.match(jobsView, /Jobs 1/);
+    assert.match(jobsView, /\/jobs → Enter · \/jobs stop tsk_/);
+    assert.match(presenter.formatStatusline(false, 120).join("\n"), /jobs 1/);
 
     await runtime.stopTask(task.taskId);
     await waitUntil(() => runtime.tasks()[0]?.status === "exited");
@@ -2548,15 +2548,15 @@ test("background ProcessTasks remain visible after their Run and can be stopped 
   }
 });
 
-test("/tasks Enter stops the selected running task while terminal tasks stay disabled", () => {
+test("/jobs Enter stops the selected running Job while terminal Jobs stay disabled", () => {
   let panel;
   let closed = false;
   let stoppedTaskId;
   const startedAt = new Date(0).toISOString();
   const base = {
-    runId: "run_tasks_panel",
-    stepId: "stp_tasks_panel",
-    actionId: "act_tasks_panel",
+    runId: "run_jobs_panel",
+    stepId: "stp_jobs_panel",
+    actionId: "act_jobs_panel",
     command: "npm",
     args: ["run", "dev"],
     workdir: "web",
@@ -2565,7 +2565,7 @@ test("/tasks Enter stops the selected running task while terminal tasks stay dis
     expiresAt: "2099-01-01T00:00:00.000Z",
     logRef: "task-log:test",
   };
-  openTasksHubPanel({
+  openJobsHubPanel({
     locale: () => "en",
     terminalRows: 40,
     presenter: { setNotice: () => {} },
@@ -2584,13 +2584,13 @@ test("/tasks Enter stops the selected running task while terminal tasks stay dis
 
   assert.ok(panel);
   const rendered = stripVTControlCharacters(panel.render(100).join("\n"));
-  assert.match(rendered, /Enter stop running task/);
+  assert.match(rendered, /Enter stop running Job/);
   assert.match(rendered, /● npm run dev/);
   assert.match(rendered, /○ npm run dev/);
 
   panel.handleInput("\u001b[B");
   panel.handleInput("\r");
-  assert.equal(stoppedTaskId, undefined, "terminal task must remain disabled");
+  assert.equal(stoppedTaskId, undefined, "terminal Job must remain disabled");
   panel.handleInput("\u001b[A");
   panel.handleInput("\r");
   assert.equal(stoppedTaskId, "tsk_running");
@@ -4409,9 +4409,109 @@ test("Running strip keeps parent tokens; Subagent rows show child tokens", () =>
   assert.match(working, /5\.9k tokens/);
   assert.doesNotMatch(working, /1\.2k/);
   const overview = presenter.render().join("\n");
-  assert.match(overview, /Subagents · 1 running/);
+  assert.match(overview, /Tasks · 1 running · \/tasks/);
   assert.match(overview, /只读调研日志打印/);
   assert.match(overview, /Running · 1\.2k tokens/);
+  assert.doesNotMatch(overview, /summary artifact:\/\//);
+});
+
+test("TUI timeline Tasks strip hides finished Subagent detail", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "delegate-v1",
+    capabilities: ["delegate"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  presenter.update([], {
+    sessionId: "ses_parent",
+    createdAt: occurredAt,
+    version: 2,
+    mode: "plan",
+    currentRunId: "run_parent",
+    runOrder: ["run_parent"],
+    runs: {
+      run_parent: {
+        runId: "run_parent",
+        trigger: "user",
+        mode: "plan",
+        status: "active",
+        input: "research vendors",
+        stepOrder: ["stp_parent"],
+        steps: {
+          stp_parent: {
+            stepId: "stp_parent",
+            status: "running",
+            context: { estimatedTokens: 4_000, budgetTokens: 64_000 },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {
+          dlg_done: {
+            delegationId: "dlg_done",
+            childSessionId: "ses_child_done",
+            outcome: "Finished DeepSeek survey that should stay off the timeline",
+            returnPolicy: "result",
+            status: "accepted",
+            depth: 1,
+            receiptId: "rcp_1",
+            parentLeaseId: "lea_1",
+            childLeaseId: "lea_2",
+            childSubject: "subagent:dlg_done",
+            contextRefs: [],
+            contractRef: "artifact://c".padEnd(74, "c"),
+            resourceEnvelope: {},
+            evidenceRefs: [],
+            summaryRef: `artifact://${"a".repeat(64)}`,
+          },
+          dlg_run: {
+            delegationId: "dlg_run",
+            childSessionId: "ses_child_run",
+            outcome: "Running Kimi survey still visible",
+            returnPolicy: "result",
+            status: "running",
+            depth: 1,
+            receiptId: "rcp_2",
+            parentLeaseId: "lea_1",
+            childLeaseId: "lea_3",
+            childSubject: "subagent:dlg_run",
+            contextRefs: [],
+            contractRef: "artifact://d".padEnd(74, "d"),
+            resourceEnvelope: {},
+            evidenceRefs: [],
+          },
+        },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "working", reason: "parent" },
+  });
+  const overview = presenter.render().join("\n");
+  assert.match(overview, /Tasks · 1 running · 1 finished · \/tasks/);
+  assert.match(overview, /Running Kimi survey still visible/);
+  assert.doesNotMatch(overview, /Finished DeepSeek survey that should stay off the timeline/);
+  assert.doesNotMatch(overview, /summary artifact:\/\//);
+  const panel = presenter.renderTasks().join("\n");
+  assert.match(panel, /Finished DeepSeek survey/);
+  assert.match(panel, /Running Kimi survey/);
 });
 
 class FakeTerminal {

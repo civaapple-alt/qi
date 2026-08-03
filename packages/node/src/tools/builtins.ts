@@ -81,7 +81,8 @@ export const readTool = defineTool({
     "After search, prefer startLine/maxLines around the reported match instead of rereading a large file in full. " +
     "startLine is 1-based; maxLines is capped at 500 and defaults to 200 when startLine is provided. " +
     "Workspace paths are relative to the primary root; authorized read-only mounts use mount:<id>/…. " +
-    "The path must be a file, never a directory; use list to discover directory entries.",
+    "The path must be a file, never a directory; use list to discover directory entries. " +
+    "Do not pass artifact:// refs here — use artifact_get for Artifact store content (including delegate resultRef).",
   input: Type.Object(
     {
       path: Type.String({ minLength: 1 }),
@@ -108,6 +109,12 @@ export const readTool = defineTool({
   resources: (input) => [`file:${input.path}`],
   async execute(input, context) {
     const request = input as { path: string; startLine?: number; maxLines?: number };
+    if (request.path.startsWith("artifact://")) {
+      throw new ToolFailure(
+        "ARTIFACT_REF_NOT_WORKSPACE_PATH",
+        "artifact:// refs are not Workspace paths. Use artifact_get to read Artifact store content.",
+      );
+    }
     assertSensitiveContentAllowed(request.path, context);
     const mounts = mountsFromContext(context);
     const resolved = await resolveAccessiblePath(context.workspaceRoot, request.path, mounts);
@@ -1199,6 +1206,55 @@ export const artifactTool = defineTool({
   },
 });
 
+const artifactGetMaxCharsDefault = 100_000;
+
+export const artifactGetTool = defineTool({
+  description:
+    "Read content from Qi's machine-private content-addressed Artifact store by artifact:// reference. " +
+    "Use for delegate resultRef (full child deliverable) or summaryRef (short preview). " +
+    "This is not a Workspace file tool — do not use read with artifact:// paths.",
+  input: Type.Object(
+    {
+      ref: Type.String({ pattern: "^artifact://[a-f0-9]{64}$" }),
+      maxChars: Type.Optional(Type.Integer({ minimum: 256, maximum: 200_000 })),
+    },
+    { additionalProperties: false },
+  ),
+  output: Type.Object(
+    {
+      ref: Type.String({ pattern: "^artifact://[a-f0-9]{64}$" }),
+      content: Type.String(),
+      mediaType: Type.String(),
+      size: Type.Integer({ minimum: 0 }),
+      sha256: Type.String({ pattern: sha256Pattern }),
+      truncated: Type.Boolean(),
+    },
+    { additionalProperties: false },
+  ),
+  effect: () => "read",
+  resources: (input) => {
+    const request = input as { ref: string };
+    const digest = request.ref.slice("artifact://".length);
+    return [`artifact-store:local:${digest}`, `artifact:${digest}`];
+  },
+  async execute(input, context) {
+    const request = input as { ref: string; maxChars?: number };
+    const stored = await context.artifactStore.get(request.ref);
+    const digest = request.ref.slice("artifact://".length);
+    const text = Buffer.from(stored.content).toString("utf8");
+    const maxChars = request.maxChars ?? artifactGetMaxCharsDefault;
+    const truncated = text.length > maxChars;
+    return {
+      ref: request.ref,
+      content: truncated ? text.slice(0, maxChars) : text,
+      mediaType: stored.mediaType,
+      size: stored.content.byteLength,
+      sha256: digest,
+      truncated,
+    };
+  },
+});
+
 export const builtinTools = {
   read: readTool as AnyToolDefinition,
   list: listTool,
@@ -1212,6 +1268,7 @@ export const builtinTools = {
   git: gitTool,
   shell: shellTool,
   artifact: artifactTool,
+  artifact_get: artifactGetTool as AnyToolDefinition,
 } as const;
 
 function hash(content: string | Uint8Array): string {

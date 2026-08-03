@@ -330,22 +330,72 @@ function renderTask(model: ToolCardModel, options: ToolCardOptions = {}): string
     ? `${String(output.taskId ?? "task")} · pid ${String(output.pid ?? "?")} · expires ${String(output.expiresAt ?? "?")}`
     : model.errorCode;
   if (options.summaryOnly) return [header(model, command, result)];
-  return [header(model, command, result), ...(output ? ["  detached as a bounded ProcessTask · /tasks"] : [])];
+  return [header(model, command, result), ...(output ? ["  detached as a bounded Job · /jobs"] : [])];
 }
 
 function renderDelegate(model: ToolCardModel, options: ToolCardOptions): string[] {
   const input = record(model.input);
   const output = model.output;
-  const subject = oneLine(String(input?.objective ?? "subagent"), 80);
+  const batchCount = Array.isArray(input?.tasks) ? input.tasks.length : 0;
+  const subject = oneLine(
+    String(
+      input?.objective
+        ?? (batchCount > 0 ? `${batchCount} subagents` : "subagent"),
+    ),
+    80,
+  );
+  const outcomes = Array.isArray(output?.results)
+    ? output.results.map((item) => {
+      const row = record(item);
+      return typeof row?.outcome === "string" ? row.outcome : undefined;
+    }).filter((item): item is string => Boolean(item))
+    : typeof output?.outcome === "string"
+      ? [output.outcome]
+      : [];
+  const primaryOutcome = outcomes.includes("timed_out")
+    ? "timed_out"
+    : outcomes.includes("cancelled")
+      ? "cancelled"
+      : outcomes.includes("failed") || outcomes.includes("rejected")
+        ? "failed"
+        : output?.accepted === true
+          ? "accepted"
+          : output?.accepted === false
+            ? "rejected"
+            : undefined;
+  const visualStatus: ActionStatus = model.status === "running"
+    ? "running"
+    : primaryOutcome === "accepted"
+      ? "completed"
+      : primaryOutcome === "timed_out" || primaryOutcome === "failed" || primaryOutcome === "rejected"
+        ? "failed"
+        : primaryOutcome === "cancelled"
+          ? "cancelled"
+          : model.status;
   const result = output
     ? [
-      output.accepted === true ? "accepted" : output.accepted === false ? "rejected" : undefined,
+      primaryOutcome === "timed_out"
+        ? "timed out"
+        : primaryOutcome === "accepted"
+          ? "accepted"
+          : primaryOutcome ?? (output.accepted === false ? "rejected" : undefined),
+      outcomes.length > 1 ? outcomes.join("+") : undefined,
       output.delegationId,
       output.summaryRef,
     ].filter(Boolean).join(" · ")
     : model.errorCode;
-  if (options.summaryOnly) return [header(model, subject, result)];
-  const lines = [header(model, subject, result)];
+  const title = [
+    coloredGlyph(visualStatus),
+    model.toolName.padEnd(8),
+    subject,
+    model.elapsed ? `· ${model.elapsed}` : undefined,
+    result ? `· ${oneLine(result, 80)}` : undefined,
+  ].filter(Boolean).join(" ");
+  if (options.summaryOnly) return [title];
+  const lines = [title];
+  if (typeof output?.parentHint === "string" && output.parentHint.trim()) {
+    lines.push(`  ${oneLine(output.parentHint, 120)}`);
+  }
   if (typeof output?.summary === "string" && output.summary.trim()) {
     if (options.expanded) {
       lines.push(...output.summary.split(/\r?\n/).map((line) => `  ${line}`));

@@ -10,6 +10,7 @@ export type TuiPanel =
   | "actions"
   | "agents"
   | "skills"
+  | "jobs"
   | "tasks"
   | "diff"
   | "plan"
@@ -74,7 +75,8 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
     panel: "plan",
   },
   { name: "skills", descriptionKey: "cmd.skills", category: "inspect", visibility: "primary", panel: "skills" },
-  { name: "tasks", descriptionKey: "cmd.tasks", argumentHint: "[stop <N|ID>]", category: "inspect", visibility: "primary", panel: "tasks" },
+  { name: "tasks", descriptionKey: "cmd.tasks", category: "inspect", visibility: "primary", panel: "tasks" },
+  { name: "jobs", descriptionKey: "cmd.jobs", argumentHint: "[stop <N|ID>]", category: "inspect", visibility: "primary", panel: "jobs" },
   { name: "mounts", descriptionKey: "cmd.mounts", argumentHint: "[add <path>|unmount <id>]", category: "inspect", visibility: "primary" },
   { name: "permissions", descriptionKey: "cmd.permissions", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
   { name: "shell", descriptionKey: "cmd.shell", category: "manage", visibility: "primary", draftPolicy: "preserve" },
@@ -97,9 +99,12 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
     visibility: "alias",
     draftPolicy: "preserve",
   },
+  { name: "subagent", descriptionKey: "cmd.subagent", category: "manage", visibility: "alias", draftPolicy: "preserve" },
+  { name: "delegate", descriptionKey: "cmd.subagent", category: "manage", visibility: "alias", draftPolicy: "preserve" },
   { name: "context", descriptionKey: "cmd.context", category: "inspect", visibility: "alias", panel: "context" },
   { name: "providers", descriptionKey: "cmd.providers", category: "inspect", visibility: "alias" },
   { name: "skill", descriptionKey: "cmd.skill", category: "manage", visibility: "alias" },
+  { name: "job", descriptionKey: "cmd.job", argumentHint: "stop <N|ID>", category: "manage", visibility: "alias" },
   { name: "task", descriptionKey: "cmd.task", argumentHint: "stop <N|ID>", category: "manage", visibility: "alias" },
   { name: "add-dir", descriptionKey: "cmd.add-dir", argumentHint: "<path>", category: "control", visibility: "alias" },
   { name: "unmount", descriptionKey: "cmd.unmount", argumentHint: "<id>", category: "control", visibility: "alias" },
@@ -135,6 +140,8 @@ export function autocompleteSlashCommands(locale: Locale = defaultLocale()): rea
           || command.name === "providers"
           || command.name === "max-steps"
           || command.name === "max-actions-per-step"
+          || command.name === "subagent"
+          || command.name === "delegate"
           || command.name === "exit"
         )))
       .map((command) => toSlashCommand(command, locale)),
@@ -264,8 +271,13 @@ export function parseMountsCommand(argument: string): MountsCommand {
   throw new TypeError("Usage: /mounts · /mounts add <path> · /mounts unmount <id>");
 }
 
-export function parseTaskStopCommand(argument: string): string {
+export function parseJobStopCommand(argument: string): string {
   const match = /^stop\s+(.+)$/i.exec(argument.trim());
-  if (!match?.[1]) throw new TypeError("Usage: /tasks stop <N|ID>");
+  if (!match?.[1]) throw new TypeError("Usage: /jobs stop <N|ID>");
   return match[1].trim();
+}
+
+/** @deprecated Use parseJobStopCommand — ProcessTasks moved to /jobs (ADR-0035). */
+export function parseTaskStopCommand(argument: string): string {
+  return parseJobStopCommand(argument);
 }

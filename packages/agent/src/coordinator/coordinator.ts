@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CapabilityLease, DelegatedLeaseRequest, InMemoryCapabilityBroker } from "@civaapple/qi-agent/capability";
 import type { EventStore } from "@civaapple/qi-agent/kernel";
 import { EventWriter } from "@civaapple/qi-agent/loop";
-import { createId, type RunId, type SessionId } from "@civaapple/qi-protocol";
+import { createId, type RunId, type SessionEvent, type SessionId } from "@civaapple/qi-protocol";
 import type { ArtifactStore } from "@civaapple/qi-agent/tools";
 import type { TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
@@ -83,6 +83,8 @@ export class Coordinator {
     artifactStore: ArtifactStore;
     brancher?: WorkspaceBranchPort;
     clock?: () => Date;
+    /** Forward parent Session facts (delegation.created/returned) to live UI/stream consumers. */
+    onEvent?: (event: SessionEvent) => void;
   }) {
     this.#store = options.store;
     this.#broker = options.broker;
@@ -91,7 +93,7 @@ export class Coordinator {
     this.#artifacts = options.artifactStore;
     this.#clock = options.clock ?? (() => new Date());
     this.#brancher = options.brancher;
-    this.#writer = new EventWriter(options.store, options.parentSessionId, this.#clock);
+    this.#writer = new EventWriter(options.store, options.parentSessionId, this.#clock, options.onEvent);
   }
 
   async delegate(contract: DelegationContract, authorization: DelegationAuthorization): Promise<DelegationHandle> {
@@ -152,7 +154,11 @@ export class Coordinator {
     return structuredClone(handle);
   }
 
-  return(handle: DelegationHandle, submission: DelegationSubmission): { accepted: boolean; reasons: string[] } {
+  return(handle: DelegationHandle, submission: DelegationSubmission): {
+    accepted: boolean;
+    outcome: NonNullable<DelegationSubmission["outcome"]>;
+    reasons: string[];
+  } {
     const active = this.#active.get(handle.delegationId) ?? this.#hydrateActive(handle.delegationId);
     if (!active || active.handle.childSessionId !== handle.childSessionId) {
       throw new Error("Delegation is unknown or already settled");
@@ -201,6 +207,7 @@ export class Coordinator {
     this.#active.delete(handle.delegationId);
     return {
       accepted: outcome === "accepted",
+      outcome,
       reasons,
     };
   }

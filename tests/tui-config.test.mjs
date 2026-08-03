@@ -13,7 +13,11 @@ import {
   persistActiveCompatible,
   persistUserLanguage,
   persistUserMaxActionsPerStep,
+  persistUserDelegateConfig,
   persistUserMaxSteps,
+  resolveDelegateConfig,
+  DEFAULT_DELEGATE_WALL_TIME_MS,
+  DEFAULT_DELEGATE_MAX_STEPS_PERCENT,
   persistUserProviderDefaults,
   persistUserShell,
   persistUserTheme,
@@ -618,6 +622,47 @@ max_steps = 32
     await assert.rejects(() => persistUserMaxSteps(1001, path), /integer from 8 to 1000/);
     const high = await persistUserMaxSteps(1000, path);
     assert.equal(high.config.maxSteps, 1000);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("persistUserDelegateConfig writes [delegate] and resolveDelegateConfig fills defaults", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-config-delegate-"));
+  const path = join(root, "config.toml");
+  try {
+    await writeFile(path, `
+version = 1
+provider = "xai"
+model = "grok-config"
+`);
+    assert.deepEqual(resolveDelegateConfig(), {
+      wallTimeMs: DEFAULT_DELEGATE_WALL_TIME_MS,
+      maxStepsPercent: DEFAULT_DELEGATE_MAX_STEPS_PERCENT,
+      contextTokensPercent: 50,
+    });
+    const saved = await persistUserDelegateConfig({
+      wallTimeMs: 120_000,
+      maxStepsPercent: 25,
+    }, path);
+    assert.equal(saved.config.delegate?.wallTimeMs, 120_000);
+    assert.equal(saved.config.delegate?.maxStepsPercent, 25);
+    assert.equal(saved.config.delegate?.contextTokensPercent, 50);
+    const text = await readFile(path, "utf8");
+    assert.match(text, /\[delegate\]/);
+    assert.match(text, /wall_time_ms = 120000/);
+    assert.match(text, /max_steps_percent = 25/);
+    assert.match(text, /context_tokens_percent = 50/);
+    const reloaded = await loadUserConfig(path);
+    assert.deepEqual(resolveDelegateConfig(reloaded.config.delegate), {
+      wallTimeMs: 120_000,
+      maxStepsPercent: 25,
+      contextTokensPercent: 50,
+    });
+    await assert.rejects(
+      () => persistUserDelegateConfig({ wallTimeMs: 30_000 }, path),
+      /wall_time_ms must be an integer from 60000 to 300000/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

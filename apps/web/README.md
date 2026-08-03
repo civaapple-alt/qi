@@ -64,6 +64,9 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
   records unless `evidence.recorded` exists.
 - ProcessTasks are rendered from the Session's durable task projection independently of Run narrative folding;
   running servers and watchers therefore remain visible after their originating Run completes.
+- Subagent Tasks (depth-1 `delegation.*` on the selected Run) appear in a dedicated inspector pane with status
+  (including `timed_out`) and an Open-child control that loads the child Session read-only. Live updates follow
+  `delegation.created` / `delegation.returned`. Web does not start, stop, or steer Subagents.
 - Missing Goal, control receipt, evidence, or accepted memory is an explicit, explanatory empty state. When a
   Formal Plan or Work Plan is bound, the Contract pane surfaces that binding instead of leading with “No formal
   Goal”. The Web surface never fabricates those contracts from conversational behavior. Goal Contract cards

@@ -52,6 +52,7 @@ test("@civaapple/qi-tui public runtime exports are reviewed explicitly", () => {
     "panelFooter",
     "panelHeader",
     "panelRule",
+    "parseJobStopCommand",
     "parseMountsCommand",
     "parseSkillInstallCommand",
     "parseTaskStopCommand",
@@ -78,6 +79,8 @@ test("@civaapple/qi-tui public runtime exports are reviewed explicitly", () => {
     "truncateToWidth",
     "tuiCommands",
     "visibleWidth",
+    "wrapPlain",
+    "wrapPlainLines",
   ]);
 });
 

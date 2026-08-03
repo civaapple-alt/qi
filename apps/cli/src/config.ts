@@ -56,6 +56,41 @@ export interface QiImageConfig {
   readonly readByteBudget?: number;
 }
 
+/** User-tunable depth-1 Subagent / `delegate` envelope (ADR-0035). */
+export interface QiDelegateConfig {
+  /** Child wall clock in ms (default 300_000; hard max 300_000). */
+  readonly wallTimeMs?: number;
+  /** Percent of parent Run maxSteps (1–100; default 50). */
+  readonly maxStepsPercent?: number;
+  /** Percent of parent context budget tokens (1–100; default 50). */
+  readonly contextTokensPercent?: number;
+}
+
+export interface ResolvedDelegateConfig {
+  readonly wallTimeMs: number;
+  readonly maxStepsPercent: number;
+  readonly contextTokensPercent: number;
+}
+
+export const DEFAULT_DELEGATE_WALL_TIME_MS = 300_000;
+export const DEFAULT_DELEGATE_MAX_STEPS_PERCENT = 50;
+export const DEFAULT_DELEGATE_CONTEXT_TOKENS_PERCENT = 50;
+export const DELEGATE_WALL_TIME_MS_MIN = 60_000;
+export const DELEGATE_WALL_TIME_MS_MAX = 300_000;
+export const DELEGATE_WALL_TIME_PRESETS_MS = [60_000, 120_000, 180_000, 300_000] as const;
+export const DELEGATE_PERCENT_PRESETS = [25, 50, 75, 100] as const;
+/** Protocol / product fixed: batch fan-out ceiling and depth-1 only. */
+export const DELEGATE_BATCH_MAX = 4;
+export const DELEGATE_DEPTH = 1;
+
+export function resolveDelegateConfig(config?: QiDelegateConfig): ResolvedDelegateConfig {
+  return {
+    wallTimeMs: config?.wallTimeMs ?? DEFAULT_DELEGATE_WALL_TIME_MS,
+    maxStepsPercent: config?.maxStepsPercent ?? DEFAULT_DELEGATE_MAX_STEPS_PERCENT,
+    contextTokensPercent: config?.contextTokensPercent ?? DEFAULT_DELEGATE_CONTEXT_TOKENS_PERCENT,
+  };
+}
+
 /** Non-secret OpenAI-compatible endpoint catalog entry (secrets stay sealed). */
 export interface CompatibleEndpoint {
   readonly name: string;
@@ -90,6 +125,7 @@ export interface QiUserConfig {
   readonly memory?: QiMemoryConfig;
   readonly ui?: QiUiConfig;
   readonly image?: QiImageConfig;
+  readonly delegate?: QiDelegateConfig;
 }
 
 export interface LoadedUserConfig {
@@ -455,6 +491,56 @@ export async function persistUserMaxActionsPerStep(
 }
 
 /**
+ * Persist `[delegate]` Subagent envelope into the user config.toml (creates it when missing).
+ */
+export async function persistUserDelegateConfig(
+  patch: QiDelegateConfig,
+  path = defaultUserConfigPath(),
+): Promise<LoadedUserConfig> {
+  const absolute = resolve(path);
+  const loaded = await loadUserConfig(absolute);
+  const merged: QiDelegateConfig = {
+    ...loaded.config.delegate,
+    ...patch,
+  };
+  const resolved = resolveDelegateConfig(merged);
+  assertDelegateWallTimeMs(resolved.wallTimeMs);
+  assertDelegatePercent(resolved.maxStepsPercent, "max_steps_percent");
+  assertDelegatePercent(resolved.contextTokensPercent, "context_tokens_percent");
+  const next: QiUserConfig = {
+    ...loaded.config,
+    version: 1,
+    delegate: {
+      wallTimeMs: resolved.wallTimeMs,
+      maxStepsPercent: resolved.maxStepsPercent,
+      contextTokensPercent: resolved.contextTokensPercent,
+    },
+  };
+  await saveUserConfig(absolute, next);
+  return { path: absolute, exists: true, config: next };
+}
+
+export function assertDelegateWallTimeMs(value: number, label = "wall_time_ms"): number {
+  if (
+    !Number.isInteger(value)
+    || value < DELEGATE_WALL_TIME_MS_MIN
+    || value > DELEGATE_WALL_TIME_MS_MAX
+  ) {
+    throw new RangeError(
+      `${label} must be an integer from ${DELEGATE_WALL_TIME_MS_MIN} to ${DELEGATE_WALL_TIME_MS_MAX}`,
+    );
+  }
+  return value;
+}
+
+export function assertDelegatePercent(value: number, label: string): number {
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    throw new RangeError(`${label} must be an integer from 1 to 100`);
+  }
+  return value;
+}
+
+/**
  * Ensure `$QI_HOME/config.toml` has `[shell]`. When missing, probe installed profiles for this OS,
  * write them once, and return the updated config. Existing `[shell]` is left unchanged.
  */
@@ -539,6 +625,21 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
                 : { read_byte_budget: config.image.readByteBudget }),
             },
           }),
+      ...(config.delegate === undefined
+        ? {}
+        : {
+            delegate: {
+              ...(config.delegate.wallTimeMs === undefined
+                ? {}
+                : { wall_time_ms: config.delegate.wallTimeMs }),
+              ...(config.delegate.maxStepsPercent === undefined
+                ? {}
+                : { max_steps_percent: config.delegate.maxStepsPercent }),
+              ...(config.delegate.contextTokensPercent === undefined
+                ? {}
+                : { context_tokens_percent: config.delegate.contextTokensPercent }),
+            },
+          }),
     },
     absolute,
   );
@@ -603,6 +704,21 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
               : { read_byte_budget: config.image.readByteBudget }),
           },
         }),
+    ...(config.delegate === undefined
+      ? {}
+      : {
+          delegate: {
+            ...(config.delegate.wallTimeMs === undefined
+              ? {}
+              : { wall_time_ms: config.delegate.wallTimeMs }),
+            ...(config.delegate.maxStepsPercent === undefined
+              ? {}
+              : { max_steps_percent: config.delegate.maxStepsPercent }),
+            ...(config.delegate.contextTokensPercent === undefined
+              ? {}
+              : { context_tokens_percent: config.delegate.contextTokensPercent }),
+          },
+        }),
   });
   if (Buffer.byteLength(body, "utf8") > userConfigLimitBytes) {
     throw new TypeError(`Qi config exceeds ${userConfigLimitBytes} bytes: ${absolute}`);
@@ -662,6 +778,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "memory",
     "ui",
     "image",
+    "delegate",
   ], path);
   const version = root.version ?? 1;
   if (version !== 1) throw new TypeError(`${path}: version must be 1`);
@@ -784,6 +901,38 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
       ...(readByteBudget === undefined ? {} : { readByteBudget }),
     };
   }
+  let delegate: QiDelegateConfig | undefined;
+  if (root.delegate !== undefined) {
+    const table = requireTable(root.delegate, `${path}: delegate`);
+    assertOnlyKeys(
+      table,
+      ["wall_time_ms", "max_steps_percent", "context_tokens_percent"],
+      `${path}: delegate`,
+    );
+    const wallTimeMs = optionalIntegerField(
+      table.wall_time_ms,
+      `${path}: delegate.wall_time_ms`,
+      DELEGATE_WALL_TIME_MS_MIN,
+      DELEGATE_WALL_TIME_MS_MAX,
+    );
+    const maxStepsPercent = optionalIntegerField(
+      table.max_steps_percent,
+      `${path}: delegate.max_steps_percent`,
+      1,
+      100,
+    );
+    const contextTokensPercent = optionalIntegerField(
+      table.context_tokens_percent,
+      `${path}: delegate.context_tokens_percent`,
+      1,
+      100,
+    );
+    delegate = {
+      ...(wallTimeMs === undefined ? {} : { wallTimeMs }),
+      ...(maxStepsPercent === undefined ? {} : { maxStepsPercent }),
+      ...(contextTokensPercent === undefined ? {} : { contextTokensPercent }),
+    };
+  }
   return {
     version: 1,
     ...(language === undefined ? {} : { language }),
@@ -803,6 +952,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(memory === undefined ? {} : { memory }),
     ...(ui === undefined ? {} : { ui }),
     ...(image === undefined ? {} : { image }),
+    ...(delegate === undefined ? {} : { delegate }),
   };
 }
 

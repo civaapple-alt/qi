@@ -11,7 +11,7 @@ import { AuthBackedModelPort } from "./auth-model-port.js";
 import { defaultUserConfigPath, findCompatibleEndpoint, loadUserConfig, removeCompatibleEndpoint } from "./config.js";
 import { persistLoginProviderDefaults } from "./login-persist.js";
 import { parseTuiCliArguments, qiCliVersion, refreshLaunchCapabilities, type TuiCliOptions } from "./cli.js";
-import { commandHelp, parseSkillInstallCommand, parseTaskStopCommand, parseTuiCommand, tuiCommands } from "./commands.js";
+import { commandHelp, parseJobStopCommand, parseSkillInstallCommand, parseTuiCommand, tuiCommands } from "./commands.js";
 import { InteractiveTui } from "./interactive.js";
 import {
   formatMemoryClaims,
@@ -104,6 +104,7 @@ async function main(): Promise<void> {
       options.allowDelegate = policy.allowDelegate;
       options.maxSteps = policy.maxSteps;
       options.maxActionsPerStep = policy.maxActionsPerStep;
+      options.delegateConfig = policy.delegateConfig;
       options.projectConfigPath = policy.projectConfigPath;
       if (policy.outputReserveTokensPreferred === undefined) {
         delete (options as { outputReserveTokensPreferred?: number }).outputReserveTokensPreferred;
@@ -139,6 +140,7 @@ async function main(): Promise<void> {
           : { outputReserveTokensPreferred: options.outputReserveTokensPreferred }),
         maxSteps: options.maxSteps,
         maxActionsPerStep: options.maxActionsPerStep,
+        delegateConfig: options.delegateConfig,
         allowWrite: options.allowWrite,
         allowVerify: options.allowVerify,
         allowExecute: options.allowExecute,
@@ -246,6 +248,7 @@ async function main(): Promise<void> {
       : { outputReserveTokensPreferred: options.outputReserveTokensPreferred }),
     maxSteps: options.maxSteps,
     maxActionsPerStep: options.maxActionsPerStep,
+    delegateConfig: options.delegateConfig,
     allowWrite: options.allowWrite,
     allowVerify: options.allowVerify,
     allowExecute: options.allowExecute,
@@ -293,7 +296,7 @@ async function main(): Promise<void> {
         ? []
         : [`verify ${runtime.verificationManifest.origin} ${runtime.verificationManifest.path} · ${runtime.verificationManifest.profiles.join(", ")}`]),
       ...(presenter.discoveryTip() === undefined ? [] : [presenter.discoveryTip()!]),
-      "commands /help · /settings · /memory · /goal · /login · /ask · /mode · /plan · /model · /effort · /next · /tasks · /skills · /mounts · /permissions · /shell · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
+      "commands /help · /settings · /memory · /goal · /login · /ask · /mode · /plan · /model · /effort · /next · /tasks · /jobs · /subagent · /skills · /mounts · /permissions · /shell · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
       "",
     ].join("\n"),
   );
@@ -431,32 +434,37 @@ async function main(): Promise<void> {
       if (!closing) readline.prompt();
       return;
     }
-    if (command?.name === "tasks" || command?.name === "task") {
+    if (command?.name === "jobs" || command?.name === "job") {
       let token: string;
       try {
-        const stopArgument = command.name === "task" && !/^stop\b/i.test(command.argument.trim())
+        const stopArgument = command.name === "job" && !/^stop\b/i.test(command.argument.trim())
           ? `stop ${command.argument}`
           : command.argument;
-        token = parseTaskStopCommand(stopArgument);
+        token = parseJobStopCommand(stopArgument);
       } catch (error) {
         process.stderr.write(`${message(error)}\n`);
         if (!closing) readline.prompt();
         return;
       }
-      const tasks = runtime.tasks();
-      const taskId = (/^\d+$/.test(token) ? tasks[Number(token) - 1]?.taskId : undefined) ?? token;
-      const task = runtime.stopTask(taskId)
+      const jobs = runtime.tasks();
+      const taskId = (/^\d+$/.test(token) ? jobs[Number(token) - 1]?.taskId : undefined) ?? token;
+      const job = runtime.stopTask(taskId)
         .then(() => {
           presenter?.update(runtime.events(), runtime.view());
-          presenter?.setPanel("tasks", `Stop requested for ${taskId}.`);
+          presenter?.setPanel("jobs", `Stop requested for ${taskId}.`);
           process.stdout.write(`${presenter?.render().join("\n") ?? ""}\n`);
         })
-        .catch((error: unknown) => { process.stderr.write(`ProcessTask error: ${message(error)}\n`); })
+        .catch((error: unknown) => { process.stderr.write(`Job error: ${message(error)}\n`); })
         .finally(() => {
-          active.delete(task);
+          active.delete(job);
           if (!closing) readline.prompt();
         });
-      active.add(task);
+      active.add(job);
+      return;
+    }
+    if (command?.name === "tasks" || command?.name === "task") {
+      process.stderr.write("Background processes moved to /jobs. Use /jobs stop <N|ID>. /tasks tracks Subagents.\n");
+      if (!closing) readline.prompt();
       return;
     }
     if (command?.name === "mode") {

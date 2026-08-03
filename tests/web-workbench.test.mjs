@@ -501,7 +501,7 @@ test("Web workbench renders durable ProcessTasks and subscribes to their lifecyc
   const address = await server.listen();
   try {
     const page = await fetch(address.url).then((response) => response.text());
-    assert.match(page, /Background ProcessTasks/);
+    assert.match(page, /Background Jobs/);
     const application = await fetch(`${address.url}/app.js`).then((response) => response.text());
     assert.match(application, /function renderTasks/);
     for (const eventType of ["task.started", "task.stop.requested", "task.exited", "task.lost"]) {
@@ -513,6 +513,87 @@ test("Web workbench renders durable ProcessTasks and subscribes to their lifecyc
     assert.equal(workbench.view.tasks[taskId].status, "running");
     assert.equal(workbench.view.tasks[taskId].command, "npm");
     assert.deepEqual(workbench.view.tasks[taskId].args, ["run", "dev"]);
+  } finally {
+    await server.close();
+  }
+});
+
+test("Web workbench renders Subagent Tasks for the selected Run", async () => {
+  const store = new InMemoryEventStore();
+  const hub = new SessionEventHub();
+  const sessionId = "ses_web_delegations";
+  const childSessionId = "ses_web_child_001";
+  const runId = "run_web_delegations";
+  const delegationId = "dlg_web_sub_001";
+  const writer = new EventWriter(store, sessionId);
+  const actor = { kind: "runtime", id: "test" };
+  writer.append("session.created", { title: "Parent research" }, actor);
+  writer.append("run.triggered", { runId, trigger: "user", input: "Explore auth" }, actor);
+  writer.append("run.started", { runId }, actor);
+  writer.append("delegation.created", {
+    runId,
+    delegationId,
+    childSessionId,
+    outcome: "Map login and session expiry paths",
+    returnPolicy: "result",
+    depth: 1,
+    receiptId: "rcp_web_delegate",
+    parentLeaseId: "lea_tui_delegate_scope",
+    childLeaseId: "lea_web_child",
+    childSubject: "agent_child",
+    contextRefs: ["artifact://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    contractRef: "artifact://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    resourceEnvelope: { maxSteps: 8, contextTokens: 40_000 },
+  }, actor);
+  writer.append("delegation.returned", {
+    runId,
+    delegationId,
+    childSessionId,
+    outcome: "timed_out",
+    evidenceRefs: [],
+    coordinationWallTimeMs: 300_000,
+    reasons: ["child wall clock expired"],
+  }, actor);
+  writer.append("step.started", { runId, stepId: "stp_web_delegations" }, actor);
+  writer.append("model.completed", {
+    runId,
+    stepId: "stp_web_delegations",
+    requestId: "req_web_delegations",
+    provider: "test",
+    model: "deterministic",
+    finishReason: "stop",
+    text: "Partial research after Subagent timeout.",
+    actionCalls: [],
+  }, actor);
+  writer.append("step.completed", {
+    runId,
+    stepId: "stp_web_delegations",
+    finishReason: "response",
+  }, actor);
+  writer.append("run.completed", {
+    runId,
+    completionKind: "response",
+    evaluationIds: [],
+  }, actor);
+
+  const server = new QiWebServer({ eventStore: store, eventHub: hub });
+  const address = await server.listen();
+  try {
+    const page = await fetch(address.url).then((response) => response.text());
+    assert.match(page, /Subagent Tasks/);
+    const application = await fetch(`${address.url}/app.js`).then((response) => response.text());
+    assert.match(application, /function renderSubagents/);
+    assert.match(application, /data-child-session/);
+    for (const eventType of ["delegation.created", "delegation.returned"]) {
+      assert.match(application, new RegExp(eventType.replace(".", "\\.")));
+    }
+
+    const workbench = await fetch(`${address.url}/api/session/${sessionId}/workbench`).then((response) => response.json());
+    const delegation = workbench.view.runs[runId].delegations[delegationId];
+    assert.equal(delegation.status, "timed_out");
+    assert.equal(delegation.childSessionId, childSessionId);
+    assert.equal(delegation.outcome, "Map login and session expiry paths");
+    assert.deepEqual(delegation.reasons, ["child wall clock expired"]);
   } finally {
     await server.close();
   }

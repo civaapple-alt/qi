@@ -10,6 +10,26 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Settings → Subagent / delegate (`/subagent`, `/delegate`): user-config `[delegate]` envelope —
+  `wall_time_ms` (default 5m), `max_steps_percent` / `context_tokens_percent` (default 50%), plus fixed
+  batch max 4 and depth 1. Writes `$QI_HOME/config.toml` and hot-applies to the next `delegate` Action.
+
+- Plan-mode parallel depth-1 research: `delegate` accepts `tasks[]` (1–4) via `runDelegatedBatch`; `/tasks`
+  tracks Subagent research (Enter opens child projection). Children keep explore tools and gain `fetch` /
+  `web_map` when the parent has network. Default child budgets are 50% of parent context/max-steps, 5-minute
+  wall clock, and `maxUses = childMaxSteps × maxActionsPerStep` (ADR-0035).
+
+- Cursor-style Subagent briefs: `delegate` accepts optional `focus[]` / `returns[]` / `constraints[]` (per task
+  or top-level). Qi expands them into a Focus / Return / Constraints child prompt (research defaults fill gaps);
+  `/tasks` detail shows the full brief from the child Run input.
+
+- Web workbench Subagent Tasks pane: selected Run lists depth-1 delegations (title, status including
+  `timed_out`) with Open-child to load the child Session read-only; live via `delegation.created` /
+  `delegation.returned`.
+
+- Read-only `artifact_get` tool: load Artifact store content by `artifact://` ref (delegate `resultRef` /
+  `summaryRef`). Workspace `read` rejects `artifact://` with a clear error.
+
 - `web_map` network tool: discover a bounded same-origin URL list from `sitemap.xml`, text/plain `llms.txt`,
   `robots.txt` Sitemap lines, or HTML anchors (including nav). Registered with `fetch` under the network
   capability; same public-DNS / no-credentials boundary. Prefer `web_map` before batching `fetch` on docs sites.
@@ -57,6 +77,27 @@ backup plus reset or a new data root rather than an automatic migration.
   Action summaries — so continue-after-failure does not require chaining runs/steps/actions.
 
 ### Changed
+
+- Background ProcessTask operator surface renamed from `/tasks` to `/jobs` (statusline `jobs N`, Web “Background
+  Jobs”). `/tasks` now lists Subagent research Tasks. Protocol events remain `task.*`; the model tool stays
+  `task`. Old `/tasks stop` prints a redirect notice (ADR-0035).
+
+- Subagent return path: `resultRef` keeps the full child deliverable (capped); `summary`/`summaryRef` stay short
+  previews. `delegate` describes the child envelope, injects budget into the child brief, and `parentHint` steers
+  parents to `artifact_get(resultRef)` / `contextRefs` instead of truncation-driven extract fan-out (ADR-0035).
+
+- TUI timeline Tasks block collapses to a count header (plus currently running rows); finished Subagent detail
+  stays on `/tasks`.
+
+### Fixed
+
+- Live TUI now receives parent `delegation.created` / `delegation.returned` while `delegate` is still running
+  (Coordinator forwards `onEvent`). Previously `/tasks` could show “no Subagent tasks” and the timeline omitted
+  the Tasks block until the Action settled, even though Web/store already had child `fetch`/`web_map` work.
+
+- Child wall-time expiry now settles as `timed_out` (not `cancelled`). `delegate` returns per-child `outcome`
+  plus a `parentHint` so the parent integrates partial summaries instead of treating the fan-out as a user
+  cancel; the TUI card shows `! … timed out` rather than `✓ … rejected`.
 
 - `fetch` HTML responses now include an optional bounded same-origin `links` list (url + anchor text) extracted
   before nav/header/footer/aside stripping, so sidebar directories remain available without flooding page `content`.

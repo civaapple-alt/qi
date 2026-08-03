@@ -112,14 +112,22 @@ import {
 import { SqliteEffectJournal } from "@civaapple/qi-node/workspace";
 import { createCodeActTool } from "./codeact-tool.js";
 import { createAskQuestionTool, RunQuestionCoordinator } from "./ask-question-tool.js";
-import type { QiCapabilityConfig, QiImageConfig, QiShellConfig } from "./config.js";
+import type {
+  QiCapabilityConfig,
+  QiImageConfig,
+  QiShellConfig,
+  ResolvedDelegateConfig,
+} from "./config.js";
 import {
   defaultUserConfigPath,
+  persistUserDelegateConfig,
   persistUserMaxActionsPerStep,
   persistUserMaxSteps,
   persistUserShell,
+  resolveDelegateConfig,
+  type QiDelegateConfig,
 } from "./config.js";
-import { createDelegateTool } from "./delegate-tool.js";
+import { childDelegateBudgetDefaults, createDelegateTool } from "./delegate-tool.js";
 import { defaultProjectConfigPath } from "./paths.js";
 import {
   assertMountPathAllowed,
@@ -156,6 +164,7 @@ const OPTIONAL_LEASE_IDS = [
   "lea_tui_network",
   "lea_tui_background",
   "lea_tui_delegate",
+  "lea_tui_delegate_scope",
 ] as const;
 
 export interface RuntimeMount {
@@ -190,6 +199,8 @@ export interface TuiRuntimeOptions {
   outputReserveTokensPreferred?: number;
   maxSteps?: number;
   maxActionsPerStep?: number;
+  /** Resolved `[delegate]` envelope from user config (defaults applied). */
+  delegateConfig?: ResolvedDelegateConfig;
   allowWrite?: boolean;
   allowVerify?: boolean;
   allowExecute?: boolean;
@@ -289,6 +300,7 @@ export class TuiRuntime {
   #outputReserveTokensPreferred: number | undefined;
   #maxSteps: number;
   #maxActionsPerStep: number;
+  #delegateConfig: ResolvedDelegateConfig;
   readonly #subject: string;
   readonly #eventStore: EventStore;
   readonly #ownedStore: SessionRepository | undefined;
@@ -332,6 +344,7 @@ export class TuiRuntime {
   #allowBackground = false;
   #allowDelegate = false;
   readonly   #optionalTools = new Map<string, RegistrationHandle>();
+  readonly #onEvent: ((event: SessionEvent) => void) | undefined;
   #lastGoalContinuation: GoalContinuationDecision | undefined;
 
   private constructor(
@@ -387,7 +400,9 @@ export class TuiRuntime {
     this.#maxActionsPerStep = assertMaxActionsPerStep(
       options.maxActionsPerStep ?? TUI_DEFAULT_MAX_ACTIONS_PER_STEP,
     );
+    this.#delegateConfig = resolveDelegateConfig(options.delegateConfig);
     this.#subject = options.subject ?? "main-agent";
+    this.#onEvent = options.onEvent;
     this.#eventStore = eventStore;
     this.#ownedStore = ownedStore;
     this.#artifactStore = artifactStore;
@@ -590,6 +605,7 @@ export class TuiRuntime {
     registry.register("tree", builtinTools.tree);
     registry.register("git", builtinTools.git);
     registry.register("artifact", builtinTools.artifact);
+    registry.register("artifact_get", builtinTools.artifact_get);
     registry.register("skill", createTuiSkillTool(skills, options.workspaceRoot));
     registry.register("qi_introspect", createQiIntrospectionTool());
     registry.register("qi_session_inspect", createQiSessionInspectionTool(eventStore, runtimeSessionId));
@@ -764,6 +780,10 @@ export class TuiRuntime {
     return this.#maxActionsPerStep;
   }
 
+  delegateConfig(): ResolvedDelegateConfig {
+    return this.#delegateConfig;
+  }
+
   /**
    * Hot-apply main-Run Step budget: persist to `$QI_HOME/config.toml` and use on the next Run.
    */
@@ -801,6 +821,34 @@ export class TuiRuntime {
     }
     this.#maxActionsPerStep = maxActionsPerStep;
     return { maxActionsPerStep, configPath };
+  }
+
+  /**
+   * Hot-apply Subagent `[delegate]` envelope: persist to `$QI_HOME/config.toml` and use on the next
+   * `delegate` Action (does not interrupt a running child).
+   */
+  async applyDelegateConfig(
+    patch: QiDelegateConfig,
+    options?: { persist?: boolean; configPath?: string },
+  ): Promise<{ config: ResolvedDelegateConfig; configPath: string }> {
+    const configPath = options?.configPath ?? defaultUserConfigPath();
+    if (options?.persist !== false) {
+      const saved = await persistUserDelegateConfig(patch, configPath);
+      this.#delegateConfig = resolveDelegateConfig(saved.config.delegate);
+    } else {
+      this.#delegateConfig = resolveDelegateConfig({ ...this.#delegateConfig, ...patch });
+    }
+    if (this.#allowDelegate) {
+      await this.#syncOptionalTools({
+        write: this.#allowWrite,
+        verify: this.#allowVerify,
+        network: this.#allowNetwork,
+        execute: this.#allowExecute,
+        background: this.#allowBackground,
+        delegate: this.#allowDelegate,
+      });
+    }
+    return { config: this.#delegateConfig, configPath };
   }
 
   /**
@@ -960,6 +1008,21 @@ export class TuiRuntime {
     else this.#closeOptionalTool("task");
 
     if (capabilities.delegate) {
+      const childTools = [
+        "read",
+        "list",
+        "search",
+        "find",
+        "tree",
+        "git",
+        ...(capabilities.network ? ["fetch", "web_map"] as const : []),
+      ];
+      const childResources = [
+        "file:**",
+        "tree:**",
+        "vcs:.",
+        ...(capabilities.network ? ["network:https://**", "network:http://**"] as const : []),
+      ];
       this.#setOptionalTool("delegate", createDelegateTool({
         eventStore: this.#eventStore,
         broker: this.#broker,
@@ -969,8 +1032,22 @@ export class TuiRuntime {
         model: this.#resolveModel,
         workspaceRoot: this.#workspaceRoot,
         parentSubject: this.#subject,
-        parentLeaseId: "lea_tui_read",
-        childTools: ["read", "list", "search", "find", "tree", "git"],
+        parentLeaseId: "lea_tui_delegate_scope",
+        childTools,
+        childResources,
+        budgetDefaults: () => childDelegateBudgetDefaults(
+          {
+            contextBudgetTokens: this.#contextBudgetTokens,
+            maxSteps: this.#maxSteps,
+            maxActionsPerStep: this.#maxActionsPerStep,
+          },
+          {
+            wallTimeMs: this.#delegateConfig.wallTimeMs,
+            maxStepsPercent: this.#delegateConfig.maxStepsPercent,
+            contextTokensPercent: this.#delegateConfig.contextTokensPercent,
+          },
+        ),
+        ...(this.#onEvent === undefined ? {} : { onEvent: this.#onEvent }),
       }));
     } else {
       this.#closeOptionalTool("delegate");
@@ -2129,7 +2206,7 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
     {
       leaseId: "lea_tui_read",
       subject,
-      tools: ["read", "list", "search", "find", "tree", "git", "skill", "qi_introspect", "qi_session_inspect", "memory", "read_image"],
+      tools: ["read", "list", "search", "find", "tree", "git", "skill", "qi_introspect", "qi_session_inspect", "memory", "read_image", "artifact_get"],
       effects: ["read"],
       resources: [
         "file:**",
@@ -2142,6 +2219,7 @@ function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: strin
         "qi:session:**",
         "memory:propose:**",
         "artifact:**",
+        "artifact-store:local:**",
       ],
       expiresAt,
     },
@@ -2275,6 +2353,28 @@ function grantOptionalRuntimeLeases(
       tools: ["delegate"],
       effects: ["read"],
       resources: ["delegation:local"],
+      expiresAt,
+    });
+    // Synthetic parent lease for child narrowing (explore ± network). Not the parent's action lease.
+    leases.push({
+      leaseId: "lea_tui_delegate_scope",
+      subject,
+      tools: [
+        "read",
+        "list",
+        "search",
+        "find",
+        "tree",
+        "git",
+        ...(allowNetwork ? ["fetch", "web_map"] : []),
+      ],
+      effects: ["read"],
+      resources: [
+        "file:**",
+        "tree:**",
+        "vcs:.",
+        ...(allowNetwork ? ["network:https://**", "network:http://**"] : []),
+      ],
       expiresAt,
     });
   }

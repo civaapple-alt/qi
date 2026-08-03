@@ -81,7 +81,8 @@ Ordinary file tools cannot read or edit that directory; `plan_document read/edit
 The `artifact` Tool also writes only to the machine-private project store. Its mutation resource includes the
 content digest (`artifact-store:local:<sha256>`), so distinct content-addressed writes in one Step do not conflict;
 the capability lease remains bounded by `artifact-store:local:**`. An Artifact reference is not a Workspace file
-mutation or evidence that an implementation task was completed.
+mutation or evidence that an implementation task was completed. Read-effect `artifact_get` loads store content by
+`artifact://` ref (for example a Subagent `resultRef`); workspace `read` rejects `artifact://` paths.
 
 Image ingestion supports PNG, JPEG, GIF, and WebP with a 64 MiB source limit and 100 MP decode guard. Sources are
 clipboard bytes, Network-authorized public HTTP(S) URLs, and Workspace/mount file paths (absolute paths under an

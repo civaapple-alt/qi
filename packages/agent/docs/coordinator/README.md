@@ -54,8 +54,8 @@ console.log(gate.decision("eval_coding").enabledByDefault); // false until paire
 
 ## Public API
 
-`Coordinator`, `runDelegatedTurn`, `contextBlocksFromRefs`, delegation contract/handle/submission types, workspace
-branch port, and `MultiAgentBaselineGate`.
+`Coordinator`, `runDelegatedTurn`, `runDelegatedBatch`, `contextBlocksFromRefs`, delegation
+contract/handle/submission types, workspace branch port, and `MultiAgentBaselineGate`.
 
 ## Change guide
 

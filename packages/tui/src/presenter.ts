@@ -692,7 +692,7 @@ export class TuiPresenter {
       model.contextPercent === undefined ? undefined : `${model.contextPercent}%`,
       model.cacheHitPercent === undefined ? undefined : `CH${model.cacheHitPercent.toFixed(1)}%`,
       model.filesChanged > 0 ? `${model.filesChanged} files` : undefined,
-      model.activeTasks > 0 ? `tasks ${model.activeTasks}` : undefined,
+      model.activeTasks > 0 ? `jobs ${model.activeTasks}` : undefined,
     ].filter((field): field is string => Boolean(field)).join(" · ");
     // Mode is a safety boundary — always keep it on the right.
     const top = splitKeepRight(left, model.mode, usable);
@@ -720,7 +720,8 @@ export class TuiPresenter {
     if (!waiting) parts.push(phase);
     if (action?.status === "running") {
       if (action.toolName === "delegate") {
-        parts.push("waiting on subagent");
+        const running = Object.values(run?.delegations ?? {}).filter((item) => item.status === "running").length;
+        parts.push(running > 1 ? `waiting on ${running} subagents` : "waiting on subagent");
       } else if (action.toolName === "shell" || action.toolName === "script" || action.toolName === "verify") {
         const events = this.actionEventsFor(action.actionId);
         const input = record(events.proposed?.data.input);
@@ -828,7 +829,7 @@ export class TuiPresenter {
       `run ${runIndex}/${view.runOrder.length} ${runDisplayStatus(run)}`,
       `step ${stepIndex || "—"}/${run.stepOrder.length || "—"}`,
       `action ${actionIndex || "—"}/${actions.length || "—"}${action ? ` ${action.status}` : ""}`,
-      tasks > 0 ? `tasks ${tasks}` : undefined,
+      tasks > 0 ? `jobs ${tasks}` : undefined,
     ].filter(Boolean).join(" · ");
   }
 
@@ -1215,8 +1216,21 @@ export class TuiPresenter {
   }
 
   renderAgents(): string[] {
+    return this.renderSubagentList("Subagents  (/tasks · /runs → Agents)");
+  }
+
+  /** Subagent research Tasks panel (`/tasks`). */
+  renderTasks(): string[] {
     const run = this.selectedRun();
-    const lines = ["Subagents  (select in /runs → Agents)", "  depth-1 only · child transcript stays in its Session"];
+    if (this.#delegationId && run?.delegations[this.#delegationId]) {
+      return this.renderSubagentDetail(this.#delegationId);
+    }
+    return this.renderSubagentList("Tasks  (Subagent research · depth-1)");
+  }
+
+  private renderSubagentList(title: string): string[] {
+    const run = this.selectedRun();
+    const lines = [title, "  depth-1 only · child transcript stays in its Session"];
     if (!run) return [...lines, "  No selected Run."];
     const ids = Object.keys(run.delegations);
     if (ids.length === 0) return [...lines, "  No delegations in this Run."];
@@ -1224,9 +1238,11 @@ export class TuiPresenter {
       const delegation = run.delegations[id];
       if (!delegation) return;
       const selected = this.#delegationId === id ? "›" : " ";
+      const childTokens = this.childSessionTokens(delegation.childSessionId);
+      const tokenPart = childTokens === undefined ? undefined : `${formatTokens(childTokens)} tokens`;
       lines.push(
         `  ${selected} ${index + 1}. ${short(id)} · ${delegation.status} · child ${short(delegation.childSessionId)}`,
-        `     ${oneLine(delegation.outcome, 100)}`,
+        `     ${[oneLine(delegation.outcome, 100), tokenPart].filter(Boolean).join(" · ")}`,
       );
       if (delegation.summaryRef) lines.push(`     summary ${delegation.summaryRef}`);
       if (delegation.reasons?.length) lines.push(`     ${delegation.reasons.join(" · ")}`);
@@ -1234,6 +1250,49 @@ export class TuiPresenter {
         lines.push(`     wall ${formatDuration(delegation.coordinationWallTimeMs)}`);
       }
     });
+    return lines;
+  }
+
+  private renderSubagentDetail(delegationId: string): string[] {
+    const run = this.selectedRun();
+    const delegation = run?.delegations[delegationId];
+    if (!delegation) return ["Tasks", "  Delegation not found."];
+    const child = this.#childViewLookup?.(delegation.childSessionId);
+    const childRun = child?.currentRunId ? child.runs[child.currentRunId] : undefined;
+    const brief = typeof childRun?.input === "string" && childRun.input.trim()
+      ? childRun.input.trim()
+      : delegation.outcome;
+    const lines = [
+      `Task  ${short(delegationId)} · ${delegation.status}`,
+      `  child Session ${delegation.childSessionId}`,
+    ];
+    lines.push("", "  Brief");
+    for (const line of brief.split(/\r?\n/)) {
+      lines.push(line.length === 0 ? "" : `  ${line}`);
+    }
+    const childTokens = this.childSessionTokens(delegation.childSessionId);
+    if (childTokens !== undefined) lines.push("", `  child context ${formatTokens(childTokens)} tokens`);
+    if (delegation.summaryRef) lines.push(`  summary ${delegation.summaryRef}`);
+    if (delegation.resultRef) lines.push(`  result ${delegation.resultRef}`);
+    if (delegation.reasons?.length) lines.push(`  ${delegation.reasons.join(" · ")}`);
+    if (delegation.coordinationWallTimeMs !== undefined) {
+      lines.push(`  wall ${formatDuration(delegation.coordinationWallTimeMs)}`);
+    }
+    if (childRun) {
+      lines.push("", "  Recent child Steps");
+      for (const stepId of childRun.stepOrder.slice(-4)) {
+        const step = childRun.steps[stepId];
+        if (!step) continue;
+        const actions = Object.values(childRun.actions).filter((action) => action.stepId === stepId);
+        lines.push(`  · ${short(stepId)} ${step.status} · ${actions.length} actions`);
+        for (const action of actions.slice(-3)) {
+          lines.push(`      ${statusGlyph(action.status)} ${action.toolName} ${action.status}`);
+        }
+      }
+    } else if (delegation.status === "running") {
+      lines.push("", "  Child projection not available yet · Esc back to list");
+    }
+    lines.push("", "  Esc closes · child transcript stays in the child Session");
     return lines;
   }
 
@@ -1249,12 +1308,14 @@ export class TuiPresenter {
     return lines;
   }
 
-  renderTasks(): string[] {
+  renderJobs(): string[] {
     const view = this.#view;
-    const tasks = (view?.taskOrder ?? []).map((taskId) => view?.tasks[taskId]).filter(Boolean);
-    const lines = [`ProcessTasks ${tasks.length}`];
-    if (tasks.length === 0) return [...lines, "  No background tasks. They require the background capability and the task tool."];
-    tasks.forEach((task, index) => {
+    const jobs = (view?.taskOrder ?? []).map((taskId) => view?.tasks[taskId]).filter(Boolean);
+    const lines = [`Jobs ${jobs.length}`];
+    if (jobs.length === 0) {
+      return [...lines, "  No background Jobs. They require the background capability and the task tool."];
+    }
+    jobs.forEach((task, index) => {
       if (!task) return;
       const activity = this.#taskActivity.get(task.taskId);
       const command = [task.command, ...task.args].join(" ");
@@ -1267,7 +1328,7 @@ export class TuiPresenter {
         lines.push(`     ${activity.stream} · live${activity.truncated ? " · truncated" : ""}`);
         lines.push(...boundedTailLines(activity.text, 4).map((line) => `       ${line}`));
       }
-      if (task.status === "running") lines.push(`     /tasks → Enter · /tasks stop ${task.taskId}`);
+      if (task.status === "running") lines.push(`     /jobs → Enter · /jobs stop ${task.taskId}`);
     });
     return lines;
   }
@@ -1363,6 +1424,7 @@ export class TuiPresenter {
       case "actions": return this.renderActions();
       case "agents": return this.renderAgents();
       case "skills": return this.renderSkills();
+      case "jobs": return this.renderJobs();
       case "tasks": return this.renderTasks();
       case "diff": return this.renderDiff();
       case "plan": return this.renderPlan();
@@ -1714,24 +1776,25 @@ export class TuiPresenter {
   private renderDelegations(run: RunView): string[] {
     const ids = Object.keys(run.delegations);
     if (ids.length === 0) return [];
-    const running = ids.filter((id) => run.delegations[id]?.status === "running").length;
-    const finished = ids.length - running;
-    const header = running > 0
-      ? `Subagents · ${running} running${finished > 0 ? ` · ${finished} finished` : ""} · /agents`
-      : `Subagents · ${ids.length} finished · /agents`;
+    const runningIds = ids.filter((id) => run.delegations[id]?.status === "running");
+    const finished = ids.length - runningIds.length;
+    const header = runningIds.length > 0
+      ? `Tasks · ${runningIds.length} running${finished > 0 ? ` · ${finished} finished` : ""} · /tasks`
+      : `Tasks · ${ids.length} finished · /tasks`;
+    // Timeline stays a count strip; finished history and Brief live in /tasks.
+    if (this.#density === "compact" || runningIds.length === 0) return [header];
     const lines = [header];
-    for (const id of ids) {
+    for (const id of runningIds.slice(0, 4)) {
       const delegation = run.delegations[id];
       if (!delegation) continue;
-      const label = delegation.status === "running" ? "Running" : delegation.status === "accepted" ? "Finished" : delegation.status;
       const title = oneLine(delegation.outcome || short(id), 72);
       const childTokens = this.childSessionTokens(delegation.childSessionId);
       const tokenPart = childTokens === undefined ? undefined : `${formatTokens(childTokens)} tokens`;
       lines.push(`  ${delegationGlyph(delegation.status)} ${title}`);
-      lines.push(
-        `    ${[label, tokenPart, delegation.summaryRef].filter(Boolean).join(" · ")}`,
-      );
-      if (delegation.reasons?.length) lines.push(`    ${delegation.reasons.join(" · ")}`);
+      lines.push(`    ${["Running", tokenPart].filter(Boolean).join(" · ")}`);
+    }
+    if (runningIds.length > 4) {
+      lines.push(`  … ${runningIds.length - 4} more running · /tasks`);
     }
     return lines;
   }
@@ -1934,7 +1997,7 @@ export class TuiPresenter {
       "Coordination",
       "  Fan-out aggregation is not available in this runtime build.",
       "  No simulated settled/running/failed members are shown (ADR 0010 / P2a).",
-      "  Depth-1 Subagents remain visible under /agents.",
+      "  Depth-1 Subagents remain visible under /tasks.",
     ];
   }
 

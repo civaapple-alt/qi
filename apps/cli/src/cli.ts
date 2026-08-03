@@ -6,10 +6,12 @@ import {
   ensureUserShellConfig,
   findCompatibleEndpoint,
   loadUserConfig,
+  resolveDelegateConfig,
   resolveLanguage,
   resolveTheme,
   resolveTimelineDensity,
   type CapabilityOverrides,
+  type ResolvedDelegateConfig,
 } from "./config.js";
 import { defaultSessionDataRoot } from "./paths.js";
 import {
@@ -72,6 +74,8 @@ export interface TuiCliOptions {
   /** Explicit CLI override retained across in-process Session relaunches. */
   maxStepsOverride?: number;
   maxActionsPerStep: number;
+  /** Resolved `[delegate]` Subagent envelope from user config. */
+  delegateConfig: ResolvedDelegateConfig;
   configPath?: string;
   projectConfigPath?: string;
   mounts: readonly CliMountSpec[];
@@ -248,6 +252,7 @@ export async function parseTuiCliArguments(
       maxSteps,
       ...(values.has("--max-steps") ? { maxStepsOverride: maxSteps } : {}),
       maxActionsPerStep,
+      delegateConfig: resolveDelegateConfig(loaded.config.delegate),
       language: resolveLanguage(loaded.config),
       theme: resolveTheme(loaded.config),
       timelineDensity: resolveTimelineDensity(loaded.config),
@@ -298,6 +303,7 @@ export async function refreshLaunchCapabilities(
   outputReserveTokensPreferred?: number;
   projectConfigPath: string;
   shell?: import("./config.js").QiShellConfig;
+  delegateConfig: ResolvedDelegateConfig;
 }> {
   const projectConfigPath = options.projectConfigPath
     ?? projectConfigPathForWorkspace(options.workspaceRoot, environment);
@@ -308,6 +314,7 @@ export async function refreshLaunchCapabilities(
       projectConfigPath,
       maxSteps: options.maxStepsOverride ?? TUI_DEFAULT_MAX_STEPS,
       maxActionsPerStep: options.maxActionsPerStep ?? TUI_DEFAULT_MAX_ACTIONS_PER_STEP,
+      delegateConfig: resolveDelegateConfig(),
       ...(options.outputReserveTokensPreferred === undefined
         ? {}
         : { outputReserveTokensPreferred: options.outputReserveTokensPreferred }),
@@ -332,6 +339,7 @@ export async function refreshLaunchCapabilities(
       ?? loaded.config.maxSteps
       ?? TUI_DEFAULT_MAX_STEPS,
     maxActionsPerStep: loaded.config.maxActionsPerStep ?? TUI_DEFAULT_MAX_ACTIONS_PER_STEP,
+    delegateConfig: resolveDelegateConfig(loaded.config.delegate),
     ...(loaded.config.outputReserveTokens === undefined
       ? {}
       : { outputReserveTokensPreferred: loaded.config.outputReserveTokens }),
