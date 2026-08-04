@@ -90,7 +90,9 @@ before it can enter the Tool Registry.
   through its `.skill-lock.json` entries until a human activates a Skill. Activation state is stored under
   `$QI_HOME/resources` and is bound to the lock entry hash; lock drift deactivates the Skill. Active precedence is
   project `.qi/skills`, project `.agents/skills`, user `$QI_HOME/resources/skills`, then activated global
-  `~/.agents/skills`. Agent roots are never modified and do not grant authority. `~/.codex/skills` and
+  `~/.agents/skills`. The TUI `/skills` hub lists always-on Workspace/user Qi (and workspace `.agents`) Skills
+  separately from the global activation manager so operators can see catalog entries that need no toggle. Agent
+  roots are never modified and do not grant authority. `~/.codex/skills` and
   `~/.claude/skills` are not scanned by default; an explicit local path or configured compatibility root is required.
   The TUI autocompletes active names after `/skill:` but requires a user task before starting a Skill Run. If the
   Workspace root is the user's home directory, the overlapping `.agents/skills` path remains global and lock-gated.
