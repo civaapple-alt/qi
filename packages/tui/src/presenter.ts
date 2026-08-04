@@ -1337,14 +1337,17 @@ export class TuiPresenter {
 
   renderSkills(): string[] {
     const zh = this.#locale === "zh";
+    const alwaysOn = this.#skills.filter((skill) => !(skill.scope === "user" && skill.origin === "agent")).length;
     const enabled = this.#skills.filter((skill) => skill.origin === "agent").length;
     const available = this.#skillCandidates.filter((skill) => skill.source === "global-agent").length;
     return [
       zh ? "技能  (/skills)" : "Skills (/skills)",
-      zh ? "  1. 启用 / 停用全局 Skill" : "  1. Enable / disable global Skills",
+      zh ? "  1. 始终启用的 Skill" : "  1. Always-on Skills",
+      zh ? `     ${alwaysOn} 个 · Workspace / 用户 Qi · 无需开关` : `     ${alwaysOn} · Workspace / user Qi · no toggle`,
+      zh ? "  2. 启用 / 停用全局 Skill" : "  2. Enable / disable global Skills",
       zh ? `     ${enabled} 个已启用 · ${available} 个可启用` : `     ${enabled} enabled · ${available} available`,
-      zh ? "  2. 安装技能 → 选择范围 → 输入名称或路径" : "  2. Install skill → choose scope → enter a name or path",
-      zh ? "  启用后使用 /skill:<name> <task> 调用 Skill" : "  Use /skill:<name> <task> after enabling a Skill",
+      zh ? "  3. 安装技能 → 选择范围 → 输入名称或路径" : "  3. Install skill → choose scope → enter a name or path",
+      zh ? "  使用 /skill:<name> <task> 调用 Skill" : "  Use /skill:<name> <task> to invoke a Skill",
     ];
   }
 
@@ -2159,13 +2162,18 @@ export class TuiPresenter {
     const duration = elapsed(events.started?.occurredAt, events.terminal?.occurredAt);
     const activity = this.#actionActivity.get(action.actionId);
     const activityLines = activity ? normalizedLineCount(activity.text) : 0;
+    const input = events.proposed?.data.input;
+    const subjectHint = action.toolName === "read_image"
+      ? this.readImageAttachmentLabel(input)
+      : undefined;
     return {
       actionId: action.actionId,
       toolName: action.toolName,
       effect: action.effect,
       status: action.status,
-      ...(events.proposed?.data.input === undefined ? {} : { input: events.proposed.data.input }),
+      ...(input === undefined ? {} : { input }),
       ...(output === undefined ? {} : { output }),
+      ...(subjectHint === undefined ? {} : { subjectHint }),
       ...(events.terminal?.type === "action.failed" ? { errorCode: events.terminal.data.errorCode } : {}),
       ...(events.terminal?.type === "action.indeterminate"
         ? {
@@ -2187,6 +2195,26 @@ export class TuiPresenter {
         },
       }),
     };
+  }
+
+  /** Map read_image artifactRef back to the Run's `image #N · source` label when possible. */
+  private readImageAttachmentLabel(input: unknown): string | undefined {
+    const view = this.#view;
+    if (!view || typeof input !== "object" || input === null) return undefined;
+    const artifactRef = (input as { artifactRef?: unknown }).artifactRef;
+    if (typeof artifactRef !== "string" || !artifactRef.startsWith("artifact://")) return undefined;
+    for (const runId of view.runOrder) {
+      const content = view.runs[runId]?.content ?? [];
+      let index = 0;
+      for (const part of content) {
+        if (part.type !== "image") continue;
+        if (part.originalArtifactRef === artifactRef) {
+          return `image #${index + 1} · ${part.source}`;
+        }
+        index += 1;
+      }
+    }
+    return undefined;
   }
 
   private actionOrder(run: RunView | undefined): string[] {

@@ -38,6 +38,8 @@ import {
 } from "../apps/cli/dist/index.js";
 import { createAskQuestionTool } from "../apps/cli/dist/ask-question-tool.js";
 import { createPlanDocumentTool, validateFormalPlan } from "../apps/cli/dist/plan-tool.js";
+import { McpBindingPanel } from "../apps/cli/dist/panels/mcp-binding-panel.js";
+import { mcpServerMaxVisible } from "../apps/cli/dist/panels/flows.js";
 import { visibleWidth } from "@civaapple/qi-tui";
 
 test("TUI command catalog separates inspection, navigation, and control", () => {
@@ -206,6 +208,58 @@ test("Memory tool has a dedicated lifecycle card", () => {
   assert.match(card, /Memory · project/);
   assert.match(card, /The project uses pnpm/);
   assert.match(card, /pending user confirmation/);
+});
+
+test("read_image card prefers image #N · source over raw artifact JSON", () => {
+  const digest = "bc2b1387d6f6ed2ca1fa4d42b0ef10c78d88d598dfac22b9543882b8dbd6b233";
+  const labeled = stripVTControlCharacters(renderToolCard({
+    actionId: "act_read_image_labeled",
+    toolName: "read_image",
+    status: "completed",
+    elapsed: "124ms",
+    subjectHint: "image #1 · path",
+    input: {
+      artifactRef: `artifact://${digest}`,
+      region: { x: 40, y: 900, width: 480, height: 80 },
+    },
+    output: {
+      artifactRef: `artifact://${"a".repeat(64)}`,
+      mediaType: "image/png",
+      byteLength: 1200,
+      width: 480,
+      height: 80,
+      originalWidth: 1689,
+      originalHeight: 1221,
+      resized: false,
+      region: { x: 40, y: 900, width: 480, height: 80 },
+    },
+  }).join("\n"));
+  assert.match(labeled, /read_image/);
+  assert.match(labeled, /image #1 · path/);
+  assert.match(labeled, /crop 40,900 480×80/);
+  assert.match(labeled, /480×80/);
+  assert.doesNotMatch(labeled, /"artifactRef"/);
+  assert.doesNotMatch(labeled, new RegExp(digest));
+
+  const unlabeled = stripVTControlCharacters(renderToolCard({
+    actionId: "act_read_image_hash",
+    toolName: "read_image",
+    status: "completed",
+    input: { artifactRef: `artifact://${digest}` },
+    output: {
+      artifactRef: `artifact://${"b".repeat(64)}`,
+      mediaType: "image/png",
+      byteLength: 100,
+      width: 100,
+      height: 50,
+      originalWidth: 100,
+      originalHeight: 50,
+      resized: false,
+      region: { x: 0, y: 0, width: 100, height: 50 },
+    },
+  }).join("\n"));
+  assert.match(unlabeled, /art_bc2b1387…b233/);
+  assert.match(unlabeled, /full|crop 0,0 100×50/);
 });
 
 test("TUI reconciles effective mounts into Session audit events across restart", async () => {
@@ -760,13 +814,13 @@ test("interactive TUI renders command help and exits through the editor", async 
     terminal.sendText("\u001b");
     await delay(25);
     terminal.sendText("/skills\r");
-    await waitUntil(() => /Install skill|安装技能/.test(terminal.output));
+    await waitUntil(() => /Install skill|安装技能|Always-on Skills|始终启用的 Skill/.test(terminal.output));
     terminal.sendText("\r");
-    await waitUntil(() => /No global .agents Skills to manage|没有可管理的全局/.test(terminal.output));
+    await waitUntil(() => /No always-on Skills|没有始终启用的 Skill/.test(terminal.output));
     assert.match(terminal.output, /\/skills/);
     assert.equal(presenter.inspections().length, 0);
     assert.equal(runtime.events().length, 0);
-    // The empty activation manager keeps the two-action hub visible; Esc returns to the composer.
+    // Empty always-on list keeps the hub visible; Esc returns to the composer.
     terminal.sendText("\u001b");
     await delay(25);
     terminal.sendText("/quit\r");
@@ -2406,28 +2460,38 @@ test("context panel shows ContextBlock kind shares, counts, and omitted tokens",
   assert.doesNotMatch(chat, /hidden/);
 });
 
-test("/skills exposes only activation management and installation", () => {
+test("/skills exposes always-on catalog, activation management, and installation", () => {
   const pushed = [];
   let applied;
+  let notice;
   const ctx = {
     panels: {
       depth: 0,
       push(panel) { pushed.push(panel); },
       closeAll() {},
-      dismiss() {},
+      dismiss() { pushed.pop(); },
     },
     presenter: {
-      setNotice() {},
+      setNotice(message) { notice = message; },
     },
     locale: () => "zh",
     terminalRows: 40,
-    discoveredSkills: () => [{
-      name: "global-review",
-      version: "1.0.0",
-      description: "Review code",
-      scope: "user",
-      origin: "agent",
-    }],
+    discoveredSkills: () => [
+      {
+        name: "prompting-guide",
+        version: "unversioned",
+        description: "Prompt migration",
+        scope: "workspace",
+        origin: "qi",
+      },
+      {
+        name: "global-review",
+        version: "1.0.0",
+        description: "Review code",
+        scope: "user",
+        origin: "agent",
+      },
+    ],
     skillCandidates: () => [{
       name: "future-skill",
       version: "unversioned",
@@ -2441,11 +2505,28 @@ test("/skills exposes only activation management and installation", () => {
 
   openSkillsHubPanel(ctx);
   const hub = pushed[0];
-  assert.match(hub.render(100).join("\n"), /启用 \/ 停用全局 Skill/);
-  assert.match(hub.render(100).join("\n"), /安装技能/);
-  assert.doesNotMatch(hub.render(100).join("\n"), /global-review|future-skill/);
+  const hubText = hub.render(100).join("\n");
+  assert.match(hubText, /始终启用的 Skill/);
+  assert.match(hubText, /1 个 · Workspace \/ 用户 Qi · 无需开关/);
+  assert.match(hubText, /启用 \/ 停用全局 Skill/);
+  assert.match(hubText, /安装技能/);
+  assert.doesNotMatch(hubText, /prompting-guide|global-review|future-skill/);
+
   hub.handleInput("\r");
-  const activation = pushed[1];
+  const alwaysOn = pushed[1];
+  const alwaysOnText = alwaysOn.render(100).join("\n");
+  assert.match(alwaysOnText, /始终启用的 Skill/);
+  assert.match(alwaysOnText, /prompting-guide/);
+  assert.match(alwaysOnText, /workspace · qi · unversioned/);
+  assert.doesNotMatch(alwaysOnText, /global-review|future-skill/);
+  alwaysOn.handleInput("\r");
+  assert.equal(notice, "使用 /skill:prompting-guide <task> 调用该 Skill");
+
+  openSkillsHubPanel(ctx);
+  const hubAgain = pushed.at(-1);
+  hubAgain.handleInput("\u001b[B"); // down to activation
+  hubAgain.handleInput("\r");
+  const activation = pushed.at(-1);
   assert.match(activation.render(100).join("\n"), /Space 启用\/停用/);
   activation.handleInput(" ");
   activation.handleInput("\r");
@@ -4006,6 +4087,48 @@ test("ListPanel keeps multiline remote metadata on one render row", () => {
   const rendered = stripVTControlCharacters(lines.join("\n"));
   assert.match(rendered, /First paragraph You MUST call this tool/);
   assert.equal((rendered.match(/tool · query-docs/g) ?? []).length, 1);
+});
+
+test("MCP server capability list stays compact across terminal heights", () => {
+  assert.equal(mcpServerMaxVisible(24), 5);
+  assert.equal(mcpServerMaxVisible(30), 6);
+  assert.equal(mcpServerMaxVisible(40), 7);
+  assert.equal(mcpServerMaxVisible(80), 7);
+});
+
+test("MCP binding panel drafts multiple effects with arrows and saves once with Enter", () => {
+  const actions = [];
+  const applied = [];
+  let action;
+  let closed = false;
+  const panel = new McpBindingPanel({
+    title: "playwright · MCP",
+    locale: "zh",
+    actions: [{ id: "refresh", label: "刷新发现", description: "重新读取能力。" }],
+    candidates: [
+      { id: "close", label: "tool · browser_close", description: "Close", effects: ["read", "execute"], state: "unbound" },
+      { id: "snapshot", label: "tool · browser_snapshot", description: "Snapshot", effects: ["read", "execute"], currentEffect: "read", state: "bound" },
+    ],
+    onAction: (id) => { action = id; },
+    onApply: (changes) => { applied.push(...changes); },
+    onClose: () => { closed = true; },
+  });
+  assert.match(stripVTControlCharacters(panel.render(100).join("\n")), /隔离 ← 当前/);
+  panel.handleInput("\u001b[C"); // close: unbound -> read
+  panel.handleInput("\u001b[B"); // snapshot
+  panel.handleInput("\u001b[C"); // snapshot: read -> execute
+  panel.handleInput("\r");
+  assert.deepEqual(applied, [
+    { id: "close", effect: "read" },
+    { id: "snapshot", effect: "execute" },
+  ]);
+  assert.match(stripVTControlCharacters(panel.render(100).join("\n")), /2 项待保存/);
+  panel.handleInput("\u001b[A");
+  panel.handleInput("\u001b[A"); // refresh action
+  panel.handleInput("\r");
+  assert.equal(action, "refresh");
+  panel.handleInput("\u001b");
+  assert.equal(closed, true);
 });
 
 test("FormPanel wraps long multi-line descriptions instead of truncating to one line", () => {

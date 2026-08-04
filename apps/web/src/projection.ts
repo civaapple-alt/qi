@@ -155,6 +155,17 @@ export interface WebRunProjection {
     tools: string[];
     skillStatus: "none" | "active" | "running" | "succeeded" | "failed" | "fallback";
   };
+  /** Session image attachments for this Run (matches TUI `image #N · source`). */
+  imageAttachments: WebImageAttachment[];
+}
+
+export interface WebImageAttachment {
+  index: number;
+  source: "clipboard" | "url" | "path";
+  mediaType: string;
+  width: number;
+  height: number;
+  originalArtifactRef: string;
 }
 
 export interface WebSessionProjection {
@@ -181,12 +192,14 @@ const terminalActionStatuses = new Set<ActionStatus>([
 export function projectWebSession(view: SessionView, events: readonly SessionEvent[]): WebSessionProjection {
   const runTiming = new Map<string, TimedProjection>();
   const actionTiming = new Map<string, TimedProjection>();
+  const imageLabels = indexSessionImageLabels(view);
   const runs: WebRunProjection[] = view.runOrder.map((runId): WebRunProjection => {
     const run = view.runs[runId];
     if (!run) throw new Error(`Session projection references missing Run ${runId}`);
     const formalPlan = projectFormalPlan(view, run.planBinding);
     const workPlan = projectWorkPlan(view);
     const skills = projectSkillUsages(run);
+    const imageAttachments = projectRunImageAttachments(run.content);
     const steps: WebStepProjection[] = run.stepOrder.map((stepId, index): WebStepProjection => {
       const step = run.steps[stepId];
       if (!step) throw new Error(`Run projection references missing Step ${stepId}`);
@@ -287,6 +300,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
         tools: [],
         skillStatus: skills.length > 0 ? "active" : "none",
       },
+      imageAttachments,
     } satisfies WebRunProjection;
   });
 
@@ -333,7 +347,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
         const action = actionById.get(event.data.actionId);
         if (action) {
           action.input = event.data.input;
-          action.target = summarizeTarget(action.toolName, event.data.input, action.resources);
+          action.target = summarizeTarget(action.toolName, event.data.input, action.resources, imageLabels);
           if (action.toolName === "skill") action.skillCall = projectSkillCall(action, undefined);
           action.milestones.proposed = event.sequence;
           actionTiming.set(action.actionId, { startAt: event.occurredAt, endAt: undefined });
@@ -380,6 +394,10 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
           } else {
             action.result = result;
             action.resultSummary = summarizeResult(action.toolName, action.result);
+            if (action.toolName === "read_image") {
+              action.target = summarizeReadImageTarget(action.input, action.result, imageLabels);
+              action.resultSummary = summarizeReadImageResult(action.result) ?? action.resultSummary;
+            }
           }
           applyDiffFields(action);
           enrichStructuredAction(action);
@@ -399,6 +417,10 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
           } else {
             action.result = result;
             action.resultSummary = summarizeResult(action.toolName, action.result);
+            if (action.toolName === "read_image") {
+              action.target = summarizeReadImageTarget(action.input, action.result, imageLabels);
+              action.resultSummary = summarizeReadImageResult(action.result) ?? action.resultSummary;
+            }
           }
           applyDiffFields(action);
           enrichStructuredAction(action);
@@ -657,7 +679,12 @@ function duration(startAt: string | undefined, endAt: string | undefined): numbe
   return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-function summarizeTarget(toolName: string, input: unknown, resources: readonly string[]): string {
+function summarizeTarget(
+  toolName: string,
+  input: unknown,
+  resources: readonly string[],
+  imageLabels: ReadonlyMap<string, string> = new Map(),
+): string {
   const value = record(input);
   let target: string | undefined;
   if (toolName === "shell") {
@@ -682,10 +709,97 @@ function summarizeTarget(toolName: string, input: unknown, resources: readonly s
   } else if (toolName === "ask_question") {
     const questions = Array.isArray(value?.questions) ? value.questions : [];
     target = `${questions.length} question${questions.length === 1 ? "" : "s"}`;
+  } else if (toolName === "read_image") {
+    target = summarizeReadImageTarget(input, undefined, imageLabels);
   } else {
     target = string(value?.path) ?? string(value?.url) ?? string(value?.mediaType);
   }
   return shorten(target ?? resources[0] ?? toolName, 180);
+}
+
+function summarizeReadImageTarget(
+  input: unknown,
+  result: unknown,
+  imageLabels: ReadonlyMap<string, string>,
+): string {
+  const value = record(input);
+  const output = record(result);
+  const artifactRef = string(value?.artifactRef);
+  const attachment = artifactRef ? imageLabels.get(artifactRef) : undefined;
+  const region = record(output?.region) ?? record(value?.region);
+  const regionLabel = region
+    && Number.isInteger(region.x)
+    && Number.isInteger(region.y)
+    && Number.isInteger(region.width)
+    && Number.isInteger(region.height)
+    ? `crop ${region.x},${region.y} ${region.width}×${region.height}`
+    : "full";
+  const sizeLabel = Number.isInteger(output?.width) && Number.isInteger(output?.height)
+    ? `${output!.width}×${output!.height}`
+    : undefined;
+  return [attachment ?? (artifactRef ? shortArtifactRef(artifactRef) : "image"), regionLabel, sizeLabel]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function summarizeReadImageResult(result: unknown): string | undefined {
+  const value = record(result);
+  if (!value) return undefined;
+  const region = record(value.region);
+  const regionLabel = region
+    && Number.isInteger(region.x)
+    && Number.isInteger(region.y)
+    && Number.isInteger(region.width)
+    && Number.isInteger(region.height)
+    ? `crop ${region.x},${region.y} ${region.width}×${region.height}`
+    : undefined;
+  const sizeLabel = Number.isInteger(value.width) && Number.isInteger(value.height)
+    ? `${value.width}×${value.height}`
+    : undefined;
+  const mediaType = string(value.mediaType);
+  return [regionLabel, sizeLabel, mediaType].filter(Boolean).join(" · ") || undefined;
+}
+
+function indexSessionImageLabels(view: SessionView): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const runId of view.runOrder) {
+    const content = view.runs[runId]?.content ?? [];
+    let index = 0;
+    for (const part of content) {
+      if (part.type !== "image") continue;
+      index += 1;
+      if (!labels.has(part.originalArtifactRef)) {
+        labels.set(part.originalArtifactRef, `image #${index} · ${part.source}`);
+      }
+    }
+  }
+  return labels;
+}
+
+function projectRunImageAttachments(
+  content: SessionView["runs"][string]["content"] | undefined,
+): WebImageAttachment[] {
+  const attachments: WebImageAttachment[] = [];
+  let index = 0;
+  for (const part of content ?? []) {
+    if (part.type !== "image") continue;
+    index += 1;
+    attachments.push({
+      index,
+      source: part.source,
+      mediaType: part.mediaType,
+      width: part.width,
+      height: part.height,
+      originalArtifactRef: part.originalArtifactRef,
+    });
+  }
+  return attachments;
+}
+
+function shortArtifactRef(ref: string): string {
+  const digest = ref.replace(/^artifact:\/\//, "");
+  if (digest.length <= 16) return ref;
+  return `art_${digest.slice(0, 8)}…${digest.slice(-4)}`;
 }
 
 function parseModelOutput(parts: unknown[] | undefined): unknown {

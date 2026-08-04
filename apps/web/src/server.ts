@@ -7,6 +7,7 @@ import { css, html, javascript } from "./assets.js";
 import { ProjectEventStoreRegistry } from "./projects.js";
 import { projectMemoryAudit, singleDatabaseMemoryAudit } from "./memory-audit.js";
 import { projectWebSession } from "./projection.js";
+import { listPrimarySessions } from "./session-catalog.js";
 
 export interface WebServerOptions {
   /** Single-database mode (explicit `--db` / tests). */
@@ -56,7 +57,7 @@ export class QiWebServer {
         }
         if (url.pathname === "/api/sessions") {
           const store = await this.#storeFor(url);
-          return send(response, 200, "application/json", JSON.stringify(store.listSessions()));
+          return send(response, 200, "application/json", JSON.stringify(listPrimarySessions(store.listSessions())));
         }
         const match = /^\/api\/session\/([^/]+)(?:\/(history|events|workbench))?$/.exec(url.pathname);
         if (!match?.[1]) return send(response, 404, "text/plain", "Not found");

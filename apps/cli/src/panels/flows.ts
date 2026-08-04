@@ -61,6 +61,7 @@ import type { SessionEntry } from "../session-list.js";
 import { FormPanel, type FormField } from "./form-panel.js";
 import type { PanelHost } from "./host.js";
 import { ListPanel } from "./list-panel.js";
+import { McpBindingPanel, type McpDraftEffect } from "./mcp-binding-panel.js";
 import { MultiSelectPanel } from "./multi-select-panel.js";
 import { ScrollPanel } from "./scroll-panel.js";
 import {
@@ -206,6 +207,13 @@ function providersMaxVisible(rows: number): number {
   const linesPerItem = 2;
   const chrome = 18;
   return Math.max(4, Math.min(7, Math.floor(Math.max(0, rows - chrome) / linesPerItem)));
+}
+
+/** MCP capability entries are two lines and catalogs can contain dozens of Tools; keep review near the editor. */
+export function mcpServerMaxVisible(rows: number): number {
+  const linesPerItem = 2;
+  const chrome = 18;
+  return Math.max(5, Math.min(7, Math.floor(Math.max(0, rows - chrome) / linesPerItem)));
 }
 
 export function openSettingsPanel(ctx: PanelFlowContext): void {
@@ -912,6 +920,18 @@ export function supportedEffortsForModel(profile: ProviderProfile, model: string
   return resolveModelCapabilities(profile, model).effortsForUi;
 }
 
+/** Catalog truth for built-in/custom profiles; generic compatible endpoints remain operator-declared. */
+export function modelCatalogAllowsImage(profile: ProviderProfile, model: string): boolean {
+  return resolveModelCapabilities(profile, model).catalogAllowsImage;
+}
+
+function modelInputCapabilityLabel(profile: ProviderProfile, model: string, locale: Locale): string {
+  if (profile.id === "compatible") return locale === "zh" ? "图片能力可配置" : "image configurable";
+  return modelCatalogAllowsImage(profile, model)
+    ? (locale === "zh" ? "支持图片" : "image")
+    : (locale === "zh" ? "仅文本" : "text only");
+}
+
 export function openMaxStepsPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   const current = ctx.currentMaxSteps();
@@ -1250,10 +1270,15 @@ export function capabilityIdsFromLaunchLabels(labels: readonly string[]): Capabi
   return ids;
 }
 
+function alwaysOnSkills(skills: readonly PresentedSkill[]): PresentedSkill[] {
+  return skills.filter((skill) => !(skill.scope === "user" && skill.origin === "agent"));
+}
+
 export function openSkillsHubPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   const active = ctx.discoveredSkills();
   const candidates = ctx.skillCandidates();
+  const alwaysOn = alwaysOnSkills(active);
   const activeGlobal = active.filter((skill) => skill.scope === "user" && skill.origin === "agent");
   const globalCandidates = candidates.filter((skill) => skill.source === "global-agent");
   ctx.panels.push(new ListPanel({
@@ -1261,6 +1286,11 @@ export function openSkillsHubPanel(ctx: PanelFlowContext): void {
     hints: t(locale, "skills.hints"),
     maxVisible: maxVisible(ctx.terminalRows),
     items: [
+      {
+        id: "always-on",
+        label: t(locale, "skills.always_on"),
+        description: t(locale, "skills.always_on.desc", { count: String(alwaysOn.length) }),
+      },
       {
         id: "activation",
         label: t(locale, "skills.activation"),
@@ -1273,11 +1303,42 @@ export function openSkillsHubPanel(ctx: PanelFlowContext): void {
     ],
     onClose: ctx.panels.dismiss,
     onSelect: (item) => {
+      if (item.id === "always-on") {
+        openAlwaysOnSkillsPanel(ctx);
+        return;
+      }
       if (item.id === "activation") {
         openSkillActivationPanel(ctx);
         return;
       }
       openSkillInstallScopePanel(ctx);
+    },
+  }));
+}
+
+function openAlwaysOnSkillsPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const skills = alwaysOnSkills(ctx.discoveredSkills());
+  if (skills.length === 0) {
+    ctx.presenter.setNotice(t(locale, "skills.always_on.empty"));
+    ctx.render();
+    return;
+  }
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "skills.always_on.title"),
+    hints: t(locale, "skills.always_on.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    searchable: true,
+    items: skills.map((skill) => ({
+      id: skill.name,
+      label: skill.name,
+      description: `${skill.scope} · ${skill.origin ?? "qi"} · ${skill.version}`,
+    })),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      ctx.panels.dismiss();
+      ctx.presenter.setNotice(t(locale, "skills.always_on.use", { name: item.id }));
+      ctx.render();
     },
   }));
 }
@@ -1345,70 +1406,85 @@ async function openMcpServerPanel(ctx: PanelFlowContext, server: string): Promis
             description: locale === "zh" ? "远端服务器说明（不可信数据）。" : "Remote server instructions (untrusted data).",
           }]),
       ];
-    ctx.panels.push(new ListPanel({
-      title: `${server} · MCP`,
-      hints: locale === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 返回" : "↑↓ navigate · Enter open · Esc back",
-      maxVisible: maxVisible(ctx.terminalRows),
-      searchable: true,
-      items: [
-        {
-          id: "refresh",
-          label: locale === "zh" ? "刷新发现" : "Refresh discovery",
-          description: locale === "zh" ? "重新读取远端工具、资源、提示与说明，并检测漂移。" : "Rediscover remote tools, resources, prompts, and instructions; detect drift.",
-        },
-        ...(status?.status === "needs-auth"
-          ? [{ id: "login", label: locale === "zh" ? "登录 MCP" : "Log in to MCP", description: locale === "zh" ? "开始 OAuth 授权流程。" : "Start the OAuth authorization flow." }]
-          : []),
-        ...(status?.status === "ready" || status?.status === "idle"
-          ? [{ id: "logout", label: locale === "zh" ? "清除登录" : "Log out", description: locale === "zh" ? "清除该 MCP 的 OAuth 凭证。" : "Remove OAuth credentials for this MCP." }]
-          : []),
-        ...(candidates.length === 0
-          ? [{
+    const actions = [
+      {
+        id: "refresh",
+        label: locale === "zh" ? "刷新发现" : "Refresh discovery",
+        description: locale === "zh" ? "重新读取远端工具、资源、提示与说明，并检测漂移。" : "Rediscover remote tools, resources, prompts, and instructions; detect drift.",
+      },
+      ...(status?.status === "needs-auth"
+        ? [{ id: "login", label: locale === "zh" ? "登录 MCP" : "Log in to MCP", description: locale === "zh" ? "开始 OAuth 授权流程。" : "Start the OAuth authorization flow." }]
+        : []),
+      ...(status?.status === "ready" || status?.status === "idle"
+        ? [{ id: "logout", label: locale === "zh" ? "清除登录" : "Log out", description: locale === "zh" ? "清除该 MCP 的 OAuth 凭证。" : "Remove OAuth credentials for this MCP." }]
+        : []),
+    ];
+    const handleAction = (id: string): void => {
+      if (id === "refresh") {
+        runMcpServerPanelAction(ctx, server, async () => {
+          const result = await ctx.refreshMcp(server);
+          return locale === "zh"
+            ? `${server} 已刷新 · ${result.drifted.length} 个绑定需要重新审阅。`
+            : `${server} refreshed · ${result.drifted.length} binding(s) need review.`;
+        });
+        return;
+      }
+      if (id === "login") {
+        runMcpPanelAction(ctx, async () => {
+          const url = await ctx.beginMcpLogin(server);
+          ctx.presenter.setNotice(locale === "zh" ? `请打开授权 URL，然后粘贴回调地址。\n${url}` : `Open the authorization URL, then paste the callback URL.\n${url}`);
+          openMcpCallbackForm(ctx, server);
+          return undefined;
+        }, false);
+        return;
+      }
+      if (id === "logout") {
+        runMcpServerPanelAction(ctx, server, async () => {
+          await ctx.logoutMcp(server);
+          return locale === "zh" ? `${server} 的 MCP 凭证已清除。` : `${server} MCP credentials removed.`;
+        });
+      }
+    };
+    if (candidates.length === 0) {
+      ctx.panels.push(new ListPanel({
+        title: `${server} · MCP`,
+        hints: locale === "zh" ? "↑↓ 选择 · Enter 执行 · Esc 返回" : "↑↓ navigate · Enter run · Esc back",
+        maxVisible: mcpServerMaxVisible(ctx.terminalRows),
+        items: [
+          ...actions,
+          {
             id: "no-snapshot",
             label: locale === "zh" ? "尚未发现能力" : "No capabilities discovered",
             description: locale === "zh" ? "先选择“刷新发现”。" : "Choose Refresh discovery first.",
             disabled: true,
-          }]
-          : candidates.map((candidate) => {
-            const binding = bindings.get(bindingKey({ server, kind: candidate.kind, name: candidate.name }));
-            return {
-              id: candidateId(candidate),
-              label: `${candidate.kind} · ${candidate.name}`,
-              description: `${binding?.state === "bound" ? (locale === "zh" ? "已绑定" : "bound") : (locale === "zh" ? "隔离" : "quarantined")} · ${candidate.description ?? (locale === "zh" ? "无描述" : "No description")}`,
-            };
-          })),
-      ],
+          },
+        ],
+        onClose: ctx.panels.dismiss,
+        onSelect: (item) => handleAction(item.id),
+      }));
+      return;
+    }
+    ctx.panels.push(new McpBindingPanel({
+      title: `${server} · MCP`,
+      locale,
+      maxVisible: mcpServerMaxVisible(ctx.terminalRows),
+      actions,
+      candidates: candidates.map((candidate) => {
+        const binding = bindings.get(bindingKey({ server, kind: candidate.kind, name: candidate.name }));
+        return {
+          id: candidateId(candidate),
+          label: `${candidate.kind} · ${candidate.name}`,
+          description: candidate.description ?? (locale === "zh" ? "无描述" : "No description"),
+          effects: candidate.kind === "instructions"
+            ? ["read"]
+            : ["read", "write", "execute", "publish", "spend"],
+          ...(binding === undefined ? {} : { currentEffect: binding.effect }),
+          state: binding?.state ?? "unbound",
+        };
+      }),
       onClose: ctx.panels.dismiss,
-      onSelect: (item) => {
-        if (item.id === "refresh") {
-          runMcpPanelAction(ctx, async () => {
-            const result = await ctx.refreshMcp(server);
-            return locale === "zh"
-              ? `${server} 已刷新 · ${result.drifted.length} 个绑定需要重新审阅。`
-              : `${server} refreshed · ${result.drifted.length} binding(s) need review.`;
-          });
-          return;
-        }
-        if (item.id === "login") {
-          runMcpPanelAction(ctx, async () => {
-            const url = await ctx.beginMcpLogin(server);
-            ctx.presenter.setNotice(locale === "zh" ? `请打开授权 URL，然后粘贴回调地址。\n${url}` : `Open the authorization URL, then paste the callback URL.\n${url}`);
-            openMcpCallbackForm(ctx, server);
-            return undefined;
-          }, false);
-          return;
-        }
-        if (item.id === "logout") {
-          runMcpPanelAction(ctx, async () => {
-            await ctx.logoutMcp(server);
-            return locale === "zh" ? `${server} 的 MCP 凭证已清除。` : `${server} MCP credentials removed.`;
-          });
-          return;
-        }
-        if (item.id === "no-snapshot") return;
-        const candidate = candidates.find((entry) => candidateId(entry) === item.id);
-        if (candidate) openMcpCapabilityPanel(ctx, server, candidate, bindings.get(bindingKey({ server, kind: candidate.kind, name: candidate.name })));
-      },
+      onAction: handleAction,
+      onApply: (changes) => applyMcpBindingChanges(ctx, server, locale, candidates, bindings, changes),
     }));
   } catch (error) {
     ctx.presenter.setNotice(error instanceof Error ? error.message : String(error));
@@ -1416,45 +1492,49 @@ async function openMcpServerPanel(ctx: PanelFlowContext, server: string): Promis
   }
 }
 
-function openMcpCapabilityPanel(ctx: PanelFlowContext, server: string, candidate: McpPanelCandidate, binding: McpBinding | undefined): void {
-  const locale = ctx.locale();
-  const effects: readonly Effect[] = candidate.kind === "instructions"
-    ? ["read"]
-    : ["read", "write", "execute", "publish", "spend"];
-  ctx.panels.push(new ListPanel({
-    title: `${server} · ${candidate.name}`,
-    hints: locale === "zh" ? "↑↓ 选择 · Enter 确认 · Esc 返回" : "↑↓ navigate · Enter confirm · Esc back",
-    maxVisible: maxVisible(ctx.terminalRows),
-    items: [
-      ...effects.map((effect) => ({
-        id: `bind:${effect}`,
-        label: locale === "zh" ? `绑定为 ${effect}` : `Bind as ${effect}`,
-        description: effect === "read"
-          ? (locale === "zh" ? "只读远端数据；适合 Context7 文档查询。" : "Read remote data; suitable for Context7 documentation queries.")
-          : (locale === "zh" ? "需要额外审阅和对应能力授权。" : "Requires additional review and matching capability grants."),
-        current: binding?.state === "bound" && binding.effect === effect,
-      })),
-      ...(binding === undefined
-        ? []
-        : [{ id: "unbind", label: locale === "zh" ? "解除绑定" : "Unbind", description: locale === "zh" ? "移除该远端能力的本地审阅绑定。" : "Remove the local review binding for this capability." }]),
-    ],
-    onClose: ctx.panels.dismiss,
-    onSelect: (item) => {
-      if (item.id === "unbind") {
-        runMcpPanelAction(ctx, async () => {
-          await ctx.unbindMcp(server, candidate.kind, candidate.name);
-          return locale === "zh" ? `${server}/${candidate.name} 已解除绑定。` : `${server}/${candidate.name} unbound.`;
-        });
-        return;
+function applyMcpBindingChanges(
+  ctx: PanelFlowContext,
+  server: string,
+  locale: Locale,
+  candidates: readonly McpPanelCandidate[],
+  bindings: ReadonlyMap<string, McpBinding>,
+  changes: readonly { id: string; effect: McpDraftEffect }[],
+): void {
+  if (changes.length === 0) {
+    ctx.presenter.setNotice(locale === "zh" ? "没有待保存的 MCP 绑定变更。" : "No pending MCP binding changes.");
+    ctx.render();
+    return;
+  }
+  ctx.panels.closeAll();
+  void (async () => {
+    let applied = 0;
+    for (const change of changes) {
+      const candidate = candidates.find((entry) => candidateId(entry) === change.id);
+      if (!candidate) throw new Error(`MCP candidate disappeared before save: ${change.id}`);
+      const binding = bindings.get(bindingKey({ server, kind: candidate.kind, name: candidate.name }));
+      if (change.effect === "unbound") {
+        if (await ctx.unbindMcp(server, candidate.kind, candidate.name)) applied += 1;
+        continue;
       }
-      if (!item.id.startsWith("bind:")) return;
-      const effect = item.id.slice("bind:".length) as Effect;
-      runMcpPanelAction(ctx, async () => {
-        await ctx.bindMcp({ server, kind: candidate.kind, name: candidate.name, effect });
-        return locale === "zh" ? `${server}/${candidate.name} 已绑定为 ${effect}。` : `${server}/${candidate.name} bound as ${effect}.`;
+      await ctx.bindMcp({
+        server,
+        kind: candidate.kind,
+        name: candidate.name,
+        effect: change.effect,
+        ...(binding?.resourcePatterns.length ? { resourcePatterns: binding.resourcePatterns } : {}),
       });
-    },
-  }));
+      applied += 1;
+    }
+    return applied;
+  })()
+    .then((applied) => {
+      ctx.presenter.setNotice(locale === "zh" ? `${server} 已保存 ${applied} 项绑定变更。` : `${server} saved ${applied} binding change(s).`);
+      void openMcpServerPanel(ctx, server);
+    })
+    .catch((error: unknown) => {
+      ctx.presenter.setNotice(error instanceof Error ? error.message : String(error));
+      ctx.render();
+    });
 }
 
 function openMcpCallbackForm(ctx: PanelFlowContext, server: string): void {
@@ -1489,6 +1569,19 @@ function runMcpPanelAction(ctx: PanelFlowContext, action: () => Promise<string |
       if (notice !== undefined) ctx.presenter.setNotice(notice);
       if (reopen) openMcpPanel(ctx);
       else ctx.render();
+    })
+    .catch((error: unknown) => {
+      ctx.presenter.setNotice(error instanceof Error ? error.message : String(error));
+      ctx.render();
+    });
+}
+
+function runMcpServerPanelAction(ctx: PanelFlowContext, server: string, action: () => Promise<string | undefined>): void {
+  ctx.panels.closeAll();
+  void action()
+    .then((notice) => {
+      if (notice !== undefined) ctx.presenter.setNotice(notice);
+      void openMcpServerPanel(ctx, server);
     })
     .catch((error: unknown) => {
       ctx.presenter.setNotice(error instanceof Error ? error.message : String(error));
@@ -1939,6 +2032,9 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
   const efforts = supportedEffortsForModel(profile, status.model);
   const modelById = new Map(availableModels.map((model) => [model.id, model]));
   const currentWireApi = resolveProviderWireApi(profile, status.model);
+  const imageInputConfigurable = profile.id === "compatible"
+    || availableModels.some((model) => modelCatalogAllowsImage(profile, model.id))
+    || modelCatalogAllowsImage(profile, status.model);
   const fields: FormField[] = [
     {
       id: "model",
@@ -1953,7 +2049,7 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
                 return {
                   value: model.id,
                   label: model.displayName,
-                  description: `${model.id} · ${wire} · ${formatContextWindow(model.contextTokens)}${
+                  description: `${model.id} · ${wire} · ${formatContextWindow(model.contextTokens)} · ${modelInputCapabilityLabel(profile, model.id, locale)}${
                     model.catalogued ? "" : (locale === "zh" ? " · 远程" : " · remote")
                   }`,
                 };
@@ -1992,15 +2088,23 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
       initialValue: String(ctx.presenter.launch.outputReserveTokens),
       required: true,
     },
-    ...(status.provider === "compatible"
+    ...(imageInputConfigurable
       ? [{
           id: "imageInput",
           label: locale === "zh" ? "图片输入" : "Image input",
           initialValue: status.imageInput ? "true" : "false",
           required: true,
           options: [
-            { value: "false", label: locale === "zh" ? "关闭" : "Disabled" },
-            { value: "true", label: locale === "zh" ? "启用" : "Enabled" },
+            {
+              value: "true",
+              label: locale === "zh" ? "启用" : "Enabled",
+              description: locale === "zh" ? "允许粘贴或附加图片进入模型上下文" : "Allow pasted or attached images in model context",
+            },
+            {
+              value: "false",
+              label: locale === "zh" ? "关闭" : "Disabled",
+              description: locale === "zh" ? "拒绝本模型的图片输入" : "Reject image input for this model",
+            },
           ],
         } satisfies FormField]
       : []),
@@ -2049,6 +2153,13 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
             windowTokens,
             providerModelOutputReserveTokens(profile, value),
           )),
+          ...(imageInputConfigurable
+            ? {
+                imageInput: profile.id === "compatible"
+                  ? (values.imageInput ?? "false")
+                  : modelCatalogAllowsImage(profile, value) ? "true" : "false",
+              }
+            : {}),
           ...(next?.thinking?.defaultEffort === undefined
             ? {}
             : { reasoningEffort: next.thinking.defaultEffort }),
@@ -2081,7 +2192,7 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
           : { reasoningEffort: values.reasoningEffort }),
         contextWindowTokens,
         outputReserveTokens: parseLoginOutputReserve(values.outputReserveTokens, contextWindowTokens),
-        ...(status.provider === "compatible"
+        ...(imageInputConfigurable
           ? { imageInput: values.imageInput === "true" }
           : {}),
       }, values.persistence === "session" ? "session" : "account");

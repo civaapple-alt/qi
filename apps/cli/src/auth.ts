@@ -15,6 +15,7 @@ import {
   normalizeKimiReasoningEffort,
   providerModelContextTokens,
   requireProviderProfile,
+  resolveModelCapabilities,
   resolveProviderWireApi,
   type MergedProviderModel,
   type ModelPort,
@@ -142,11 +143,11 @@ export class AuthSession {
         : providerModelContextTokens(this.#config.profile, this.#config.model),
       contextWindowTokensOverride: this.#contextWindowTokensOverride,
       ...(this.#config.baseURL === undefined ? {} : { baseURL: this.#config.baseURL }),
-      imageInput: (
-        getProviderModelProfile(this.#config.profile, this.#config.model)?.inputModalities
-        ?? this.#config.profile.inputModalities
-      )?.includes("image") === true
-        || this.#config.imageInput === true,
+      imageInput: resolveAuthImageInput(
+        this.#config.profile,
+        this.#config.model,
+        this.#config.imageInput,
+      ),
     };
   }
 
@@ -244,6 +245,7 @@ export class AuthSession {
       ),
     );
     const contextWindowTokens = loginContextWindowTokens(options.contextWindowTokens);
+    const imageInput = resolveAuthImageInput(profile, model, options.imageInput);
     const accountId = accountKey(provider, alias);
     await this.#store.set({
       accountId,
@@ -258,9 +260,7 @@ export class AuthSession {
         ...(contextWindowTokens === undefined
           ? {}
           : { contextWindowTokens: String(contextWindowTokens) }),
-        ...(provider === "compatible"
-          ? { imageInput: String(options.imageInput === true) }
-          : {}),
+        imageInput: String(imageInput),
       },
     });
     const { reasoningEffort: _previousEffort, imageInput: _previousImageInput, ...previousConfig } = this.#config;
@@ -275,6 +275,7 @@ export class AuthSession {
       endpointTrust,
       authStatus: "ready",
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+      imageInput,
     });
     if (contextWindowTokens !== undefined) {
       this.#contextWindowTokens = contextWindowTokens;
@@ -346,17 +347,26 @@ export class AuthSession {
     }
     const metadataModel = optionalNonEmpty(stored.metadata?.model);
     const metadataBase = optionalNonEmpty(stored.metadata?.baseURL);
-    const storedImageInput = stored.metadata?.imageInput === "true";
+    const storedImageInput = stored.metadata?.imageInput === undefined
+      ? undefined
+      : stored.metadata.imageInput === "true";
+    const requestedImageInput = routing?.imageInput
+      ?? storedImageInput
+      ?? (provider === this.#config.provider && this.#config.accountAlias === normalizedAlias
+        ? this.#config.imageInput
+        : undefined);
+    const imageInput = resolveAuthImageInput(profile, model, requestedImageInput);
     if (
       metadataModel !== model ||
       metadataBase !== baseURL ||
       optionalNonEmpty(stored.metadata?.reasoningEffort) !== reasoningEffort ||
       optionalStoredInteger(stored.metadata?.contextWindowTokens) !== contextWindowTokens ||
-      (provider === "compatible" && storedImageInput !== (routing?.imageInput ?? storedImageInput))
+      storedImageInput !== imageInput
     ) {
       const {
         reasoningEffort: _storedEffort,
         contextWindowTokens: _storedContext,
+        imageInput: _storedImageInput,
         ...storedMetadata
       } = stored.metadata ?? {};
       if (persistence === "account") {
@@ -371,20 +381,11 @@ export class AuthSession {
             ...(contextWindowTokens === undefined
               ? {}
               : { contextWindowTokens: String(contextWindowTokens) }),
-            ...(provider === "compatible"
-              ? { imageInput: String(routing?.imageInput ?? storedImageInput) }
-              : {}),
+            imageInput: String(imageInput),
           },
         });
       }
     }
-    const imageInput = provider === "compatible"
-      ? routing?.imageInput ?? storedImageInput ?? (
-          provider === this.#config.provider && this.#config.accountAlias === normalizedAlias
-            ? this.#config.imageInput
-            : false
-        )
-      : undefined;
     const {
       reasoningEffort: _previousEffort,
       imageInput: _previousImageInput,
@@ -401,7 +402,7 @@ export class AuthSession {
       endpointTrust: classifyProfileEndpoint(profile, baseURL),
       authStatus: "ready",
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-      ...(imageInput === undefined ? {} : { imageInput }),
+      imageInput,
     });
     if (contextWindowTokens !== undefined) {
       this.#contextWindowTokens = contextWindowTokens;
@@ -801,6 +802,18 @@ function safeAccessToken(secret: string): string {
   } catch {
     return secret;
   }
+}
+
+/** Catalogued providers may be narrowed off; only generic compatible endpoints may opt in without catalog metadata. */
+function resolveAuthImageInput(
+  profile: ProviderProfile,
+  model: string,
+  requested: boolean | undefined,
+): boolean {
+  if (profile.id === "compatible") return requested ?? false;
+  return resolveModelCapabilities(profile, model, {
+    ...(requested === undefined ? {} : { imageInput: requested }),
+  }).imageInput;
 }
 
 function loginReasoningEffort(

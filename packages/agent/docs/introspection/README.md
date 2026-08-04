@@ -78,7 +78,9 @@ Diagnostic fields (not Evidence):
   process tools (`process`), and `diffKind` (`file` | `git`) with a bounded `diff` preview.
 
 `createQiSessionInspectionTool(source, currentSessionId)` exposes the same semantics as `qi_session_inspect`.
-The CLI injects only its current project EventStore; callers cannot supply a database path or cross-project root.
+The CLI registers that Tool only when `$QI_HOME/config.toml` sets `[tools] qi_session_inspect = true` (default
+off). Offline `inspectQiSession` / extract-session stay available without the flag. The CLI injects only its
+current project EventStore; callers cannot supply a database path or cross-project root.
 
 ## Public API
 

@@ -37,7 +37,8 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
 - `GET /api/meta` reports `single` vs `projects` mode.
 - `GET /api/projects` lists directories under the projects root that contain `qi.sqlite`.
 - `GET /api/sessions?project=<slug>` (projects mode) lists Sessions by latest event time without full stream
-  replay (catalog title from `session.created`).
+  replay (catalog title from `session.created`). Depth-1 Subagent child Sessions (`Delegated: …` titles) are
+  omitted from this picker; open them from the Subagent Tasks pane when needed.
 - `GET /api/session/:id/workbench?project=<slug>` returns `view`, `narrative`, `memory`, and `eventCount` for
   first paint. The raw Audit stream is `GET /api/session/:id/history` and is loaded lazily when Audit mode is
   selected.
@@ -55,10 +56,11 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
 - Model-initiated `skill` Tool calls are projected separately with bounded operation/name/status metadata. Skill
   `load` results never expose instruction bodies, and a failed Skill call that still yields a Run response is labeled
   as a fallback rather than an unqualified Skill success.
-- `update_plan`, `ask_question`, process tools (`shell`/`script`/`verify`), and file mutations (`edit`/`write`/
-  `move`/`remove`) use specialized narrative cards keyed by tool name (not Session mode), so Plan-mode Work Todos
-  and Agent-mode clarification Questions render the same cards; generic JSON Tool result remains under a details
-  fold. Web remains read-only and does not answer in-Run Questions.
+- `update_plan`, `ask_question`, `read_image`, process tools (`shell`/`script`/`verify`), and file mutations
+  (`edit`/`write`/`move`/`remove`) use specialized narrative cards keyed by tool name (not Session mode), so
+  Plan-mode Work Todos and Agent-mode clarification Questions render the same cards; generic JSON Tool result
+  remains under a details fold. `read_image` targets prefer `image #N · source` over raw `artifact://` refs, and
+  Run headers list Session image attachments. Web remains read-only and does not answer in-Run Questions.
 - Failed `git` Actions project the full request on the target line (`git status · ref HEAD`,
   `git diff · maxCount 5`) and prepend that command to the result summary with the validation message; Tool
   result `details.command` remains available under the fold.

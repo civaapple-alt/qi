@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 
+const toolsOnly = process.argv.includes("--tools-only");
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on("line", (line) => {
   let message;
@@ -12,7 +13,7 @@ input.on("line", (line) => {
 function responseFor(method, params) {
   if (method === "initialize") return {
     protocolVersion: params?.protocolVersion ?? "2025-11-25",
-    capabilities: { tools: {}, resources: {}, prompts: {} },
+    capabilities: toolsOnly ? { tools: {} } : { tools: {}, resources: {}, prompts: {} },
     serverInfo: { name: "qi-test-stdio", version: "1.0.0" },
     instructions: "Untrusted fixture instructions",
   };

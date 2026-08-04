@@ -71,7 +71,7 @@ const expectedRuntimeExports = {
     "McpBindingDriftError", "McpBridge", "McpConnectionManager", "McpDeclarationCatalog",
     "McpRemoteToolError", "McpReviewStore", "McpSchemaError", "SealedMcpOAuthProvider",
     "SealedMcpOAuthProviderFactory", "bindingKey", "candidateFromRaw", "createMcpCatalogTool",
-    "createMcpLiveTool", "fingerprintMcpValue", "mcpTargetResource", "parseDeclaration",
+    "createMcpLiveTool", "fingerprintMcpValue", "mcpTargetResource", "normalizeMcpOutput", "parseDeclaration",
   ],
   "@civaapple/qi-agent/memory": [
     "ContinuityController", "MemoryController", "MemoryIndexPendingError",
@@ -133,7 +133,7 @@ const expectedRuntimeExports = {
     "ImageIngestService", "MAX_IMAGES_PER_INPUT", "MAX_IMAGE_DECODE_PIXELS",
     "MAX_IMAGE_SOURCE_BYTES", "MAX_PREPARED_IMAGE_BYTES_PER_INPUT", "createReadImageTool",
     "detectImageInputCandidates", "detectImagePathCandidates", "detectImageUrlCandidates",
-    "normalizeImageMediaType", "prepareImageBytes", "sniffImageMediaType",
+    "decodeFileUri", "normalizeImageMediaType", "prepareImageBytes", "sniffImageMediaType",
   ],
   "@civaapple/qi-tui": [
     "ComposerComponent", "FollowUpQueue", "FollowUpsComponent", "FormPanel",

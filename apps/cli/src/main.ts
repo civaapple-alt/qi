@@ -85,9 +85,7 @@ async function main(): Promise<void> {
                 ? {}
                 : { reasoningEffort: configured.reasoningEffort }),
               contextWindowTokens: configured.contextWindowTokens,
-              ...(configured.provider === "compatible"
-                ? { imageInput: configured.imageInput }
-                : {}),
+              imageInput: configured.imageInput,
             }, "session");
           }
         } finally {
@@ -129,6 +127,7 @@ async function main(): Promise<void> {
         projectId: paths.projectId,
         memoryEnabled: options.memoryEnabled,
         memoryAutoAcceptProject: options.memoryAutoAcceptProject,
+        enableQiSessionInspect: options.enableQiSessionInspect,
         image: options.image,
         modelPort: new AuthBackedModelPort(auth),
         model: { provider: auth.config.provider, model: auth.config.model },
@@ -239,6 +238,7 @@ async function main(): Promise<void> {
     projectId: paths.projectId,
     memoryEnabled: options.memoryEnabled,
     memoryAutoAcceptProject: options.memoryAutoAcceptProject,
+    enableQiSessionInspect: options.enableQiSessionInspect,
     image: options.image,
     modelPort: new AuthBackedModelPort(auth),
     model: { provider: options.provider.provider, model: options.provider.model },
@@ -857,6 +857,9 @@ async function handleLoginCommand(
             ...(loaded.config.contextWindowTokens === undefined
               ? {}
               : { contextWindowTokens: loaded.config.contextWindowTokens }),
+            ...(loaded.config.imageInput === undefined
+              ? {}
+              : { imageInput: loaded.config.imageInput }),
           }
         : undefined);
     const status = await auth.useAccount(provider, alias, routing);

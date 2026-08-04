@@ -69,7 +69,9 @@ and instruction digest in ContextBlock provenance. Other resources remain indivi
 become Artifacts instead of being decoded as UTF-8.
 
 The TUI autocompletes active names after `/skill:` and requires the operator to provide a task; selecting a name
-does not execute it by itself. If the Workspace root is the user's home directory, its `.agents/skills` path is
+does not execute it by itself. `/skills` → **Always-on Skills** surfaces Workspace/user Qi (and workspace
+`.agents`) catalog entries that are already active without a toggle; global Agent Skills stay behind the
+activation manager. If the Workspace root is the user's home directory, its `.agents/skills` path is
 treated as the global Agent root and still requires lock-backed human activation.
 
 Scripts require the separate `skill.run-script` execute path. Only `scripts/**`, argv arrays, Workspace cwd, a

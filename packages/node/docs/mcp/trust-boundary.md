@@ -21,7 +21,11 @@ Every Run freezes declarations and bindings. Reconnect or `list_changed` compare
 changed entries become `drifted`, and new calls fail until a human rebinds. An in-flight Action keeps its original
 snapshot only to reach an honest settlement.
 
-stdio rejects implicit downloaders and shell wrappers and runs a resolved executable under a minimal environment.
+stdio permits explicitly declared `npx` and `uvx` launchers for registry-published MCP servers, rejects other
+package-manager and shell wrappers, and runs the resolved launcher under a minimal environment. The launcher
+path/hash and full declared argv are fingerprinted as transport identity. Exact package versions are recommended;
+a floating selector such as `@latest` or an unpinned uvx package remains an explicit reproducibility risk because
+it may resolve to new code without changing the declaration.
 HTTP requires HTTPS except loopback, refuses URL credentials and redirects, and requires explicit declaration for
 private/LAN targets. legacy SSE is never an automatic fallback. Static credentials and OAuth state/tokens live in
 the encrypted Credential Store; config and events carry aliases only. OAuth uses SDK discovery, PKCE S256,

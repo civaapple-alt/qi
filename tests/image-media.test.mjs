@@ -173,6 +173,7 @@ test("path detection finds Windows absolute, mount, Markdown local, and standalo
       String.raw`C:\Users\alwar\Pictures\qi-notebook\ScreenShot_2026-07-31_133242_600.jpg`,
       "mount:qi-notebook/ui.png",
       "docs/assets/hero.webp",
+      "relative/not-standalone.png",
     ],
   );
   assert.deepEqual(
@@ -180,5 +181,31 @@ test("path detection finds Windows absolute, mount, Markdown local, and standalo
       "https://cdn.example/a.png and C:\\shots\\b.jpg",
     ).map((candidate) => ("url" in candidate ? candidate.url : candidate.path)),
     ["https://cdn.example/a.png", String.raw`C:\shots\b.jpg`],
+  );
+});
+
+test("path detection accepts bare filenames and file:// URIs in Chinese or English prose", () => {
+  assert.deepEqual(
+    detectImagePathCandidates("查看 图片 spider-quiz-full.png").map((c) => c.path),
+    ["spider-quiz-full.png"],
+  );
+  assert.deepEqual(
+    detectImagePathCandidates("Please review ./shots/ui.png thanks").map((c) => c.path),
+    ["./shots/ui.png"],
+  );
+  assert.deepEqual(
+    detectImagePathCandidates("file:///C:/shots/quiz.png").map((c) => c.path),
+    [String.raw`C:\shots\quiz.png`],
+  );
+  assert.deepEqual(
+    detectImageInputCandidates("看这张 ![x](output/a.png) 和 bare.webp").map((c) =>
+      c.kind === "url" ? c.url : c.path
+    ),
+    ["output/a.png", "bare.webp"],
+  );
+  // Mid-token false positives stay rejected (trailing alnum continues the token).
+  assert.deepEqual(
+    detectImagePathCandidates("embedded prefixspider-quiz-full.pngx token").map((c) => c.path),
+    [],
   );
 });

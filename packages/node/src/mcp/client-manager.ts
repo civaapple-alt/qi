@@ -83,11 +83,20 @@ export class McpConnectionManager {
   async refresh(server: string): Promise<{ snapshot: McpCandidateSnapshot; drifted: readonly string[] }> {
     const connection = await this.#connect(server);
     try {
+      const capabilities = connection.client.getServerCapabilities();
       const [tools, resources, resourceTemplates, prompts] = await Promise.all([
-        pagedList((cursor) => connection.client.listTools(cursor ? { cursor } : undefined), "tools"),
-        pagedList((cursor) => connection.client.listResources(cursor ? { cursor } : undefined), "resources"),
-        pagedList((cursor) => connection.client.listResourceTemplates(cursor ? { cursor } : undefined), "resourceTemplates"),
-        pagedList((cursor) => connection.client.listPrompts(cursor ? { cursor } : undefined), "prompts"),
+        capabilities?.tools
+          ? pagedList((cursor) => connection.client.listTools(cursor ? { cursor } : undefined), "tools")
+          : Promise.resolve([]),
+        capabilities?.resources
+          ? pagedList((cursor) => connection.client.listResources(cursor ? { cursor } : undefined), "resources")
+          : Promise.resolve([]),
+        capabilities?.resources
+          ? pagedList((cursor) => connection.client.listResourceTemplates(cursor ? { cursor } : undefined), "resourceTemplates")
+          : Promise.resolve([]),
+        capabilities?.prompts
+          ? pagedList((cursor) => connection.client.listPrompts(cursor ? { cursor } : undefined), "prompts")
+          : Promise.resolve([]),
       ]);
       const instructions = connection.client.getInstructions();
       const snapshot: McpCandidateSnapshot = {
@@ -250,7 +259,13 @@ export class McpConnectionManager {
       return {
         transport,
         ...(transport.stderr === null ? {} : { stderr: transport.stderr }),
-        identity: { transport: "stdio", command: canonicalCommand, size: commandInfo.size, sha256: await sha256File(canonicalCommand) },
+        identity: {
+          transport: "stdio",
+          command: canonicalCommand,
+          args: [...declaration.args],
+          size: commandInfo.size,
+          sha256: await sha256File(canonicalCommand),
+        },
       };
     }
     const headers = await resolveReferenceMap(declaration.headers, this.#credentials);

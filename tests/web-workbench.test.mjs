@@ -41,11 +41,22 @@ test("Web workbench serves real Session projections, history and committed live 
 
     const meta = await fetch(`${address.url}/api/meta`).then((response) => response.json());
     assert.equal(meta.mode, "single");
+    const childSessionId = "ses_web_child_delegated";
+    new EventWriter(store, childSessionId).append(
+      "session.created",
+      { title: "Delegated: Map login paths" },
+      { kind: "runtime", id: "coordinator" },
+    );
     const sessions = await fetch(`${address.url}/api/sessions`).then((response) => response.json());
     assert.equal(sessions.length, 1);
     assert.equal(sessions[0].sessionId, sessionId);
     assert.equal(sessions[0].title, "Real project");
     assert.equal(sessions[0].version, 1);
+    assert.equal(
+      (await fetch(`${address.url}/api/session/${childSessionId}`)).status,
+      200,
+      "Delegated child Sessions remain loadable by ID",
+    );
 
     const response = await fetch(`${address.url}/api/session/${sessionId}`);
     assert.equal(response.status, 200);
@@ -233,6 +244,101 @@ test("Web narrative shows full git request on INVALID_GIT_ARGUMENT failures", ()
     "git status · ref HEAD · ref is only valid for rev-parse and show",
   );
   assert.equal(action.result?.details?.command, "git status · ref HEAD");
+});
+
+test("Web read_image targets prefer image #N · source over raw artifact refs", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = "ses_web_read_image";
+  const runId = "run_web_read_image";
+  const stepId = "stp_web_read_image";
+  const actionId = "act_web_read_image";
+  const actor = { kind: "runtime", id: "test" };
+  const originalArtifactRef = `artifact://${"e".repeat(64)}`;
+  const preparedArtifactRef = `artifact://${"f".repeat(64)}`;
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { title: "Read image" }, actor);
+  writer.append("run.triggered", {
+    runId,
+    trigger: "user",
+    input: "[image #1 (1689×1221)] crop the title",
+    content: [
+      { type: "text", text: "[image #1 (1689×1221)] crop the title" },
+      {
+        type: "image",
+        source: "path",
+        originalArtifactRef,
+        preparedArtifactRef,
+        originalMediaType: "image/png",
+        mediaType: "image/png",
+        originalByteLength: 2400,
+        byteLength: 1800,
+        originalWidth: 1689,
+        originalHeight: 1221,
+        width: 1689,
+        height: 1221,
+        downsampled: false,
+        formatChanged: false,
+        orientationApplied: false,
+      },
+    ],
+  }, actor);
+  writer.append("run.started", { runId }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId,
+    toolName: "read_image",
+    effect: "read",
+    input: {
+      artifactRef: originalArtifactRef,
+      region: { x: 40, y: 900, width: 480, height: 80 },
+    },
+    resources: [originalArtifactRef],
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+  writer.append("authority.requested", { runId, stepId, actionId }, actor);
+  writer.append("authority.granted", { runId, stepId, actionId, leaseId: "lea_read_image" }, actor);
+  writer.append("action.started", { runId, stepId, actionId }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        artifactRef: `artifact://${"a".repeat(64)}`,
+        mediaType: "image/png",
+        byteLength: 1200,
+        width: 480,
+        height: 80,
+        originalWidth: 1689,
+        originalHeight: 1221,
+        resized: false,
+        region: { x: 40, y: 900, width: 480, height: 80 },
+      }),
+    }],
+  }, actor);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, actor);
+
+  const view = store.load(sessionId);
+  assert.ok(view);
+  const narrative = projectWebSession(view, store.read(sessionId).events);
+  const run = narrative.runs[0];
+  assert.deepEqual(run.imageAttachments, [{
+    index: 1,
+    source: "path",
+    mediaType: "image/png",
+    width: 1689,
+    height: 1221,
+    originalArtifactRef,
+  }]);
+  const action = run.steps[0].actions[0];
+  assert.equal(action.toolName, "read_image");
+  assert.equal(action.target, "image #1 · path · crop 40,900 480×80 · 480×80");
+  assert.equal(action.resultSummary, "crop 40,900 480×80 · 480×80 · image/png");
+  assert.doesNotMatch(action.target, /"artifactRef"/);
+  assert.doesNotMatch(action.target, /e{16}/);
 });
 
 test("Web observes automatic Skill Tool calls without exposing Skill instructions", () => {

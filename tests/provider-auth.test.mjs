@@ -227,6 +227,7 @@ test("resolveProviderConfig selects Qianwen AI Token Plan Responses and effort",
   });
   assert.equal(config.wireApi, "responses");
   assert.equal(config.reasoningEffort, "medium");
+  assert.equal(config.imageInput, true);
   assert.equal(config.profile.envApiKey, "QIANWENAI_API_KEY");
   assert.equal(
     config.baseURL,
@@ -735,6 +736,41 @@ test("sealed compatible account reconfigures model and image input without re-en
     assert.equal(saved.imageInput, true);
     assert.equal((await store.get("compatible:local"))?.metadata?.model, "after");
     assert.equal((await store.get("compatible:local"))?.metadata?.imageInput, "true");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("catalog provider image input can be narrowed and text-only models remain denied", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-qianwen-image-reconfigure-"));
+  try {
+    const store = new EncryptedFileCredentialStore(root);
+    const auth = await AuthSession.create({
+      config: resolveProviderConfig({
+        provider: "qianwenai",
+        model: "qwen3.8-max",
+        allowMissingCredential: true,
+        environment: {},
+      }),
+      store,
+    });
+    const loggedIn = await auth.loginApiKey("qianwenai", "sealed-secret", {
+      model: "qwen3.8-max",
+    });
+    assert.equal(loggedIn.imageInput, true);
+
+    const temporary = await auth.useAccount("qianwenai", "default", {
+      model: "qwen3.8-max",
+      imageInput: false,
+    }, "session");
+    assert.equal(temporary.imageInput, false);
+
+    const textOnly = await auth.useAccount("qianwenai", "default", {
+      model: "glm-5-2",
+      imageInput: true,
+    });
+    assert.equal(textOnly.imageInput, false);
+    assert.equal((await store.get("qianwenai:default"))?.metadata?.imageInput, "false");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

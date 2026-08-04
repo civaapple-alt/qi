@@ -68,6 +68,12 @@ export interface QiDelegateConfig {
   readonly contextTokensPercent?: number;
 }
 
+/** Opt-in model-facing Tools controlled from `$QI_HOME/config.toml`. */
+export interface QiToolsConfig {
+  /** When true, register `qi_session_inspect`. Default off. */
+  readonly qiSessionInspect?: boolean;
+}
+
 export interface ResolvedDelegateConfig {
   readonly wallTimeMs: number;
   readonly maxStepsPercent: number;
@@ -91,6 +97,11 @@ export function resolveDelegateConfig(config?: QiDelegateConfig): ResolvedDelega
     maxStepsPercent: config?.maxStepsPercent ?? DEFAULT_DELEGATE_MAX_STEPS_PERCENT,
     contextTokensPercent: config?.contextTokensPercent ?? DEFAULT_DELEGATE_CONTEXT_TOKENS_PERCENT,
   };
+}
+
+/** Model-facing `qi_session_inspect` is off unless user config sets `[tools] qi_session_inspect = true`. */
+export function isQiSessionInspectEnabled(config: QiUserConfig | undefined): boolean {
+  return config?.tools?.qiSessionInspect === true;
 }
 
 /** Non-secret OpenAI-compatible endpoint catalog entry (secrets stay sealed). */
@@ -128,6 +139,7 @@ export interface QiUserConfig {
   readonly ui?: QiUiConfig;
   readonly image?: QiImageConfig;
   readonly delegate?: QiDelegateConfig;
+  readonly tools?: QiToolsConfig;
 }
 
 export interface LoadedUserConfig {
@@ -233,6 +245,10 @@ export async function persistUserProviderDefaults(
     ? undefined
     : selection.reasoningEffort ?? loaded.config.reasoningEffort;
   const contextWindowTokens = selection.contextWindowTokens ?? loaded.config.contextWindowTokens;
+  const imageInput = selection.imageInput
+    ?? (loaded.config.provider === selection.provider && loaded.config.model === selection.model
+      ? loaded.config.imageInput
+      : undefined);
   const next: QiUserConfig = {
     version: 1,
     ...(loaded.config.language === undefined ? {} : { language: loaded.config.language }),
@@ -253,6 +269,7 @@ export async function persistUserProviderDefaults(
         ? {}
         : { outputReserveTokens: loaded.config.outputReserveTokens })
       : { outputReserveTokens: selection.outputReserveTokens }),
+    ...(imageInput === undefined ? {} : { imageInput }),
     ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
     ...(loaded.config.maxActionsPerStep === undefined
       ? {}
@@ -290,6 +307,7 @@ export async function persistActiveCompatible(
       accountAlias: entry.name,
       model: entry.model,
       baseURL: entry.baseURL,
+      ...(entry.imageInput === undefined ? {} : { imageInput: entry.imageInput }),
     },
     absolute,
   );
@@ -320,6 +338,7 @@ export async function removeCompatibleEndpoint(
     ...(loaded.config.outputReserveTokens === undefined
       ? {}
       : { outputReserveTokens: loaded.config.outputReserveTokens }),
+    ...(loaded.config.imageInput === undefined ? {} : { imageInput: loaded.config.imageInput }),
     ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
     ...(loaded.config.maxActionsPerStep === undefined
       ? {}
@@ -589,6 +608,7 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
       ...(config.outputReserveTokens === undefined
         ? {}
         : { output_reserve_tokens: config.outputReserveTokens }),
+      ...(config.imageInput === undefined ? {} : { image_input: config.imageInput }),
       ...(config.maxSteps === undefined ? {} : { max_steps: config.maxSteps }),
       ...(config.maxActionsPerStep === undefined
         ? {}
@@ -646,6 +666,15 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
                 : { context_tokens_percent: config.delegate.contextTokensPercent }),
             },
           }),
+      ...(config.tools === undefined
+        ? {}
+        : {
+            tools: {
+              ...(config.tools.qiSessionInspect === undefined
+                ? {}
+                : { qi_session_inspect: config.tools.qiSessionInspect }),
+            },
+          }),
     },
     absolute,
   );
@@ -668,6 +697,7 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
     ...(config.outputReserveTokens === undefined
       ? {}
       : { output_reserve_tokens: config.outputReserveTokens }),
+    ...(config.imageInput === undefined ? {} : { image_input: config.imageInput }),
     ...(config.maxSteps === undefined ? {} : { max_steps: config.maxSteps }),
     ...(config.maxActionsPerStep === undefined
       ? {}
@@ -723,6 +753,15 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
             ...(config.delegate.contextTokensPercent === undefined
               ? {}
               : { context_tokens_percent: config.delegate.contextTokensPercent }),
+          },
+        }),
+    ...(config.tools === undefined
+      ? {}
+      : {
+          tools: {
+            ...(config.tools.qiSessionInspect === undefined
+              ? {}
+              : { qi_session_inspect: config.tools.qiSessionInspect }),
           },
         }),
   });
@@ -781,6 +820,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "compatible",
     "context_window_tokens",
     "output_reserve_tokens",
+    "image_input",
     "max_steps",
     "max_actions_per_step",
     "capabilities",
@@ -789,6 +829,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "ui",
     "image",
     "delegate",
+    "tools",
   ], path);
   const version = root.version ?? 1;
   if (version !== 1) throw new TypeError(`${path}: version must be 1`);
@@ -820,6 +861,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     1,
     2_000_000,
   );
+  const imageInput = optionalBooleanField(root.image_input, `${path}: image_input`);
   const maxSteps = optionalIntegerField(root.max_steps, `${path}: max_steps`, 8, 1_000);
   const maxActionsPerStep = optionalIntegerField(
     root.max_actions_per_step,
@@ -827,8 +869,13 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     1,
     32,
   );
-  if ((model !== undefined || baseURL !== undefined || reasoningEffort !== undefined) && provider === undefined) {
-    throw new TypeError(`${path}: provider is required when model, base_url, or reasoning_effort is configured`);
+  if (
+    (model !== undefined || baseURL !== undefined || reasoningEffort !== undefined || imageInput !== undefined)
+    && provider === undefined
+  ) {
+    throw new TypeError(
+      `${path}: provider is required when model, base_url, reasoning_effort, or image_input is configured`,
+    );
   }
   if (reasoningEffort !== undefined && !providerPersistsReasoningEffort(provider)) {
     throw new TypeError(
@@ -945,6 +992,18 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
       ...(contextTokensPercent === undefined ? {} : { contextTokensPercent }),
     };
   }
+  let tools: QiToolsConfig | undefined;
+  if (root.tools !== undefined) {
+    const table = requireTable(root.tools, `${path}: tools`);
+    assertOnlyKeys(table, ["qi_session_inspect"], `${path}: tools`);
+    const qiSessionInspect = optionalBooleanField(
+      table.qi_session_inspect,
+      `${path}: tools.qi_session_inspect`,
+    );
+    tools = {
+      ...(qiSessionInspect === undefined ? {} : { qiSessionInspect }),
+    };
+  }
   return {
     version: 1,
     ...(language === undefined ? {} : { language }),
@@ -957,6 +1016,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(compatible === undefined ? {} : { compatible }),
     ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
     ...(outputReserveTokens === undefined ? {} : { outputReserveTokens }),
+    ...(imageInput === undefined ? {} : { imageInput }),
     ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(maxActionsPerStep === undefined ? {} : { maxActionsPerStep }),
     ...(capabilities === undefined ? {} : { capabilities }),
@@ -965,6 +1025,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(ui === undefined ? {} : { ui }),
     ...(image === undefined ? {} : { image }),
     ...(delegate === undefined ? {} : { delegate }),
+    ...(tools === undefined ? {} : { tools }),
   };
 }
 

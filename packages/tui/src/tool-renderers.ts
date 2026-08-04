@@ -15,6 +15,11 @@ export interface ToolCardModel {
   detail?: string;
   /** Optional recovery guidance shown with indeterminate/cancelled cards. */
   hint?: string;
+  /**
+   * Optional human subject for opaque tool inputs (e.g. read_image → `image #1 · path`).
+   * When set, dedicated renderers prefer this over raw JSON.
+   */
+  subjectHint?: string;
   elapsed?: string;
   resources?: readonly string[];
   liveTail?: { stream: "stdout" | "stderr" | "model"; text: string; droppedLines: number };
@@ -53,6 +58,7 @@ const renderers: Record<string, Renderer> = {
   update_plan: renderWorkPlan,
   ask_question: renderAskQuestion,
   memory: renderMemory,
+  read_image: renderReadImage,
 };
 
 function renderMemory(model: ToolCardModel, options: ToolCardOptions): string[] {
@@ -65,6 +71,44 @@ function renderMemory(model: ToolCardModel, options: ToolCardOptions): string[] 
   if (!options.summaryOnly) lines.push(`  ${oneLine(statement, 110)}`);
   if (output?.requiresConfirmation === true) lines.push("  pending user confirmation · /memory list pending");
   return lines;
+}
+
+function renderReadImage(model: ToolCardModel, options: ToolCardOptions): string[] {
+  const input = record(model.input);
+  const output = model.output;
+  const artifactRef = typeof input?.artifactRef === "string" ? input.artifactRef : undefined;
+  const region = record(input?.region);
+  const outRegion = record(output?.region);
+  const regionSource = outRegion ?? region;
+  const regionLabel = regionSource
+    && Number.isInteger(regionSource.x)
+    && Number.isInteger(regionSource.y)
+    && Number.isInteger(regionSource.width)
+    && Number.isInteger(regionSource.height)
+    ? `crop ${regionSource.x},${regionSource.y} ${regionSource.width}×${regionSource.height}`
+    : "full";
+  const sizeLabel = Number.isInteger(output?.width) && Number.isInteger(output?.height)
+    ? `${output!.width}×${output!.height}`
+    : undefined;
+  const attachment = model.subjectHint
+    ?? (artifactRef ? shortArtifactRef(artifactRef) : "image");
+  const subject = [attachment, regionLabel, sizeLabel].filter(Boolean).join(" · ");
+  const lines = [header(model, subject, model.errorCode)];
+  if (options.summaryOnly) return lines;
+  if (model.detail && (model.status === "indeterminate" || model.status === "cancelled" || model.status === "failed")) {
+    lines.push(`  ${oneLine(model.detail, 110)}`);
+  }
+  if (model.hint && model.status === "indeterminate") lines.push(`  ${oneLine(model.hint, 110)}`);
+  if (options.expanded && artifactRef && model.subjectHint) {
+    lines.push(`  ${shortArtifactRef(artifactRef)}`);
+  }
+  return lines;
+}
+
+function shortArtifactRef(ref: string): string {
+  const digest = ref.replace(/^artifact:\/\//, "");
+  if (digest.length <= 16) return ref;
+  return `art_${digest.slice(0, 8)}…${digest.slice(-4)}`;
 }
 
 export function renderToolCard(model: ToolCardModel, options: ToolCardOptions = {}): string[] {

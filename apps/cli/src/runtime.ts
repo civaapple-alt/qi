@@ -1,6 +1,6 @@
-import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
   InMemoryCapabilityBroker,
   redactSensitiveValue,
@@ -196,6 +196,8 @@ export interface TuiRuntimeOptions {
   projectId?: string;
   memoryEnabled?: boolean;
   memoryAutoAcceptProject?: boolean;
+  /** Opt-in from `$QI_HOME/config.toml` `[tools] qi_session_inspect = true`. Default false. */
+  enableQiSessionInspect?: boolean;
   image?: QiImageConfig;
   modelPort: ModelPort;
   model: ModelRef;
@@ -599,7 +601,9 @@ export class TuiRuntime {
     // first real search/find/shell/script/verify call does not pay PATH-walk latency. Never awaited and
     // never throws (each candidate probe swallows its own failure).
     void prewarmTrustedExecutables(options.workspaceRoot);
-    grantBaseRuntimeLeases(broker, subject);
+    grantBaseRuntimeLeases(broker, subject, {
+      enableQiSessionInspect: options.enableQiSessionInspect === true,
+    });
     const registry = new ToolRegistry(broker);
     const projectId = options.projectId ?? workspaceProjectId(options.workspaceRoot);
     const projectMemoryIndex = new SqliteMemoryIndex(resolve(stateRoot, "memory.sqlite"));
@@ -689,7 +693,9 @@ export class TuiRuntime {
     registry.register("mcp_catalog", createMcpCatalogTool({ manager: mcp, reviews: mcpReviews }));
     const mcpLiveRegistration = registry.register("mcp", createMcpLiveTool({ manager: mcp, declarations: mcpDeclarationSnapshot, bindings: mcpBindingSnapshot }));
     registry.register("qi_introspect", createQiIntrospectionTool());
-    registry.register("qi_session_inspect", createQiSessionInspectionTool(eventStore, runtimeSessionId));
+    if (options.enableQiSessionInspect === true) {
+      registry.register("qi_session_inspect", createQiSessionInspectionTool(eventStore, runtimeSessionId));
+    }
     if (options.memoryEnabled ?? true) {
       registry.register("memory", createMemoryTool({
         eventStore,
@@ -2055,7 +2061,9 @@ export class TuiRuntime {
           ...(this.#activeController === undefined ? {} : { signal: this.#activeController.signal }),
         }));
       } else {
-        content.push(await this.#ingestImagePath(candidate.path));
+        const image = await this.#tryIngestImagePath(candidate.path);
+        // Ambiguous or missing Workspace paths stay as text; do not fail the Run.
+        if (image) content.push(image);
       }
       cursor = candidate.end;
     }
@@ -2064,17 +2072,28 @@ export class TuiRuntime {
     return content;
   }
 
-  async #ingestImagePath(requested: string): Promise<RunImagePart> {
+  async #tryIngestImagePath(requested: string): Promise<RunImagePart | undefined> {
     const logical = await rewriteImagePathOntoAuthorizedRoot(
       requested,
       this.#workspaceRoot,
       this.getMounts(),
     );
-    const resolved = await resolveAccessiblePath(this.#workspaceRoot, logical, this.getMounts());
-    if (!(await isRegularFile(resolved.absolute))) {
-      throw new TypeError(`Image path is not a regular file: ${requested}`);
+    const mounts = this.getMounts();
+    try {
+      const resolved = await resolveAccessiblePath(this.#workspaceRoot, logical, mounts);
+      if (await isRegularFile(resolved.absolute)) {
+        const bytes = new Uint8Array(await readFile(resolved.absolute));
+        return this.#imageIngest.ingestBytes({ bytes, source: "path" });
+      }
+    } catch {
+      // Fall through to basename search when the typed path is incomplete.
     }
-    const bytes = new Uint8Array(await readFile(resolved.absolute));
+
+    const name = basename(logical.replaceAll("\\", "/"));
+    if (!/\.(?:png|jpe?g|gif|webp)$/i.test(name)) return undefined;
+    const hit = await findUniqueAuthorizedImageByBasename(name, this.#workspaceRoot, mounts);
+    if (!hit) return undefined;
+    const bytes = new Uint8Array(await readFile(hit.absolute));
     return this.#imageIngest.ingestBytes({ bytes, source: "path" });
   }
 
@@ -2449,13 +2468,32 @@ function collectOriginalImageRefs(view: SessionView | undefined): ReadonlySet<st
   return refs;
 }
 
-function grantBaseRuntimeLeases(broker: InMemoryCapabilityBroker, subject: string): void {
+function grantBaseRuntimeLeases(
+  broker: InMemoryCapabilityBroker,
+  subject: string,
+  options: { enableQiSessionInspect?: boolean } = {},
+): void {
   const expiresAt = leaseExpiry();
+  const readTools = [
+    "read",
+    "list",
+    "search",
+    "find",
+    "tree",
+    "git",
+    "skill",
+    "mcp_catalog",
+    "qi_introspect",
+    ...(options.enableQiSessionInspect === true ? ["qi_session_inspect"] as const : []),
+    "memory",
+    "read_image",
+    "artifact_get",
+  ];
   for (const lease of [
     {
       leaseId: "lea_tui_read",
       subject,
-      tools: ["read", "list", "search", "find", "tree", "git", "skill", "mcp_catalog", "qi_introspect", "qi_session_inspect", "memory", "read_image", "artifact_get"],
+      tools: [...readTools],
       effects: ["read"],
       resources: [
         "file:**",
@@ -2729,3 +2767,98 @@ async function rewriteImagePathOntoAuthorizedRoot(
   }
   return requested;
 }
+
+const IMAGE_BASENAME_SEARCH_MAX_ENTRIES = 4_000;
+const IMAGE_BASENAME_SEARCH_MAX_DEPTH = 12;
+const PROTECTED_WORKSPACE_ENTRIES = new Set([".git", ".qi", ".artifacts", "node_modules"]);
+
+/**
+ * Prefer a Workspace-root exact basename match; otherwise accept a unique hit under the
+ * Workspace or an authorized mount. Zero or multiple hits leave the path unresolved.
+ */
+async function findUniqueAuthorizedImageByBasename(
+  name: string,
+  workspaceRoot: string,
+  mounts: readonly WorkspaceMount[],
+): Promise<{ absolute: string; logical: string } | undefined> {
+  const rootHit = resolve(workspaceRoot, name);
+  if (await isRegularFile(rootHit)) {
+    return { absolute: rootHit, logical: name.replaceAll("\\", "/") };
+  }
+
+  const hits: Array<{ absolute: string; logical: string }> = [];
+  let visited = 0;
+
+  const walk = async (
+    absoluteDir: string,
+    logicalPrefix: string,
+    depth: number,
+  ): Promise<void> => {
+    if (hits.length > 1 || depth > IMAGE_BASENAME_SEARCH_MAX_DEPTH || visited >= IMAGE_BASENAME_SEARCH_MAX_ENTRIES) {
+      return;
+    }
+    let entries;
+    try {
+      entries = await readdir(absoluteDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (hits.length > 1 || visited >= IMAGE_BASENAME_SEARCH_MAX_ENTRIES) return;
+      visited += 1;
+      if (PROTECTED_WORKSPACE_ENTRIES.has(entry.name)) continue;
+      const absolute = resolve(absoluteDir, entry.name);
+      const logical = logicalPrefix ? `${logicalPrefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        await walk(absolute, logical, depth + 1);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (entry.name.toLowerCase() !== name.toLowerCase()) continue;
+      hits.push({ absolute, logical });
+      if (hits.length > 1) return;
+    }
+  };
+
+  await walk(workspaceRoot, "", 0);
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) return undefined;
+
+  for (const mount of mounts) {
+    const mountHits: Array<{ absolute: string; logical: string }> = [];
+    visited = 0;
+    const walkMount = async (absoluteDir: string, suffix: string, depth: number): Promise<void> => {
+      if (mountHits.length > 1 || depth > IMAGE_BASENAME_SEARCH_MAX_DEPTH || visited >= IMAGE_BASENAME_SEARCH_MAX_ENTRIES) {
+        return;
+      }
+      let entries;
+      try {
+        entries = await readdir(absoluteDir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (mountHits.length > 1 || visited >= IMAGE_BASENAME_SEARCH_MAX_ENTRIES) return;
+        visited += 1;
+        if (PROTECTED_WORKSPACE_ENTRIES.has(entry.name)) continue;
+        const absolute = resolve(absoluteDir, entry.name);
+        const nextSuffix = suffix ? `${suffix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          await walkMount(absolute, nextSuffix, depth + 1);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (entry.name.toLowerCase() !== name.toLowerCase()) continue;
+        mountHits.push({
+          absolute,
+          logical: `mount:${mount.id}/${nextSuffix}`,
+        });
+        if (mountHits.length > 1) return;
+      }
+    };
+    await walkMount(mount.path, "", 0);
+    if (mountHits.length === 1) return mountHits[0];
+  }
+  return undefined;
+}
+

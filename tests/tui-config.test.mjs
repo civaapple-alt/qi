@@ -22,6 +22,7 @@ import {
   persistUserShell,
   persistUserTheme,
   persistUserTimelineDensity,
+  isQiSessionInspectEnabled,
   parseTuiCliArguments,
   resolveCapabilities,
   resolveLanguage,
@@ -30,6 +31,7 @@ import {
   saveUserConfig,
   supportedEffortsForModel,
 } from "../apps/cli/dist/index.js";
+import { modelCatalogAllowsImage } from "../apps/cli/dist/panels/flows.js";
 import { writeCustomOpenAiCompatibleProvider } from "../apps/cli/dist/provider-catalog-write.js";
 
 test("user config loads strict provider defaults and persistent capabilities", async () => {
@@ -443,6 +445,30 @@ image_input = true
   }
 });
 
+test("catalog provider image input override round-trips as a top-level model setting", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-config-qianwen-image-"));
+  const path = join(root, "config.toml");
+  try {
+    await persistUserProviderDefaults({
+      provider: "qianwenai",
+      model: "qwen3.8-max",
+      imageInput: false,
+    }, path);
+    const loaded = await loadUserConfig(path);
+    assert.equal(loaded.config.imageInput, false);
+    assert.match(await readFile(path, "utf8"), /^image_input = false$/m);
+
+    await persistUserProviderDefaults({
+      provider: "qianwenai",
+      model: "qwen3.8-max",
+      imageInput: true,
+    }, path);
+    assert.equal((await loadUserConfig(path)).config.imageInput, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("compatible catalog upserts multiple endpoints and can switch active", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-compatible-catalog-"));
   const path = join(root, "config.toml");
@@ -674,6 +700,70 @@ model = "grok-config"
   }
 });
 
+test("[tools] qi_session_inspect is opt-in and defaults off", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-user-config-tools-"));
+  const path = join(root, "config.toml");
+  try {
+    assert.equal(isQiSessionInspectEnabled(undefined), false);
+    assert.equal(isQiSessionInspectEnabled({ version: 1 }), false);
+
+    await writeFile(path, `
+version = 1
+provider = "xai"
+model = "grok-config"
+`);
+    const absent = await loadUserConfig(path);
+    assert.equal(isQiSessionInspectEnabled(absent.config), false);
+    assert.equal(absent.config.tools, undefined);
+
+    await writeFile(path, `
+version = 1
+provider = "xai"
+model = "grok-config"
+
+[tools]
+qi_session_inspect = false
+`);
+    const disabled = await loadUserConfig(path);
+    assert.equal(disabled.config.tools?.qiSessionInspect, false);
+    assert.equal(isQiSessionInspectEnabled(disabled.config), false);
+
+    await writeFile(path, `
+version = 1
+provider = "xai"
+model = "grok-config"
+
+[tools]
+qi_session_inspect = true
+`);
+    const enabled = await loadUserConfig(path);
+    assert.equal(enabled.config.tools?.qiSessionInspect, true);
+    assert.equal(isQiSessionInspectEnabled(enabled.config), true);
+    await saveUserConfig(path, enabled.config);
+    const text = await readFile(path, "utf8");
+    assert.match(text, /\[tools\]/);
+    assert.match(text, /qi_session_inspect = true/);
+    const parsed = await parseTuiCliArguments(
+      ["--workspace", root, "--config", path],
+      { environment: { QI_HOME: join(root, "state") } },
+    );
+    assert.equal(parsed.kind, "run");
+    assert.equal(parsed.options.enableQiSessionInspect, true);
+
+    await writeFile(path, `
+version = 1
+provider = "xai"
+model = "grok-config"
+
+[tools]
+unknown_tool = true
+`);
+    await assert.rejects(loadUserConfig(path), /unknown keys: unknown_tool/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("output_reserve_tokens loads from user config and persists via provider defaults", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-user-output-reserve-"));
   const path = join(root, "config.toml");
@@ -734,6 +824,13 @@ test("supportedEffortsForModel advertises Kimi K3 thinking efforts from provider
   assert.ok(kimi);
   assert.deepEqual(supportedEffortsForModel(kimi, "k3"), ["low", "high", "max"]);
   assert.deepEqual(supportedEffortsForModel(kimi, "kimi-for-coding"), []);
+});
+
+test("model configuration reads image capability from the selected catalog model", () => {
+  const qianwen = getProviderProfile("qianwenai");
+  assert.ok(qianwen);
+  assert.equal(modelCatalogAllowsImage(qianwen, "qwen3.8-max"), true);
+  assert.equal(modelCatalogAllowsImage(qianwen, "glm-5-2"), false);
 });
 
 test("supportedEffortsForModel advertises Volcengine Agent Plan thinking efforts", () => {

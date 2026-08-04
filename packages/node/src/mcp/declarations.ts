@@ -4,7 +4,7 @@ import { parse } from "smol-toml";
 import type { McpServerDeclaration, McpTransportKind } from "./types.js";
 
 const namePattern = /^[a-z][a-z0-9-]{0,63}$/;
-const implicitLaunchers = new Set(["npx", "npm", "pnpm", "yarn", "bunx", "uvx", "pipx", "bash", "sh", "cmd", "powershell", "pwsh"]);
+const implicitLaunchers = new Set(["npm", "pnpm", "yarn", "bunx", "pipx", "bash", "sh", "cmd", "powershell", "pwsh"]);
 const secretName = /(?:authorization|api[_-]?key|token|secret|password|credential)/i;
 const referencePattern = /^\$\{(?:credential|env):[A-Za-z_][A-Za-z0-9_.-]*\}$/;
 

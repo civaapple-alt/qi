@@ -19,11 +19,14 @@ import {
   McpReviewStore,
   SealedMcpOAuthProvider,
   candidateFromRaw,
+  createMcpCatalogTool,
   createMcpLiveTool,
   fingerprintMcpValue,
   mcpTargetResource,
+  normalizeMcpOutput,
   parseDeclaration,
 } from "../packages/node/dist/mcp/index.js";
+import { FileArtifactStore } from "../packages/node/dist/tools/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -79,7 +82,7 @@ test("credential-free Skill and MCP JSON management commands operate without sta
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("MCP declarations shadow by scope and reject implicit launchers, literal secrets, and unsafe private URLs", async () => {
+test("MCP declarations shadow by scope, allow npx and uvx, and reject other launchers, literal secrets, and unsafe private URLs", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-mcp-declarations-"));
   try {
     const workspace = join(root, "workspace");
@@ -92,7 +95,14 @@ test("MCP declarations shadow by scope and reject implicit launchers, literal se
     assert.equal(discovered.length, 1);
     assert.equal(discovered[0].scope, "workspace");
     assert.equal(discovered[0].url, "https://workspace.example/mcp");
-    assert.throws(() => parseDeclaration({ transport: "stdio", command: "npx", args: ["-y", "x"] }, "bad", "bad.toml", "workspace", workspace), /not allowed/);
+    const npx = parseDeclaration({ transport: "stdio", command: "npx", args: ["-y", "@playwright/mcp@latest"] }, "playwright", "playwright.toml", "workspace", workspace);
+    assert.equal(npx.command, "npx");
+    assert.deepEqual(npx.args, ["-y", "@playwright/mcp@latest"]);
+    const uvx = parseDeclaration({ transport: "stdio", command: "uvx", args: ["mcp-server-fetch"] }, "fetch", "fetch.json", "workspace", workspace);
+    assert.equal(uvx.command, "uvx");
+    assert.deepEqual(uvx.args, ["mcp-server-fetch"]);
+    assert.throws(() => parseDeclaration({ transport: "stdio", command: "npm", args: ["exec", "x"] }, "bad", "bad.toml", "workspace", workspace), /not allowed/);
+    assert.throws(() => parseDeclaration({ transport: "stdio", command: "pipx", args: ["run", "x"] }, "bad", "bad.toml", "workspace", workspace), /not allowed/);
     assert.throws(() => parseDeclaration({ transport: "http", url: "https://example.test/mcp", headers: { Authorization: "Bearer secret" } }, "bad", "bad.toml", "workspace", workspace), /credential or env reference/);
     assert.throws(() => parseDeclaration({ transport: "http", url: "https://192.168.1.2/mcp", allow_private_network: "yes" }, "bad", "bad.toml", "workspace", workspace), /must be boolean/);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -110,6 +120,29 @@ test("MCP review fingerprints quarantine drift and bind exact target resources",
     assert.equal(binding.fingerprint, fingerprintMcpValue(raw));
     const changed = candidateFromRaw("tool", { ...raw, description: "Changed" });
     const recorded = await reviews.recordSnapshot({ server: "demo", capturedAt: new Date().toISOString(), tools: [changed], resources: [], resourceTemplates: [], prompts: [] });
+    assert.equal(recorded.drifted.length, 1);
+    assert.equal(Object.values((await reviews.read()).bindings)[0].state, "drifted");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP review quarantines bindings when declared stdio argv changes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-mcp-argv-drift-"));
+  try {
+    const reviews = new McpReviewStore(join(root, "state", "mcp-bindings.json"));
+    const candidate = candidateFromRaw("tool", { name: "lookup", inputSchema: { type: "object" } });
+    const snapshot = {
+      server: "npm-server",
+      capturedAt: new Date().toISOString(),
+      transportIdentity: { transport: "stdio", command: "/usr/bin/npx", args: ["-y", "example-mcp@1.0.0"] },
+      tools: [candidate], resources: [], resourceTemplates: [], prompts: [],
+    };
+    await reviews.recordSnapshot(snapshot);
+    await reviews.bind({ server: "npm-server", kind: "tool", name: "lookup", effect: "read" });
+    const recorded = await reviews.recordSnapshot({
+      ...snapshot,
+      capturedAt: new Date().toISOString(),
+      transportIdentity: { ...snapshot.transportIdentity, args: ["-y", "example-mcp@2.0.0"] },
+    });
     assert.equal(recorded.drifted.length, 1);
     assert.equal(Object.values((await reviews.read()).bindings)[0].state, "drifted");
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -157,6 +190,27 @@ test("official MCP client negotiates stdio, discovers all capability classes, an
     const result = await manager.callTool(binding, { text: "hello" });
     assert.equal(result.structuredContent.echoed, "hello");
     await assert.rejects(() => manager.callTool(binding, {}), /input schema validation/);
+  } finally { await manager.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("official MCP client discovers tool-only servers without calling unsupported list methods", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-mcp-tools-only-"));
+  const workspace = join(root, "workspace");
+  const declarationsRoot = join(workspace, ".qi", "mcp");
+  const fixture = join(process.cwd(), "tests", "fixtures", "mcp-stdio-server.mjs");
+  await mkdir(declarationsRoot, { recursive: true });
+  await writeFile(join(declarationsRoot, "tools-only.toml"), `transport = "stdio"\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(fixture)}, "--tools-only"]\nconnect_timeout_ms = 5000\ncall_timeout_ms = 5000\n`);
+  const manager = new McpConnectionManager({
+    catalog: new McpDeclarationCatalog({ workspaceRoot: workspace, userDeclarationsRoot: join(root, "user") }),
+    reviews: new McpReviewStore(join(root, "state", "reviews.json")),
+    workspaceRoot: workspace,
+  });
+  try {
+    const refreshed = await manager.refresh("tools-only");
+    assert.equal(refreshed.snapshot.tools[0].name, "echo");
+    assert.deepEqual(refreshed.snapshot.resources, []);
+    assert.deepEqual(refreshed.snapshot.resourceTemplates, []);
+    assert.deepEqual(refreshed.snapshot.prompts, []);
   } finally { await manager.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -294,4 +348,73 @@ test("agent-browser opt-in binary passes offline doctor and MCP handshake", asyn
     const refreshed = await manager.refresh("agent-browser");
     assert.ok(refreshed.snapshot.tools.length > 0);
   } finally { await manager.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("mcp_catalog search returns an explicit empty-catalog hint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-mcp-catalog-empty-"));
+  try {
+    const workspace = join(root, "workspace");
+    await mkdir(workspace, { recursive: true });
+    const reviews = new McpReviewStore(join(root, "reviews.json"));
+    const manager = new McpConnectionManager({
+      catalog: new McpDeclarationCatalog({ workspaceRoot: workspace, userDeclarationsRoot: join(root, "user") }),
+      reviews,
+      workspaceRoot: workspace,
+    });
+    const tool = createMcpCatalogTool({ manager, reviews });
+    const result = await tool.execute({ operation: "search", query: "image screenshot" }, {
+      sessionId: "ses_mcp",
+      runId: "run_mcp",
+      stepId: "stp_mcp",
+      actionId: "act_mcp",
+      subject: "agent",
+      workspaceRoot: workspace,
+      artifactStore: new FileArtifactStore(join(root, "artifacts")),
+    });
+    assert.deepEqual(result.candidates, []);
+    assert.match(result.hint, /no refreshed server snapshots/i);
+    assert.match(result.hint, /read_image/i);
+    assert.match(tool.description, /Do not invent MCP servers/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP image blocks become vision artifact parts without Session attachment promotion", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-mcp-image-vision-"));
+  try {
+    const store = new FileArtifactStore(join(root, "artifacts"));
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const normalized = await normalizeMcpOutput({
+      content: [{ type: "image", mimeType: "image/png", data: png.toString("base64") }],
+    }, store);
+    assert.equal(normalized.imageArtifacts?.length, 1);
+    assert.equal(normalized.imageArtifacts[0].mediaType, "image/png");
+    assert.match(normalized.imageArtifacts[0].ref, /^artifact:\/\//);
+    const tool = createMcpLiveTool({
+      manager: {},
+      declarations: [{ name: "demo", transport: "http", url: "https://example.test/mcp" }],
+      bindings: [{
+        server: "demo",
+        kind: "tool",
+        name: "shot",
+        fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        effect: "read",
+        resourcePatterns: [mcpTargetResource("demo", "tool", "shot")],
+        reviewedAt: new Date(0).toISOString(),
+        state: "bound",
+      }],
+    });
+    const modelOutput = tool.toModelOutput(normalized);
+    assert.equal(modelOutput[0].type, "text");
+    assert.equal(modelOutput[1].type, "artifact");
+    assert.equal(modelOutput[1].mediaType, "image/png");
+    assert.equal(modelOutput[1].ref, normalized.imageArtifacts[0].ref);
+    assert.match(tool.description, /not Session attachments for read_image/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

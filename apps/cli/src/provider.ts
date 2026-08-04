@@ -4,6 +4,7 @@ import {
   listProviderProfiles,
   normalizeReasoningEffort,
   requireProviderProfile,
+  resolveModelCapabilities,
   resolveProviderWireApi,
   type ProviderThinkingEffort,
   type ProviderProfile,
@@ -133,9 +134,12 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
   const reasoningEffort = supportsReasoningEffort
     ? normalizeReasoningEffort(requestedReasoningEffort)
     : undefined;
+  const requestedImageInput = input.imageInput ?? matchingDefaults?.imageInput;
   const imageInput = provider === "compatible"
-    ? input.imageInput ?? matchingDefaults?.imageInput
-    : undefined;
+    ? requestedImageInput ?? false
+    : resolveModelCapabilities(profile, model, {
+        ...(requestedImageInput === undefined ? {} : { imageInput: requestedImageInput }),
+      }).imageInput;
 
   return {
     provider,
@@ -148,7 +152,7 @@ export function resolveProviderConfig(input: ResolveProviderConfigInput = {}): P
     accountAlias,
     authStatus: apiKey ? "ready" : "missing",
     wireApi: resolveProviderWireApi(profile, model),
-    ...(imageInput === undefined ? {} : { imageInput }),
+    imageInput,
   };
 }
 

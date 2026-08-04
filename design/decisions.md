@@ -519,6 +519,15 @@ event stream and can leak binary content into logs, redaction, and context accou
   magic-byte, decode-size, pixel-count, dimension, count, and aggregate-byte checks before a Run is committed.
   Provider-side URL fetching is not an ingestion path. Path ingestion never widens authority beyond the primary
   Workspace and currently authorized read-only mounts.
+- Task text may name Workspace/mount image paths incompletely (bare filenames or prose-embedded tokens with a known
+  image extension, plus `file://` URIs). The Runtime detects those candidates, resolves a Workspace-root match or a
+  unique authorized basename hit, and ingests the file as a Session image attachment before the Run commits. Zero or
+  ambiguous hits leave the text unchanged rather than inventing a path or failing the Run.
+- Tool-result images (including image blocks from a bound MCP call such as a Playwright screenshot) are materialized
+  as model `artifact` parts for the current Run so an image-capable model can see them. Those Artifacts do not enter
+  the Session attachment set and cannot be passed to `read_image`, which remains limited to original Artifacts from
+  `run.triggered` attachments. An empty or unmatched MCP catalog must not be used as a substitute for viewing local
+  Workspace or Session images.
 - Original and prepared images are retained as project-private Artifacts. The prepared image is the default model
   view; an explicitly authorized read-only image Action may derive a bounded crop from an original attachment.
   Skills, prompts, and provider capabilities do not grant that Action authority.
@@ -639,8 +648,10 @@ replaying tool transcripts or Runtime telemetry would violate ADR-0024/0026.
   - interrupted Runs without images when a non-empty final assistant narrative exists (`<qi-interrupted-run>`),
     stating only coarse status/reason plus that narrative.
 - When the history budget drops whole earlier turns, a Runtime ContextBlock may state only
-  `olderTurnsOmitted=<N>` and point to explicit `qi_session_inspect` (`recovery` preferred). It must not list
-  omitted Run IDs in model text; compile metadata may still record `history:omitted:<runId>` for operators.
+  `olderTurnsOmitted=<N>`. When the operator has enabled model-facing `qi_session_inspect` in user config, that
+  notice may point to an explicit `recovery` Action; otherwise offline Session extract remains the diagnostic path.
+  It must not list omitted Run IDs in model text; compile metadata may still record `history:omitted:<runId>` for
+  operators.
 - Plan and Agent Runs may receive a Runtime Work Plan navigation ContextBlock when `currentWorkPlanId` has
   unfinished items: allowlisted `workPlanId`, `revision`, and per-item `workItemId` / `step` / `status`, with an
   explicit navigation-not-evidence disclaimer. Ask Runs never receive it. Work Plan IDs are model-authored
@@ -742,7 +753,7 @@ Decision:
   via `/settings` → Subagent or `/subagent`; batch max 4 and depth 1 remain fixed.
 - Return path: `summaryRef` / inline `summary` stay short previews; `resultRef` stores the full child deliverable
   text (hard-capped). Parents read Artifact store content with read-effect `artifact_get`, never workspace `read`
-  on `artifact://`. `qi_session_inspect` projects Subagent Task refs (`operation=delegations`, Run/recovery
+  on `artifact://`. When enabled, `qi_session_inspect` projects Subagent Task refs (`operation=delegations`, Run/recovery
   facts) but does not inline full child text — parents still load `resultRef` via `artifact_get`. Child briefs
   and the `delegate` tool description expose the actual envelope so parents size `tasks[]` to fit (one document
   surface/theme per child); no automatic complexity scoring.
@@ -769,6 +780,11 @@ Decision:
 
 - User declarations live under `$QI_HOME/resources/mcp`; Workspace declarations under `.qi/mcp` shadow equal
   names. Declarations are secret-free and inert until a human connects and reviews them.
+- stdio declarations may explicitly use `npx` or `uvx` so npm- and Python-published MCP servers can be launched
+  without a separate global install. The resolved launcher path/hash and complete declared argv are part of
+  transport identity; changing either drifts existing bindings. Floating selectors such as `@latest` or an
+  unpinned uvx package are allowed as an operator choice but are not reproducible, so exact package versions
+  remain the recommended declaration form.
 - Stdio, Streamable HTTP and explicit legacy SSE are supported through the official TypeScript client behind a
   Node port. SSE is never a silent downgrade. Connections start lazily, use bounded output/time/lifetime, and
   close with the owning Runtime.
@@ -789,8 +805,8 @@ Decision:
   ports rather than being accepted implicitly.
 
 Rejected: auto-binding every discovered tool, treating annotations as effect authority, model-written server
-configuration, floating executable installers, automatic SSE fallback, and injecting server instructions into
-the system prefix.
+configuration, granting registry-distributed servers authority from package metadata, automatic SSE fallback,
+and injecting server instructions into the system prefix.
 
 Required evidence: all three transports; secret-free declaration parsing; binding and fingerprint drift;
 transport/business capability conjunction; prompt/resource/output bounds; OAuth token sealing; dispatch-aware

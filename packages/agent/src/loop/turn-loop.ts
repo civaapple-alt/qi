@@ -2250,8 +2250,7 @@ function createHistoryOmissionBlock(olderTurnsOmitted: number): ContextBlock {
     content: [
       `Restored conversation history omitted olderTurnsOmitted=${olderTurnsOmitted} earlier user turn(s) under the history budget.`,
       "Those turns remain durable Session evidence. Prefer the restored messages already in this request for ordinary continue.",
-      "Use qi_session_inspect with operation=recovery only when the prior Run terminal state or settlement is unclear.",
-      "Do not invent Run IDs or tool transcripts for omitted turns.",
+      "When prior Run terminal state or settlement is unclear, use an enabled qi_session_inspect recovery Action or offline Session extract — do not invent Run IDs or tool transcripts for omitted turns.",
     ].join("\n"),
     priority: 999,
     required: false,

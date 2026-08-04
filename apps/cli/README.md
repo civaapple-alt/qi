@@ -93,7 +93,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/runs` | Session history hub — choose Runs, then Steps or Agents (Actions via Step; chooser when both exist; Enter selects observation; no separate `/steps` / `/actions` / `/agents` shortcuts) |
 | `/sessions` | Active/Archived Session list (about 3–5 cards visible; ↑↓ scrolls); type-to-search; Enter resumes or restores; `a` archives (with confirm) |
 | `/status` | Session/Run/Step/Action engineering detail panel |
-| `/model` | Reconfigure without re-login (model, thinking effort, context window, max output tokens). Save scope: **User default** writes `~/.qi/config.toml` + sealed credential metadata; **Current Session only** applies without changing config. |
+| `/model` | Reconfigure without re-login (model, thinking effort, context window, max output tokens, and image input when configurable). Model rows show catalogued image/text capability. Save scope: **User default** writes `~/.qi/config.toml` + sealed credential metadata; **Current Session only** applies without changing config. |
 | `/reset-workspace` | Preflight all active Sessions, archive them, and start a fresh Session |
 | `/next [continue\|stop\|plan]` | Next Run panel |
 | `/steer <text>` | Queue direction for the next safe Step boundary |
@@ -230,6 +230,11 @@ per-model windows; then set `provider = "<id>"` in `~/.qi/config.toml` (must mat
 OpenAI-compatible endpoints are text-only without `image_input = true`. A Turn supports at most eight images and
 20 MiB of prepared image data. The timeline displays committed metadata rather than maintaining a separate UI
 attachment truth.
+
+For catalogued providers, `/model` derives the image-input setting from the selected model's `inputModalities`.
+Image-capable models default on and may be narrowed off; catalogued text-only models remain off even if a stale
+setting requests images. A **User default** save writes top-level `image_input` for the active provider/model,
+while **Current Session only** records the effective setting only in that Session.
 
 CLI flags are parsed by a pure helper that supports credential-free `--help`/`--version`. Bare `qi` uses the
 current directory as the Workspace (optional positional `qi PATH` or `--workspace PATH`). `--data PATH`
@@ -369,7 +374,7 @@ batch fan-out max **4** and depth **1** are fixed product limits shown in the hu
 The active Skill catalog combines `<workspace>/.qi/skills`, `<workspace>/.agents/skills`, `$QI_HOME/resources/skills`,
 and activated entries from `~/.agents/skills`; project `.qi/skills` wins on a name collision. Workspace Agent Skills
 are directly usable read-only. Global Agent Skills appear from `.skill-lock.json` as inactive candidates and become
-usable through `/skills` → **启用 / 停用全局 Skill** (Space toggles, Enter applies; `/skills activate|deactivate <name>` remains available for scripts); activation state is stored under `$QI_HOME/resources`. Workspace/user Qi Skills are always active and are not toggleable. `~/.codex/skills` and
+usable through `/skills` → **启用 / 停用全局 Skill** (Space toggles, Enter applies; `/skills activate|deactivate <name>` remains available for scripts); activation state is stored under `$QI_HOME/resources`. Workspace/user Qi Skills are always active and are not toggleable; `/skills` → **始终启用的 Skill** lists them with a `/skill:<name> <task>` invoke hint. `~/.codex/skills` and
 `~/.claude/skills` are not scanned by default; use an explicit local path or configured compatibility root. Only independently omittable metadata entries enter initial model context, plus a short required
 progressive-discovery hint in the advertised `skill` Tool schema and an optional context index. The `skill` tool
 progressively loads a selected
@@ -387,9 +392,16 @@ Workspace cwd, and bounded timeout/output. Qi never runs dependency installers o
 
 The same dedicated `skill` Tool can export an existing Workspace Skill to a new ordinary draft directory and
 publish a digest-guarded update. Ordinary file tools still cannot access `.qi`. The read-only
-`qi_session_inspect` Tool lets Ask, Plan, and Agent inspect bounded Session projections from the current project
-EventStore (including Subagent `operation=delegations` / `resultRef` pointers for `artifact_get`); this
-capability adds no TUI command, panel, or query API.
+`qi_session_inspect` Tool is **off by default**. Enable it in `$QI_HOME/config.toml` before Ask, Plan, or Agent
+can use bounded Session projections (including Subagent `operation=delegations` / `resultRef` for `artifact_get`):
+
+```toml
+[tools]
+qi_session_inspect = true
+```
+
+Offline `scripts/extract-session.mjs` / `inspectQiSession` remain available without this flag. Enabling the Tool
+adds no TUI command, panel, or query API.
 
 MCP declarations live at `<workspace>/.qi/mcp/<server>.toml` and
 `$QI_HOME/resources/mcp/<server>.toml` (Workspace shadows user) and remain inert until `/mcp` → **Refresh
@@ -402,6 +414,17 @@ client registration, and tokens stay sealed. Drift blocks new calls. Remote text
 output is an Artifact. Server-level `隔离（未连接）` can coexist with bound capabilities: it describes the live
 connection state, while the panel shows each capability as `已绑定` or `隔离`; an unbound server `instructions`
 entry is guidance, not a callable Tool.
+
+The server capability page is a batch review table: Up/Down selects a capability, Left/Right changes its pending
+effect between quarantined and the allowed effect classes, Enter saves every pending bind/unbind change, and Esc
+discards unsaved edits. Refresh and OAuth remain explicit action rows; the initial cursor lands on the first
+capability after discovery.
+
+Registry-published stdio servers may use explicit `npx` or `uvx` declarations, for example
+`command = "npx"` with `args = ["-y", "@playwright/mcp@0.0.78"]`, or `command = "uvx"` with
+`args = ["mcp-server-fetch"]`. Exact versions are recommended, but Qi also accepts operator-selected floating
+selectors. Refresh is the explicit point where the launcher may resolve, download, and start that package;
+discovered capabilities remain quarantined until separately bound.
 
 Credential-free JSON management is available as `qi skills list|activate|deactivate|install ... --json` and
 `qi mcp status|refresh|bind|unbind|logout ... --json`. Secrets are never accepted as command-line options.

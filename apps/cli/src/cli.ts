@@ -5,6 +5,7 @@ import {
   defaultUserConfigPath,
   ensureUserShellConfig,
   findCompatibleEndpoint,
+  isQiSessionInspectEnabled,
   loadUserConfig,
   resolveDelegateConfig,
   resolveLanguage,
@@ -57,6 +58,8 @@ export interface TuiCliOptions {
   allowSpend: boolean;
   memoryEnabled: boolean;
   memoryAutoAcceptProject: boolean;
+  /** When true, register model-facing `qi_session_inspect` (user config opt-in). */
+  enableQiSessionInspect: boolean;
   image: import("./config.js").QiImageConfig;
   /** CLI `--allow-*` / `--safe` only; re-applied when refreshing project/user policy mid-process. */
   capabilityOverrides: CapabilityOverrides;
@@ -217,14 +220,14 @@ export async function parseTuiCliArguments(
         : { reasoningEffort: loaded.config.reasoningEffort }),
       ...(loaded.config.baseURL === undefined ? {} : { baseURL: loaded.config.baseURL }),
       ...(loaded.config.accountAlias === undefined ? {} : { accountAlias: loaded.config.accountAlias }),
-      ...(loaded.config.provider !== "compatible"
-        ? {}
-        : {
+      ...(loaded.config.provider === "compatible"
+        ? {
             imageInput: findCompatibleEndpoint(
               loaded.config,
               loaded.config.accountAlias ?? "default",
-            )?.imageInput ?? false,
-          }),
+            )?.imageInput ?? loaded.config.imageInput ?? false,
+          }
+        : (loaded.config.imageInput === undefined ? {} : { imageInput: loaded.config.imageInput })),
     },
     allowMissingCredential: true,
     environment,
@@ -265,6 +268,7 @@ export async function parseTuiCliArguments(
       ...capabilities,
       memoryEnabled: loaded.config.memory?.enabled ?? true,
       memoryAutoAcceptProject: loaded.config.memory?.autoAcceptProject ?? true,
+      enableQiSessionInspect: isQiSessionInspectEnabled(loaded.config),
       image: loaded.config.image ?? {},
       capabilityOverrides: overrides,
       noConfig: flags.has("--no-config"),

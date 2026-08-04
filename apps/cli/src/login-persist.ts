@@ -24,7 +24,7 @@ export async function persistLoginProviderDefaults(
       ...(extras?.outputReserveTokens === undefined
         ? {}
         : { outputReserveTokens: extras.outputReserveTokens }),
-      ...(status.provider === "compatible" ? { imageInput: status.imageInput } : {}),
+      imageInput: status.imageInput,
     },
     configPath,
   );

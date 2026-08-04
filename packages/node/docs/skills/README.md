@@ -31,7 +31,9 @@ can be used as optional content-addressed snapshots. `discoverCompatibility()` r
 configured compatibility root before inspection or installation.
 
 The TUI completes active Skill names after `/skill:`; the completed `/skill:<name>` command still requires a task
-before starting a Run. When the Workspace is the user's home directory, the overlapping `.agents/skills` path is
+before starting a Run. `/skills` → **Always-on Skills** lists Workspace and user Qi Skills (plus workspace
+`.agents` Skills) that need no activation toggle; global `~/.agents/skills` remain under **Enable / disable global
+Skills**. When the Workspace is the user's home directory, the overlapping `.agents/skills` path is
 kept behind the global lock and activation state rather than being treated as a directly active project root.
 
 ## Behavioral invariants

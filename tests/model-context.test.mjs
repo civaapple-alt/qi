@@ -77,7 +77,35 @@ test("Ask/Plan/Agent advertised Tool schema digests match the golden", async () 
         createHash("sha256").update(JSON.stringify(tools)).digest("hex"),
         toolFixture[mode].sha256,
       );
+      assert.equal(tools.some((tool) => tool.name === "qi_session_inspect"), false);
     }
+  } finally {
+    await runtime?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("enableQiSessionInspect registers qi_session_inspect in Agent tool catalog", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tool-inspect-opt-in-"));
+  let runtime;
+  try {
+    const model = new ScriptedModelPort([[
+      { type: "text.delta", delta: "ok" },
+      { type: "completed", finishReason: "stop" },
+    ]]);
+    runtime = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, ".data"),
+      userSkillsRoot: join(root, "skills"),
+      skillCompatibilityRoots: [],
+      modelPort: model,
+      model: { provider: "fake", model: "tool-golden" },
+      enableQiSessionInspect: true,
+    });
+    runtime.changeMode("agent");
+    await runtime.run("Inspect contract");
+    const tools = model.requests.at(-1).tools.map((tool) => tool.name);
+    assert.equal(tools.includes("qi_session_inspect"), true);
   } finally {
     await runtime?.close();
     await rm(root, { recursive: true, force: true });

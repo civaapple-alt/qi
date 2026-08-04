@@ -27,6 +27,25 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- TUI `/skills` adds **始终启用的 Skill / Always-on Skills**: lists Workspace and user Qi Skills (plus workspace
+  `.agents` Skills) that need no activation toggle, with a `/skill:<name> <task>` invoke hint.
+- Web Recent Sessions omit depth-1 Subagent child Sessions (`Delegated: …` catalog titles). Open those children
+  from the Subagent Tasks pane; direct Session ID / deep links still work.
+- TUI and Web `read_image` cards show `image #N · path|clipboard|url` (matching the user-message attachment
+  line) plus crop/size instead of dumping the raw `artifact://` JSON input. Web Run Narrative also lists those
+  Session attachments on the Run header.
+- Model-facing `qi_session_inspect` is off by default. Enable it with `$QI_HOME/config.toml`
+  `[tools] qi_session_inspect = true`. Offline Session extract / `inspectQiSession` are unchanged.
+- Task text image detection now accepts bare filenames and prose-embedded paths (for example
+  `查看 图片 spider-quiz-full.png`), `file://` local URIs, and unique Workspace/mount basename resolution when the
+  typed path is incomplete. Zero or ambiguous hits stay text and do not fail the Run.
+- Bound MCP image results are returned as tool-result `artifact` parts so image-capable models can see screenshots
+  in the same Run; those Artifacts are not Session attachments and remain outside `read_image` authority.
+- `mcp_catalog` search returns an explicit empty-catalog hint and steers agents away from inventing MCP servers or
+  using MCP to view local Workspace/Session images.
+- MCP stdio declarations now allow explicit `npx` and `uvx` launchers for registry-published servers. Exact
+  package versions remain recommended, declared argv participates in transport drift, and discovery/binding/Run
+  authority remain separately gated.
 - `.qi/skills/**` now uses its dedicated full-tree validator while generic `.qi` declarations remain
   non-executable; Workspace Skill and MCP configuration changes are rejected during an active Run.
 - TUI `/mcp` is now a single panel entry, like `/settings` and `/permissions`; server refresh, OAuth, capability
@@ -37,13 +56,22 @@ backup plus reset or a new data root rather than an automatic migration.
   that previously failed with `INVALID_MODEL_ACTION`.
 - MCP server summaries now distinguish the connection quarantine state from persisted capability bindings
   (`隔离（未连接） · 2/3 已绑定`).
+- MCP server capability review is now a compact batch table: Up/Down selects a capability, Left/Right changes its
+  pending effect, Enter saves all bind/unbind changes, and Esc discards them. It shows at most seven two-line
+  entries while preserving search, scrolling, explicit refresh/OAuth actions, and the position counter.
 - Ctrl+O now prioritizes a final reply that was truncated by rendered line count over collapsed Thinking,
   so long Markdown responses can be expanded reliably.
 
 ### Fixed
 
-- Skill management now keeps `/skills` to two explicit actions—global activation management and installation—with a
-  permissions-style Space toggle plus Enter apply flow; individual Skill lists are confined to activation management.
+- `/model` now shows catalogued image capability and an Image input setting for providers such as
+  `qianwenai/qwen3.8-max`, instead of limiting the control to generic `compatible` endpoints. User-default and
+  Session-only saves carry the setting end to end, while catalogued text-only models still deny image input.
+- MCP refresh now enumerates only capability classes advertised by each server, so tool-only servers such as
+  Playwright no longer fail strict discovery on unsupported `resources/list` or `prompts/list` calls.
+- Skill management keeps `/skills` to explicit hub actions—always-on Workspace/user catalog, global activation
+  management, and installation—with a permissions-style Space toggle plus Enter apply flow for global Skills;
+  individual Skill lists are confined to always-on browse and activation management.
 - Global Agent Skill activations are now reconciled during startup and Run refreshes, so an external
   `npx skills remove <name> -g` removes the stale Qi activation record and prevents later Runs from loading it.
 - Skill-aware TUI/Web projections now observe model-initiated `skill` Tool calls, hide Skill instruction bodies,

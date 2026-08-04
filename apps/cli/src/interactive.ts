@@ -2657,6 +2657,9 @@ export class InteractiveTui {
                 ...(loaded.config.contextWindowTokens === undefined
                   ? {}
                   : { contextWindowTokens: loaded.config.contextWindowTokens }),
+                ...(loaded.config.imageInput === undefined
+                  ? {}
+                  : { imageInput: loaded.config.imageInput }),
               }
               : undefined);
           const status = await auth.useAccount(provider, alias, routing);
