@@ -2126,8 +2126,22 @@ export class TuiPresenter {
     const run = this.activeRun() ?? this.selectedRun();
     if (!run) return undefined;
     const step = this.selectedStep() ?? (run.stepOrder.at(-1) ? run.steps[run.stepOrder.at(-1)!] : undefined);
-    if (!step || !isCollapsibleModelText(step)) return undefined;
+    if (!step || !this.isModelOutputCollapsed(step, run)) return undefined;
     return `step:${step.stepId}`;
+  }
+
+  private isModelOutputCollapsed(step: StepView, run: RunView): boolean {
+    const final = step.model?.text;
+    if (!final) return false;
+    if (step.model?.finishReason === "length" || final.length > COLLAPSED_MODEL_TEXT_CHARS) return true;
+    const width = Math.max(40, this.#width - 2);
+    const terminalStep = run.stepOrder.at(-1) === step.stepId && run.status !== "active" && run.status !== "triggered";
+    const rendered = renderMarkdown(final, {
+      width,
+      expandCodeBlocks: false,
+      maxCodeLines: terminalStep ? 40 : 16,
+    });
+    return rendered.length > (terminalStep ? COLLAPSED_LONG_RESPONSE_LINES : 24);
   }
 
   /** Ctrl+O target when an active Run has folded older Steps into a summary line. */
@@ -2333,12 +2347,6 @@ function handoffStatusKey(
 function isGoalAttemptsBudgetPark(run: RunView): boolean {
   if (!run.goalBinding) return false;
   return /\battempts budget exhausted\b/i.test(run.terminal?.detail ?? "");
-}
-
-function isCollapsibleModelText(step: StepView): boolean {
-  const final = step.model?.text;
-  if (!final) return false;
-  return step.model?.finishReason === "length" || final.length > COLLAPSED_MODEL_TEXT_CHARS;
 }
 
 function isPlainShortText(text: string): boolean {

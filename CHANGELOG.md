@@ -29,6 +29,16 @@ backup plus reset or a new data root rather than an automatic migration.
 
 - `.qi/skills/**` now uses its dedicated full-tree validator while generic `.qi` declarations remain
   non-executable; Workspace Skill and MCP configuration changes are rejected during an active Run.
+- TUI `/mcp` is now a single panel entry, like `/settings` and `/permissions`; server refresh, OAuth, capability
+  review, binding, and unbinding are selected from the panel instead of slash subcommands.
+- MCP list metadata is normalized to one terminal row so multiline remote tool descriptions cannot corrupt
+  arrow-key rendering.
+- MCP live action resources are deduplicated before `action.proposed` validation, fixing bound remote tool calls
+  that previously failed with `INVALID_MODEL_ACTION`.
+- MCP server summaries now distinguish the connection quarantine state from persisted capability bindings
+  (`隔离（未连接） · 2/3 已绑定`).
+- Ctrl+O now prioritizes a final reply that was truncated by rendered line count over collapsed Thinking,
+  so long Markdown responses can be expanded reliably.
 
 ### Fixed
 

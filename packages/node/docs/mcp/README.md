@@ -21,6 +21,16 @@ Resources, Resource Templates, Prompts, and server instructions without making a
 server, kind/name, fingerprint, effect (`read/write/execute/publish/spend`), and exact resources. Models see one
 cached `mcp_catalog` and one Agent-only live `mcp` proxy instead of one Tool schema per remote capability.
 
+Bindings are project-scoped and survive Session creation and Runtime restart. They are stored under the project
+private root (`$QI_HOME/projects/<project-id>/state/mcp-bindings.json`), not in Workspace `.qi` and not in a
+single Session's event stream. This persistent review state does not bypass fresh per-Run capability leases,
+transport checks, or fingerprint drift checks.
+
+The server's MCP `instructions` value is stored and fingerprinted as a separate review candidate. It is remote,
+untrusted guidance and is never a Tool or an authority grant. Loading it requires an explicit `read` binding;
+binding remote Tools does not implicitly bind server instructions. A server may therefore show some bound Tools
+while its server-level instructions remain quarantined.
+
 ## Behavioral invariants
 
 - Declarations and discovered capabilities are inert until explicitly refreshed and bound.

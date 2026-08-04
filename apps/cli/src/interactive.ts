@@ -81,6 +81,7 @@ import {
   openSubagentSettingsPanel,
   openModelConfigurationPanel,
   openMountsPanel,
+  openMcpPanel,
   openPermissionsPanel,
   openShellPanel,
   openProvidersPanel,
@@ -1607,6 +1608,14 @@ export class InteractiveTui {
         }
         this.#render();
       },
+      mcpStatuses: () => this.#runtime.mcpStatuses(),
+      mcpReview: () => this.#runtime.mcpReview(),
+      refreshMcp: (server) => this.#runtime.refreshMcp(server),
+      bindMcp: (input) => this.#runtime.bindMcp(input),
+      unbindMcp: (server, kind, name) => this.#runtime.unbindMcp(server, kind, name),
+      beginMcpLogin: (server) => this.#runtime.beginMcpLogin(server),
+      finishMcpLogin: (server, callbackUrl) => this.#runtime.finishMcpLogin(server, callbackUrl),
+      logoutMcp: (server) => this.#runtime.logoutMcp(server),
       startLoginDevice: (provider, options) => {
         const modelSuffix = options?.model?.trim() ? ` model ${options.model.trim()}` : "";
         const effortSuffix = options?.reasoningEffort?.trim()
@@ -2446,49 +2455,12 @@ export class InteractiveTui {
       return;
     }
     if (name === "mcp") {
-      const parts = argument.trim().split(/\s+/).filter(Boolean);
-      const operation = parts.shift() ?? "status";
-      this.#startManagementTask(async () => {
-        if (operation === "status") {
-          this.#presenter.setNotice(JSON.stringify(await this.#runtime.mcpStatuses(), null, 2));
-          return;
-        }
-        if (operation === "refresh" && parts.length === 1) {
-          const result = await this.#runtime.refreshMcp(parts[0]!);
-          this.#presenter.setNotice(`MCP ${parts[0]} refreshed; ${result.drifted.length} binding(s) drifted.`);
-          return;
-        }
-        if (operation === "login" && parts.length === 1) {
-          const url = await this.#runtime.beginMcpLogin(parts[0]!);
-          this.#presenter.setNotice(`Open this authorization URL, then use /mcp finish ${parts[0]} <callback-url>:\n${url}`);
-          return;
-        }
-        if (operation === "finish" && parts.length === 2) {
-          await this.#runtime.finishMcpLogin(parts[0]!, parts[1]!);
-          this.#presenter.setNotice(`MCP ${parts[0]} OAuth login completed.`);
-          return;
-        }
-        if (operation === "logout" && parts.length === 1) {
-          await this.#runtime.logoutMcp(parts[0]!);
-          this.#presenter.setNotice(`MCP ${parts[0]} OAuth credentials removed.`);
-          return;
-        }
-        if (operation === "bind" && parts.length >= 4) {
-          const [server, kind, capabilityName, effect, ...resources] = parts;
-          if (!new Set(["tool", "resource", "resource-template", "prompt", "instructions"]).has(kind!)) throw new Error("MCP kind must be tool, resource, resource-template, prompt, or instructions");
-          if (!new Set(["read", "write", "execute", "publish", "spend"]).has(effect!)) throw new Error("MCP effect must be read, write, execute, publish, or spend");
-          await this.#runtime.bindMcp({ server: server!, kind: kind! as import("@civaapple/qi-node/mcp").McpBinding["kind"], name: capabilityName!, effect: effect! as import("@civaapple/qi-agent/capability").Effect, ...(resources.length ? { resourcePatterns: resources } : {}) });
-          this.#presenter.setNotice(`Bound MCP ${server}/${kind}/${capabilityName} as ${effect}.`);
-          return;
-        }
-        if (operation === "unbind" && parts.length === 3) {
-          const [server, kind, capabilityName] = parts;
-          const changed = await this.#runtime.unbindMcp(server!, kind! as import("@civaapple/qi-node/mcp").McpBinding["kind"], capabilityName!);
-          this.#presenter.setNotice(changed ? `Unbound MCP ${server}/${kind}/${capabilityName}.` : "MCP binding was not present.");
-          return;
-        }
-        throw new Error("Usage: /mcp status | refresh <server> | login <server> | finish <server> <callback-url> | logout <server> | bind <server> <kind> <name> <effect> [resource-pattern...] | unbind <server> <kind> <name>");
-      }, "MCP");
+      if (argument.trim()) {
+        this.#presenter.setNotice("请使用 /mcp 打开 MCP 管理面板；/mcp 不接受参数。");
+        this.#render();
+        return;
+      }
+      openMcpPanel(this.#panelFlow());
       return;
     }
     if (name === "skill") {

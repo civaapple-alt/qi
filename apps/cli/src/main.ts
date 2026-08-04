@@ -408,21 +408,12 @@ async function main(): Promise<void> {
         if (!closing) readline.prompt();
         return;
       }
-      const parts = command.argument.trim().split(/\s+/).filter(Boolean);
-      const operation = parts.shift() ?? "status";
-      const execute = async (): Promise<unknown> => {
-        if (operation === "status") return runtime.mcpStatuses();
-        if (operation === "refresh" && parts.length === 1) return runtime.refreshMcp(parts[0]!);
-        if (operation === "login" && parts.length === 1) return { authorizationUrl: await runtime.beginMcpLogin(parts[0]!) };
-        if (operation === "finish" && parts.length === 2) { await runtime.finishMcpLogin(parts[0]!, parts[1]!); return { status: "logged-in" }; }
-        if (operation === "logout" && parts.length === 1) { await runtime.logoutMcp(parts[0]!); return { status: "logged-out" }; }
-        if (operation === "bind" && parts.length >= 4) {
-          const [server, kind, name, effect, ...resourcePatterns] = parts;
-          return runtime.bindMcp({ server: server!, kind: kind! as import("@civaapple/qi-node/mcp").McpBinding["kind"], name: name!, effect: effect! as import("@civaapple/qi-agent/capability").Effect, ...(resourcePatterns.length ? { resourcePatterns } : {}) });
-        }
-        if (operation === "unbind" && parts.length === 3) return { unbound: await runtime.unbindMcp(parts[0]!, parts[1]! as import("@civaapple/qi-node/mcp").McpBinding["kind"], parts[2]!) };
-        throw new Error("Usage: /mcp status|refresh|login|finish|logout|bind|unbind ...");
-      };
+      if (command.argument.trim()) {
+        process.stderr.write("Use bare /mcp to inspect MCP in the panel; slash subcommands are not supported.\n");
+        if (!closing) readline.prompt();
+        return;
+      }
+      const execute = async (): Promise<unknown> => runtime.mcpStatuses();
       const task = execute()
         .then((result) => { process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); })
         .catch((error: unknown) => { process.stderr.write(`mcp error: ${message(error)}\n`); })

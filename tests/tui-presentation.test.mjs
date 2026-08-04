@@ -85,6 +85,9 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.ok(!primary.some((command) => command.name === "max-steps"));
   assert.ok(!primary.some((command) => command.name === "run"));
   assert.ok(!primary.some((command) => command.name === "effort"));
+  const mcp = primary.find((command) => command.name === "mcp");
+  assert.ok(mcp);
+  assert.equal(mcp.argumentHint, undefined);
   const autocomplete = autocompleteSlashCommands("en");
   assert.ok(autocomplete.some((command) => command.name === "runs"));
   assert.ok(!autocomplete.some((command) => command.name === "run"));
@@ -1791,6 +1794,76 @@ test("long response reports preview from the head like Formal Plan, not an 8-lin
   assert.match(expanded, /TAIL_ONLY_SUMMARY_MARKER/);
   assert.doesNotMatch(expanded, /truncated model output · Ctrl\+O/);
   assert.equal(presenter.toggleExpand(), "Collapsed model output");
+});
+
+test("Ctrl+O expands a rendered-long final response before Thinking", () => {
+  const report = [
+    "# Middleware setup",
+    "",
+    ...Array.from({ length: 70 }, (_, index) => `Configuration note ${index + 1}.`),
+  ].join("\n");
+  assert.ok(report.length < 4_000);
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "rendered-long-response",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const runId = "run_rendered_long";
+  const stepId = "stp_rendered_long";
+  presenter.update([], {
+    sessionId: "ses_rendered_long",
+    createdAt: new Date(0).toISOString(),
+    version: 1,
+    mode: "agent",
+    runOrder: [runId],
+    runs: {
+      [runId]: {
+        runId,
+        trigger: "user",
+        mode: "agent",
+        status: "completed",
+        input: "set up middleware",
+        stepOrder: [stepId],
+        steps: {
+          [stepId]: {
+            stepId,
+            status: "completed",
+            context: { estimatedTokens: 100, budgetTokens: 64_000, includedBlockIds: [], omittedBlockIds: [] },
+            model: { text: report, reasoning: "Think through the setup.", finishReason: "stop" },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: {},
+        delegations: {},
+        terminal: { type: "completed", reason: "response" },
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    presence: { state: "waiting", reason: "idle" },
+  });
+  const collapsed = presenter.render(80).join("\n");
+  assert.match(collapsed, /earlier lines · Ctrl\+O/);
+  assert.equal(presenter.toggleExpand(), "Expanded model output");
+  const expanded = presenter.render(80).join("\n");
+  assert.match(expanded, /Configuration note 1/);
+  assert.doesNotMatch(expanded, /earlier lines · Ctrl\+O/);
 });
 
 test("live reasoning activity does not render as agent narration in the transcript", () => {
@@ -3915,6 +3988,24 @@ test("History-style ListPanel searches bounded labels and status descriptions", 
   panel.handleInput("\u001b");
   assert.equal(closed, false, "first Esc clears search");
   assert.match(stripVTControlCharacters(panel.render(60).join("\n")), /Run 1/);
+});
+
+test("ListPanel keeps multiline remote metadata on one render row", () => {
+  const panel = new ListPanel({
+    title: "MCP",
+    items: [{
+      id: "query-docs",
+      label: "tool · query-docs",
+      description: "First paragraph\n\nYou MUST call this tool before querying docs.",
+    }],
+    onSelect: () => {},
+    onClose: () => {},
+  });
+  const lines = panel.render(80);
+  assert.ok(lines.every((line) => !line.includes("\n")), "each rendered item must occupy one terminal row");
+  const rendered = stripVTControlCharacters(lines.join("\n"));
+  assert.match(rendered, /First paragraph You MUST call this tool/);
+  assert.equal((rendered.match(/tool · query-docs/g) ?? []).length, 1);
 });
 
 test("FormPanel wraps long multi-line descriptions instead of truncating to one line", () => {

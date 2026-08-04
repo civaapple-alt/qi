@@ -83,7 +83,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
 | `/skills` | Skills hub with only two actions: activation management (Space toggles global Skills, Enter applies) and Install → scope → name/path form |
 | `/skill:<name> <task>` | Start an ordinary Run with one explicitly activated, digest-pinned Skill |
-| `/mcp …` | Status/refresh/login/logout and explicit bind/unbind for quarantined MCP capabilities |
+| `/mcp` | Single MCP management panel: server status, refresh, OAuth, capability inspection, bind, and unbind; use `qi mcp …` for non-interactive management |
 | `/tasks` | List depth-1 Subagent research Tasks for the selected Run; Enter opens tracking |
 | `/jobs [stop …]` | Interactive background Job list; select a running Job and press Enter to stop it |
 | `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path form) / unmount (picker); slash args still work |
@@ -392,11 +392,16 @@ EventStore (including Subagent `operation=delegations` / `resultRef` pointers fo
 capability adds no TUI command, panel, or query API.
 
 MCP declarations live at `<workspace>/.qi/mcp/<server>.toml` and
-`$QI_HOME/resources/mcp/<server>.toml` (Workspace shadows user) and remain inert until `/mcp refresh`. A human
-binds an exact Tool/Resource/Template/Prompt/instructions fingerprint to an effect and resource patterns.
-Ask/Plan may inspect only frozen local `mcp_catalog`; live `mcp` is Agent-only. stdio requires Execute plus the
-business capability; HTTP/SSE requires Network plus it. OAuth state, PKCE verifier, discovery, client registration,
-and tokens stay sealed. Drift blocks new calls. Remote text is labeled untrusted and binary output is an Artifact.
+`$QI_HOME/resources/mcp/<server>.toml` (Workspace shadows user) and remain inert until `/mcp` → **Refresh
+discovery**. The panel binds an exact Tool/Resource/Template/Prompt/instructions fingerprint to an effect and
+resource patterns. Bindings persist in the machine-private project review store at
+`$QI_HOME/projects/<project-id>/state/mcp-bindings.json`; the per-Session/Run capability lease is still checked
+on every call. Ask/Plan may inspect only frozen local `mcp_catalog`; live `mcp` is Agent-only. stdio requires
+Execute plus the business capability; HTTP/SSE requires Network plus it. OAuth state, PKCE verifier, discovery,
+client registration, and tokens stay sealed. Drift blocks new calls. Remote text is labeled untrusted and binary
+output is an Artifact. Server-level `隔离（未连接）` can coexist with bound capabilities: it describes the live
+connection state, while the panel shows each capability as `已绑定` or `隔离`; an unbound server `instructions`
+entry is guidance, not a callable Tool.
 
 Credential-free JSON management is available as `qi skills list|activate|deactivate|install ... --json` and
 `qi mcp status|refresh|bind|unbind|logout ... --json`. Secrets are never accepted as command-line options.

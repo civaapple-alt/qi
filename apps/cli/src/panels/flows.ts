@@ -12,6 +12,14 @@ import {
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import { SHELL_PROFILE_IDS, type ShellProfileId } from "@civaapple/qi-node/tools";
 import type { ProcessTaskView } from "@civaapple/qi-agent/kernel";
+import type { Effect } from "@civaapple/qi-agent/capability";
+import {
+  bindingKey,
+  type McpBinding,
+  type McpCandidate,
+  type McpReviewDocument,
+  type McpServerStatus,
+} from "@civaapple/qi-node/mcp";
 import type { PanelItem } from "@civaapple/qi-tui";
 import type { AuthSession } from "../auth.js";
 import {
@@ -61,6 +69,12 @@ import {
   sessionEntriesToPanelItems,
 } from "./sessions-panel.js";
 
+type McpPanelCandidate = McpCandidate | {
+  kind: "instructions";
+  name: "instructions";
+  description: string;
+};
+
 export const CAPABILITY_IDS = [
   "write",
   "verify",
@@ -87,6 +101,20 @@ export interface PanelFlowContext {
   readonly changeDensity: (density: TimelineDensity, persist: boolean) => void;
   readonly mode: () => string;
   readonly changeMode: (mode: "ask" | "plan" | "agent") => void;
+  readonly mcpStatuses: () => Promise<readonly McpServerStatus[]>;
+  readonly mcpReview: () => Promise<McpReviewDocument>;
+  readonly refreshMcp: (server: string) => Promise<{ drifted: readonly string[] }>;
+  readonly bindMcp: (input: {
+    server: string;
+    kind: McpBinding["kind"];
+    name: string;
+    effect: Effect;
+    resourcePatterns?: readonly string[];
+  }) => Promise<McpBinding>;
+  readonly unbindMcp: (server: string, kind: McpBinding["kind"], name: string) => Promise<boolean>;
+  readonly beginMcpLogin: (server: string) => Promise<string>;
+  readonly finishMcpLogin: (server: string, callbackUrl: string) => Promise<void>;
+  readonly logoutMcp: (server: string) => Promise<void>;
   readonly startLoginDevice: (
     provider: string,
     options?: {
@@ -1252,6 +1280,234 @@ export function openSkillsHubPanel(ctx: PanelFlowContext): void {
       openSkillInstallScopePanel(ctx);
     },
   }));
+}
+
+export function openMcpPanel(ctx: PanelFlowContext): void {
+  void openMcpPanelAsync(ctx);
+}
+
+async function openMcpPanelAsync(ctx: PanelFlowContext): Promise<void> {
+  const locale = ctx.locale();
+  try {
+    const statuses = await ctx.mcpStatuses();
+    ctx.panels.push(new ListPanel({
+      title: locale === "zh" ? "MCP 管理" : "MCP manager",
+      hints: locale === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 返回" : "↑↓ navigate · Enter open · Esc back",
+      maxVisible: maxVisible(ctx.terminalRows),
+      searchable: true,
+      items: statuses.length === 0
+        ? [{
+          id: "empty",
+          label: locale === "zh" ? "没有 MCP 声明" : "No MCP declarations",
+          description: locale === "zh" ? "在 .qi/mcp 或用户 MCP 目录添加声明文件。" : "Add a declaration under .qi/mcp or the user MCP directory.",
+          disabled: true,
+        }]
+        : statuses.map((status) => ({
+          id: status.name,
+          label: status.name,
+          description: formatMcpStatus(status, locale),
+        })),
+      onClose: ctx.panels.dismiss,
+      onSelect: (item) => {
+        if (item.id === "empty") return;
+        void openMcpServerPanel(ctx, item.id);
+      },
+    }));
+  } catch (error) {
+    ctx.presenter.setNotice(error instanceof Error ? error.message : String(error));
+    ctx.render();
+  }
+}
+
+async function openMcpServerPanel(ctx: PanelFlowContext, server: string): Promise<void> {
+  const locale = ctx.locale();
+  try {
+    const [statuses, review] = await Promise.all([ctx.mcpStatuses(), ctx.mcpReview()]);
+    const status = statuses.find((entry) => entry.name === server);
+    const snapshot = review.snapshots[server];
+    const bindings = new Map(
+      Object.values(review.bindings)
+        .filter((binding) => binding.server === server)
+        .map((binding) => [bindingKey(binding), binding]),
+    );
+    const candidates: McpPanelCandidate[] = snapshot === undefined
+      ? []
+      : [
+        ...snapshot.tools,
+        ...snapshot.resources,
+        ...snapshot.resourceTemplates,
+        ...snapshot.prompts,
+        ...(snapshot.instructions === undefined
+          ? []
+          : [{
+            kind: "instructions" as const,
+            name: "instructions" as const,
+            description: locale === "zh" ? "远端服务器说明（不可信数据）。" : "Remote server instructions (untrusted data).",
+          }]),
+      ];
+    ctx.panels.push(new ListPanel({
+      title: `${server} · MCP`,
+      hints: locale === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 返回" : "↑↓ navigate · Enter open · Esc back",
+      maxVisible: maxVisible(ctx.terminalRows),
+      searchable: true,
+      items: [
+        {
+          id: "refresh",
+          label: locale === "zh" ? "刷新发现" : "Refresh discovery",
+          description: locale === "zh" ? "重新读取远端工具、资源、提示与说明，并检测漂移。" : "Rediscover remote tools, resources, prompts, and instructions; detect drift.",
+        },
+        ...(status?.status === "needs-auth"
+          ? [{ id: "login", label: locale === "zh" ? "登录 MCP" : "Log in to MCP", description: locale === "zh" ? "开始 OAuth 授权流程。" : "Start the OAuth authorization flow." }]
+          : []),
+        ...(status?.status === "ready" || status?.status === "idle"
+          ? [{ id: "logout", label: locale === "zh" ? "清除登录" : "Log out", description: locale === "zh" ? "清除该 MCP 的 OAuth 凭证。" : "Remove OAuth credentials for this MCP." }]
+          : []),
+        ...(candidates.length === 0
+          ? [{
+            id: "no-snapshot",
+            label: locale === "zh" ? "尚未发现能力" : "No capabilities discovered",
+            description: locale === "zh" ? "先选择“刷新发现”。" : "Choose Refresh discovery first.",
+            disabled: true,
+          }]
+          : candidates.map((candidate) => {
+            const binding = bindings.get(bindingKey({ server, kind: candidate.kind, name: candidate.name }));
+            return {
+              id: candidateId(candidate),
+              label: `${candidate.kind} · ${candidate.name}`,
+              description: `${binding?.state === "bound" ? (locale === "zh" ? "已绑定" : "bound") : (locale === "zh" ? "隔离" : "quarantined")} · ${candidate.description ?? (locale === "zh" ? "无描述" : "No description")}`,
+            };
+          })),
+      ],
+      onClose: ctx.panels.dismiss,
+      onSelect: (item) => {
+        if (item.id === "refresh") {
+          runMcpPanelAction(ctx, async () => {
+            const result = await ctx.refreshMcp(server);
+            return locale === "zh"
+              ? `${server} 已刷新 · ${result.drifted.length} 个绑定需要重新审阅。`
+              : `${server} refreshed · ${result.drifted.length} binding(s) need review.`;
+          });
+          return;
+        }
+        if (item.id === "login") {
+          runMcpPanelAction(ctx, async () => {
+            const url = await ctx.beginMcpLogin(server);
+            ctx.presenter.setNotice(locale === "zh" ? `请打开授权 URL，然后粘贴回调地址。\n${url}` : `Open the authorization URL, then paste the callback URL.\n${url}`);
+            openMcpCallbackForm(ctx, server);
+            return undefined;
+          }, false);
+          return;
+        }
+        if (item.id === "logout") {
+          runMcpPanelAction(ctx, async () => {
+            await ctx.logoutMcp(server);
+            return locale === "zh" ? `${server} 的 MCP 凭证已清除。` : `${server} MCP credentials removed.`;
+          });
+          return;
+        }
+        if (item.id === "no-snapshot") return;
+        const candidate = candidates.find((entry) => candidateId(entry) === item.id);
+        if (candidate) openMcpCapabilityPanel(ctx, server, candidate, bindings.get(bindingKey({ server, kind: candidate.kind, name: candidate.name })));
+      },
+    }));
+  } catch (error) {
+    ctx.presenter.setNotice(error instanceof Error ? error.message : String(error));
+    ctx.render();
+  }
+}
+
+function openMcpCapabilityPanel(ctx: PanelFlowContext, server: string, candidate: McpPanelCandidate, binding: McpBinding | undefined): void {
+  const locale = ctx.locale();
+  const effects: readonly Effect[] = candidate.kind === "instructions"
+    ? ["read"]
+    : ["read", "write", "execute", "publish", "spend"];
+  ctx.panels.push(new ListPanel({
+    title: `${server} · ${candidate.name}`,
+    hints: locale === "zh" ? "↑↓ 选择 · Enter 确认 · Esc 返回" : "↑↓ navigate · Enter confirm · Esc back",
+    maxVisible: maxVisible(ctx.terminalRows),
+    items: [
+      ...effects.map((effect) => ({
+        id: `bind:${effect}`,
+        label: locale === "zh" ? `绑定为 ${effect}` : `Bind as ${effect}`,
+        description: effect === "read"
+          ? (locale === "zh" ? "只读远端数据；适合 Context7 文档查询。" : "Read remote data; suitable for Context7 documentation queries.")
+          : (locale === "zh" ? "需要额外审阅和对应能力授权。" : "Requires additional review and matching capability grants."),
+        current: binding?.state === "bound" && binding.effect === effect,
+      })),
+      ...(binding === undefined
+        ? []
+        : [{ id: "unbind", label: locale === "zh" ? "解除绑定" : "Unbind", description: locale === "zh" ? "移除该远端能力的本地审阅绑定。" : "Remove the local review binding for this capability." }]),
+    ],
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      if (item.id === "unbind") {
+        runMcpPanelAction(ctx, async () => {
+          await ctx.unbindMcp(server, candidate.kind, candidate.name);
+          return locale === "zh" ? `${server}/${candidate.name} 已解除绑定。` : `${server}/${candidate.name} unbound.`;
+        });
+        return;
+      }
+      if (!item.id.startsWith("bind:")) return;
+      const effect = item.id.slice("bind:".length) as Effect;
+      runMcpPanelAction(ctx, async () => {
+        await ctx.bindMcp({ server, kind: candidate.kind, name: candidate.name, effect });
+        return locale === "zh" ? `${server}/${candidate.name} 已绑定为 ${effect}。` : `${server}/${candidate.name} bound as ${effect}.`;
+      });
+    },
+  }));
+}
+
+function openMcpCallbackForm(ctx: PanelFlowContext, server: string): void {
+  const locale = ctx.locale();
+  ctx.panels.push(new FormPanel({
+    title: locale === "zh" ? `${server} · OAuth 回调` : `${server} · OAuth callback`,
+    description: locale === "zh" ? "将授权页面重定向后的完整回调 URL 粘贴到这里。" : "Paste the complete callback URL after the authorization page redirects.",
+    fields: [{ id: "callbackUrl", label: locale === "zh" ? "回调 URL" : "Callback URL", required: true }],
+    submitLabel: locale === "zh" ? "完成登录" : "Finish login",
+    onClose: ctx.panels.dismiss,
+    onSubmit: (values) => {
+      const callbackUrl = values.callbackUrl?.trim();
+      if (!callbackUrl) return;
+      ctx.panels.closeAll();
+      void ctx.finishMcpLogin(server, callbackUrl)
+        .then(() => {
+          ctx.presenter.setNotice(locale === "zh" ? `${server} MCP 登录完成。` : `${server} MCP login completed.`);
+          ctx.render();
+        })
+        .catch((error: unknown) => {
+          ctx.presenter.setNotice(error instanceof Error ? error.message : String(error));
+          ctx.render();
+        });
+    },
+  }));
+}
+
+function runMcpPanelAction(ctx: PanelFlowContext, action: () => Promise<string | undefined>, reopen = true): void {
+  ctx.panels.closeAll();
+  void action()
+    .then((notice) => {
+      if (notice !== undefined) ctx.presenter.setNotice(notice);
+      if (reopen) openMcpPanel(ctx);
+      else ctx.render();
+    })
+    .catch((error: unknown) => {
+      ctx.presenter.setNotice(error instanceof Error ? error.message : String(error));
+      ctx.render();
+    });
+}
+
+function candidateId(candidate: McpPanelCandidate): string {
+  return `candidate:${candidate.kind}:${encodeURIComponent(candidate.name)}`;
+}
+
+function formatMcpStatus(status: McpServerStatus, locale: Locale): string {
+  const state = locale === "zh"
+    ? ({ disabled: "禁用", quarantined: "隔离（未连接）", connecting: "连接中", ready: "就绪", "needs-auth": "需要登录", drifted: "发生漂移", failed: "失败", idle: "空闲" } as const)[status.status]
+    : status.status;
+  const bindingSummary = status.candidateCount > 0
+    ? `${status.bindingCount}/${status.candidateCount} ${locale === "zh" ? "已绑定" : "bound"}`
+    : `${status.bindingCount} ${locale === "zh" ? "个绑定" : "binding(s)"}`;
+  return `${state} · ${status.transport} · ${status.candidateCount} ${locale === "zh" ? "项能力" : "capabilities"} · ${bindingSummary}`;
 }
 
 function openSkillActivationPanel(ctx: PanelFlowContext): void {

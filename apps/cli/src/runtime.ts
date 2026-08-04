@@ -82,6 +82,7 @@ import {
   createMcpCatalogTool,
   createMcpLiveTool,
   type McpBinding,
+  type McpReviewDocument,
   type McpServerDeclaration,
 } from "@civaapple/qi-node/mcp";
 import {
@@ -1309,6 +1310,10 @@ export class TuiRuntime {
 
   async mcpStatuses() {
     return this.#mcp.statuses();
+  }
+
+  async mcpReview(): Promise<McpReviewDocument> {
+    return this.#mcpReviews.read();
   }
 
   async beginMcpLogin(server: string): Promise<string> {

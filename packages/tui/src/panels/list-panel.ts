@@ -99,10 +99,15 @@ export class ListPanel implements PanelComponent, Focusable {
     for (let index = start; index < end; index += 1) {
       const item = this.#filtered[index]!;
       const selected = index === this.#selected;
-      const label = selected ? theme.bold(item.label) : item.label;
+      // Panel items can contain remote metadata (for example MCP tool
+      // descriptions). Keep every rendered item field to one terminal row;
+      // embedded newlines would desynchronize differential rendering.
+      const labelText = item.label.replace(/\s+/g, " ").trim();
+      const label = selected ? theme.bold(labelText) : labelText;
       const dimmed = item.disabled ? theme.fg("textDim", label) : label;
-      const desc = item.description
-        ? theme.fg("textDim", `  ${item.description}`)
+      const description = item.description?.replace(/\s+/g, " ").trim();
+      const desc = description
+        ? theme.fg("textDim", `  ${description}`)
         : "";
       lines.push(truncateToWidth(`${pointer(selected)}${dimmed}${currentMark(Boolean(item.current))}`, safe, "…"));
       if (desc) lines.push(truncateToWidth(`    ${desc}`, safe, "…"));

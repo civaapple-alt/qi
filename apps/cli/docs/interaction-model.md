@@ -85,6 +85,14 @@ max 4 and depth 1.
 login without writing secrets into Session events or TOML. Esc pops one panel level; an empty stack restores the
 composer.
 
+`/mcp` is a single panel stack, matching `/settings` and `/permissions`. The server list reports connection
+state separately from binding coverage (for example, `隔离（未连接） · 2/3 已绑定` after a restart). Enter opens
+refresh, OAuth, capability inspection, and explicit bind/unbind actions. Tool, Resource, Prompt, Template, and
+server-level `instructions` candidates remain quarantined until reviewed; `instructions` is remote guidance, not
+a callable Tool. The review binding is project-persistent, while each Session/Run still performs fresh capability
+and transport authorization. The non-interactive `qi mcp status|refresh|bind|unbind|logout` commands remain
+available for scripts; slash subcommands are not accepted by the TUI `/mcp` entry.
+
 Provider login details:
 
 - API-key providers: Key + Base URL (prefilled) + Model; successful login persists `provider` / `model` /
@@ -124,7 +132,9 @@ Previous command names that only selected by index/id were removed. UI copy for 
 these hubs follows `language` in `~/.qi/config.toml` (`zh` default, or `en`).
 
 `/status` opens the denser Session/Run/Step/Action engineering panel. `Ctrl+O` expands or collapses the
-latest or explicitly selected Action/activity group/Thinking block, long paste, or Markdown code block.
+latest or explicitly selected Action/activity group, final assistant Markdown response, Thinking block, long
+paste, or Markdown code block. A final response that is truncated by rendered line count is treated as the
+`Ctrl+O` target before Thinking, even when its source text is shorter than the character threshold.
 `Ctrl+G` opens pending gates in Run Question → Plan Review → Next Run → path grant order. New gates never replace
 a non-empty composer or follow-up editor; they leave a persistent attention notice. Focus and expansion are
 observational; they do not hide committed history.

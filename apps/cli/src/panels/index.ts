@@ -14,6 +14,7 @@ export {
   openModePanel,
   openModelConfigurationPanel,
   openMountsPanel,
+  openMcpPanel,
   openPermissionsPanel,
   openShellPanel,
   openProvidersPanel,

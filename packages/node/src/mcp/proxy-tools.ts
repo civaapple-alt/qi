@@ -83,14 +83,14 @@ export function createMcpLiveTool(options: {
       const binding = resolveBinding(input);
       const declaration = declarations.get(input.server);
       if (!declaration) throw new ToolFailure("MCP_SERVER_MISSING", `MCP declaration is missing: ${input.server}`);
-      return [
+      return [...new Set([
         ...binding.resourcePatterns,
         mcpTargetResource(input.server, binding.kind, input.operation === "read-resource" || input.operation === "read-resource-template" ? required(input.uri, "uri") : binding.name),
         `mcp-binding:${input.server}/${binding.kind}/${binding.name}@${binding.fingerprint}`,
         declaration.transport === "stdio"
           ? `mcp-transport:stdio:${declaration.command}`
           : `mcp-transport:${declaration.transport}:${new URL(declaration.url!).origin}`,
-      ];
+      ])];
     },
     execute: async (input: LiveRequest, context) => {
       const binding = resolveBinding(input);

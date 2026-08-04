@@ -19,6 +19,7 @@ import {
   McpReviewStore,
   SealedMcpOAuthProvider,
   candidateFromRaw,
+  createMcpLiveTool,
   fingerprintMcpValue,
   mcpTargetResource,
   parseDeclaration,
@@ -112,6 +113,28 @@ test("MCP review fingerprints quarantine drift and bind exact target resources",
     assert.equal(recorded.drifted.length, 1);
     assert.equal(Object.values((await reviews.read()).bindings)[0].state, "drifted");
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP live proxy deduplicates target resources already present in a binding", () => {
+  const binding = {
+    server: "demo",
+    kind: "tool",
+    name: "lookup",
+    fingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    effect: "read",
+    resourcePatterns: [mcpTargetResource("demo", "tool", "lookup")],
+    reviewedAt: new Date(0).toISOString(),
+    state: "bound",
+  };
+  const tool = createMcpLiveTool({
+    manager: {},
+    declarations: [{ name: "demo", transport: "http", url: "https://example.test/mcp" }],
+    bindings: [binding],
+  });
+  const input = { operation: "call", server: "demo", name: "lookup", arguments: {} };
+  const resources = tool.resources(input, {});
+  assert.equal(new Set(resources).size, resources.length);
+  assert.equal(resources.filter((resource) => resource === mcpTargetResource("demo", "tool", "lookup")).length, 1);
 });
 
 test("official MCP client negotiates stdio, discovers all capability classes, and validates schemas", async () => {
