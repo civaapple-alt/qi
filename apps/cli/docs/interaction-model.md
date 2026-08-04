@@ -302,12 +302,20 @@ Authorized paths use `mount:<id>/…`; write/edit/move/remove remain confined to
 
 ## Skill discovery and installation
 
-`/skills` projects the current merged catalog from Workspace and user roots. Scope and same-name shadowing are
-visible rather than silently flattened. Catalog metadata may enter the Run context; full instructions and
-resources enter only after a `skill` Action requests them.
+`/skills` projects the current merged catalog from the four active roots: project `.qi/skills`, project
+`.agents/skills`, user `$QI_HOME/resources/skills`, and activated global `~/.agents/skills`. The Qi roots take
+precedence over the corresponding Agent roots. Workspace Agent Skills are directly usable read-only; global Agent
+Skills are shown from `.skill-lock.json` as inactive until selected in the `/skills` panel (`/skills activate <name>`
+remains available for scripts), with state stored under
+`$QI_HOME/resources`. `~/.codex/skills` and `~/.claude/skills` are not scanned by default; explicit local paths remain available. Catalog metadata may enter the Run context; full
+instructions and resources enter only after a `skill` Action requests them.
 
 `/skills` → **Install skill** opens a scope list (user vs Workspace) then a form for a Skill name or local path.
 Installation is disabled while a Run or another TUI management action is active. A model does not receive
 global-install authority: its `skill install-workspace` operation requires the
 write lease, settles as an ordinary Action, and can only publish a Workspace draft or a named Skill from a
 configured local compatibility root.
+
+Typing `/skill:` in the editor offers active Skill names with prefix filtering. Selecting a name only completes
+the command; `/skill:<name>` must be followed by a task before Qi starts the Run. The task is untrusted workflow
+context and does not grant capabilities.

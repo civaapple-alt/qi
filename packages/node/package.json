@@ -66,9 +66,11 @@
   "dependencies": {
     "@civaapple/qi-agent": "0.7.3",
     "@civaapple/qi-protocol": "0.7.3",
+    "@modelcontextprotocol/client": "2.0.0",
     "@sinclair/typebox": "0.34.52",
     "diff": "9.0.0",
     "sharp": "^0.35.3",
+    "smol-toml": "1.7.0",
     "tar": "^7.5.22",
     "yaml": "2.9.0"
   },

@@ -2,19 +2,64 @@ import { createHash, randomUUID } from "node:crypto";
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { SkillLoader, type LoadedSkill, type SkillSummary } from "./skill-loader.js";
+import {
+  DEFAULT_SKILL_MAX_BYTES,
+  DEFAULT_SKILL_MAX_FILE_BYTES,
+  DEFAULT_SKILL_MAX_FILES,
+  SKILL_NAME_PATTERN,
+  SkillLoader,
+  assertSkillDirectoryName,
+  type LoadedSkill,
+  type SkillSummary,
+} from "./skill-loader.js";
+import {
+  acquireImmutableSkillSource,
+  type ImmutableSkillSource,
+  type SkillSourceProvenance,
+} from "./source.js";
+import {
+  agentSkillLockHash,
+  readAgentSkillActivations,
+  readAgentSkillLock,
+  writeAgentSkillActivations,
+  type AgentSkillLockEntry,
+} from "./activation.js";
 
 export type SkillScope = "workspace" | "user";
+export type SkillOrigin = "qi" | "agent";
+
+function samePath(left: string, right: string): boolean {
+  const normalize = (value: string) => value.replace(/[\\/]+$/, "").toLowerCase();
+  return normalize(left) === normalize(right);
+}
 
 export interface CatalogSkill extends SkillSummary {
   scope: SkillScope;
+  origin: SkillOrigin;
   shadowedUserRoot?: string;
+}
+
+/** Metadata-only Skill visible in a generic Agent directory; it is not loadable until migrated. */
+export interface CompatibilitySkill extends SkillSummary {
+  readonly source: "compatibility";
+}
+
+/** Global .agents Skill metadata gated by the user's explicit activation state. */
+export interface AgentSkillCandidate extends SkillSummary {
+  readonly source: "global-agent";
+  readonly lockHash: string;
+  readonly activationPath: string;
 }
 
 export interface SkillCatalogOptions {
   workspaceRoot: string;
   userHome?: string;
   userSkillsRoot?: string;
+  userAgentSkillsRoot?: string;
+  workspaceAgentSkillsRoot?: string;
+  agentSkillsEnabled?: boolean;
+  userAgentLockPath?: string;
+  agentActivationPath?: string;
   compatibilityRoots?: readonly string[];
   loader?: SkillLoader;
 }
@@ -27,6 +72,8 @@ export interface SkillInstallRequest {
 
 export interface InstalledSkill extends CatalogSkill {
   sourceRoot: string;
+  digest: string;
+  source: SkillSourceProvenance | { type: "local"; resolved: string; subdir: string };
 }
 
 export interface ExportedWorkspaceSkillDraft {
@@ -68,17 +115,21 @@ export class SkillUpdateIndeterminateError extends Error {
   }
 }
 
-const skillNamePattern = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const installDirectories = new Set(["references", "assets", "evals", "agents"]);
-const ignoredNames = new Set([".DS_Store", "__pycache__"]);
-const maximumInstallFiles = 256;
-const maximumInstallFileBytes = 1_000_000;
-const maximumInstallBytes = 16_000_000;
+const skillNamePattern = SKILL_NAME_PATTERN;
+const rejectedDirectoryNames = new Set([".git", ".hg", ".svn", "node_modules"]);
+const ignoredNames = new Set([".DS_Store", "__pycache__", ".pytest_cache", ".mypy_cache", ".cache"]);
+const maximumInstallFiles = DEFAULT_SKILL_MAX_FILES;
+const maximumInstallFileBytes = DEFAULT_SKILL_MAX_FILE_BYTES;
+const maximumInstallBytes = DEFAULT_SKILL_MAX_BYTES;
 
 export class SkillCatalog {
   readonly workspaceRoot: string;
   readonly workspaceSkillsRoot: string;
   readonly userSkillsRoot: string;
+  readonly workspaceAgentSkillsRoot: string | undefined;
+  readonly userAgentSkillsRoot: string | undefined;
+  readonly userAgentLockPath: string | undefined;
+  readonly agentActivationPath: string | undefined;
   readonly compatibilityRoots: readonly string[];
   readonly #loader: SkillLoader;
 
@@ -87,26 +138,125 @@ export class SkillCatalog {
     this.workspaceRoot = resolve(options.workspaceRoot);
     this.workspaceSkillsRoot = resolve(this.workspaceRoot, ".qi", "skills");
     this.userSkillsRoot = resolve(options.userSkillsRoot ?? resolve(userHome, ".qi", "resources", "skills"));
-    this.compatibilityRoots = Object.freeze((options.compatibilityRoots ?? [
-      resolve(userHome, ".codex", "skills"),
-      resolve(userHome, ".agents", "skills"),
-    ]).map((root) => resolve(root)));
+    const agentSkillsEnabled = options.agentSkillsEnabled ?? true;
+    this.userAgentSkillsRoot = agentSkillsEnabled
+      ? resolve(options.userAgentSkillsRoot ?? resolve(userHome, ".agents", "skills"))
+      : undefined;
+    const workspaceAgentSkillsRoot = agentSkillsEnabled
+      ? resolve(options.workspaceAgentSkillsRoot ?? resolve(this.workspaceRoot, ".agents", "skills"))
+      : undefined;
+    // If Qi is launched with the user's home directory as the Workspace, its .agents
+    // directory is still the global Agent installation. Do not silently turn that
+    // global source into a directly active Workspace root.
+    this.workspaceAgentSkillsRoot = workspaceAgentSkillsRoot &&
+      (this.userAgentSkillsRoot === undefined || !samePath(workspaceAgentSkillsRoot, this.userAgentSkillsRoot))
+      ? workspaceAgentSkillsRoot
+      : undefined;
+    this.userAgentLockPath = agentSkillsEnabled
+      ? resolve(options.userAgentLockPath ?? resolve(userHome, ".agents", ".skill-lock.json"))
+      : undefined;
+    this.agentActivationPath = agentSkillsEnabled
+      ? resolve(options.agentActivationPath ?? resolve(userHome, ".qi", "resources", "skills.activation.json"))
+      : undefined;
+    this.compatibilityRoots = Object.freeze((options.compatibilityRoots ?? []).map((root) => resolve(root)));
     this.#loader = options.loader ?? new SkillLoader();
   }
 
   async discover(): Promise<CatalogSkill[]> {
-    const user = await this.#discoverScope(this.userSkillsRoot, "user");
-    const workspace = await this.#discoverScope(this.workspaceSkillsRoot, "workspace");
+    // Lowest to highest precedence: global Agent, user Qi, project Agent, project Qi.
+    const userAgent = await this.#discoverActivatedAgentScope();
+    const user = await this.#discoverScope(this.userSkillsRoot, "user", "qi");
+    const workspaceAgent = await this.#discoverAgentScope(this.workspaceAgentSkillsRoot, "workspace");
+    const workspace = await this.#discoverScope(this.workspaceSkillsRoot, "workspace", "qi");
     const active = new Map<string, CatalogSkill>();
-    for (const skill of user) active.set(skill.name, skill);
-    for (const skill of workspace) {
+    for (const skill of [...userAgent, ...user, ...workspaceAgent, ...workspace]) {
       const shadowed = active.get(skill.name);
-      active.set(skill.name, {
-        ...skill,
-        ...(shadowed?.scope === "user" ? { shadowedUserRoot: shadowed.root } : {}),
-      });
+      active.set(skill.name, shadowed?.scope === "user" && skill.scope === "workspace"
+        ? { ...skill, shadowedUserRoot: shadowed.root }
+        : skill);
     }
     return [...active.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /**
+   * Read only validated frontmatter from generic Agent Skill roots.
+   * Compatibility entries are intentionally separate from the active catalog: callers may present them to a
+   * human as migration candidates, but `load`, `readResource`, and `run-script` can only select active entries.
+   */
+  async discoverCompatibility(activeSkills?: readonly CatalogSkill[]): Promise<CompatibilitySkill[]> {
+    const activeNames = new Set((activeSkills ?? await this.discover()).map((skill) => skill.name));
+    const found = new Map<string, CompatibilitySkill>();
+    for (const root of this.compatibilityRoots) {
+      for (const candidateRoot of [root, resolve(root, ".system")]) {
+        let summaries: SkillSummary[];
+        try {
+          summaries = await this.#discoverCompatibilityRoot(candidateRoot);
+        } catch {
+          // Generic Agent directories are optional and untrusted. A malformed candidate must not prevent Qi startup.
+          continue;
+        }
+        for (const summary of summaries) {
+          if (activeNames.has(summary.name) || found.has(summary.name)) continue;
+          found.set(summary.name, { ...summary, source: "compatibility" });
+        }
+      }
+    }
+    return [...found.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /** Read global .agents lock entries and expose only inactive Skills as activation candidates. */
+  async discoverAgentCandidates(activeSkills?: readonly CatalogSkill[]): Promise<AgentSkillCandidate[]> {
+    const activeNames = new Set((activeSkills ?? await this.discover()).map((skill) => skill.name));
+    if (!this.userAgentSkillsRoot || !this.userAgentLockPath || !this.agentActivationPath) return [];
+    const lock = await readAgentSkillLock(this.userAgentLockPath);
+    const activations = await readAgentSkillActivations(this.agentActivationPath);
+    const candidates: AgentSkillCandidate[] = [];
+    for (const [name, entry] of Object.entries(lock)) {
+      if (activeNames.has(name)) continue;
+      const lockHash = agentSkillLockHash(entry);
+      if (activations[name]?.lockHash === lockHash) continue;
+      const root = await this.#agentLockEntryRoot(name, entry);
+      if (!root) continue;
+      try {
+        const summary = await this.#loader.inspect(root);
+        if (summary.name !== name) continue;
+        candidates.push({
+          ...summary,
+          source: "global-agent",
+          lockHash,
+          activationPath: this.agentActivationPath,
+        });
+      } catch {
+        // Malformed or stale third-party entries are omitted from the candidate view.
+      }
+    }
+    return candidates.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /** Activate one lock-listed global Agent Skill without copying or modifying its source directory. */
+  async activateAgentSkill(name: string): Promise<AgentSkillCandidate | CatalogSkill> {
+    if (!SKILL_NAME_PATTERN.test(name)) throw new TypeError(`Invalid Skill name: ${name}`);
+    if (!this.userAgentLockPath || !this.agentActivationPath) throw new Error("Global Agent Skill activation is disabled");
+    const lock = await readAgentSkillLock(this.userAgentLockPath);
+    const entry = lock[name];
+    if (!entry) throw new Error(`Global Agent Skill ${name} is not listed in .skill-lock.json`);
+    const root = await this.#agentLockEntryRoot(name, entry);
+    if (!root) throw new Error(`Global Agent Skill ${name} has an unsafe lock path`);
+    const summary = await this.#loader.inspect(root);
+    if (summary.name !== name) throw new Error(`Global Agent Skill ${name} metadata does not match its lock entry`);
+    const active = { ...(await readAgentSkillActivations(this.agentActivationPath)) };
+    active[name] = { lockHash: agentSkillLockHash(entry), activatedAt: new Date().toISOString() };
+    await writeAgentSkillActivations(this.agentActivationPath, active);
+    return { ...summary, scope: "user", origin: "agent" };
+  }
+
+  async deactivateAgentSkill(name: string): Promise<boolean> {
+    if (!this.agentActivationPath) return false;
+    const active = { ...(await readAgentSkillActivations(this.agentActivationPath)) };
+    if (!active[name]) return false;
+    delete active[name];
+    await writeAgentSkillActivations(this.agentActivationPath, active);
+    return true;
   }
 
   async load(name: string): Promise<LoadedSkill & { scope: SkillScope }> {
@@ -119,6 +269,12 @@ export class SkillCatalog {
   async readResource(name: string, resourcePath: string): Promise<Uint8Array> {
     const loaded = await this.load(name);
     return this.#loader.readResource(loaded, resourcePath);
+  }
+
+  /** Content-address the active Skill tree for immutable Run provenance. */
+  async digest(name: string): Promise<string> {
+    const skill = await this.#select(name);
+    return digestInstallFiles(await collectInstallFiles(skill.root));
   }
 
   async install(request: SkillInstallRequest): Promise<InstalledSkill> {
@@ -140,19 +296,27 @@ export class SkillCatalog {
     try {
       await mkdir(temporary);
       const files = await collectInstallFiles(sourceRoot);
+      const digest = await digestInstallFiles(files);
       await copyInstallFiles(files, temporary);
       const staged = await this.#loader.load(temporary);
       if (staged.name !== source.name || staged.description !== source.description) {
         throw new Error("Installed Skill metadata does not match its source");
       }
       await rename(temporary, target);
+      const localSource = {
+        type: "local" as const,
+        resolved: portableLocalSource(scope, this.workspaceRoot, sourceRoot),
+        subdir: ".",
+      };
+      await writeSkillLock(scope === "workspace" ? this.workspaceSkillsRoot : this.userSkillsRoot, staged, digest, localSource);
       return {
-        name: staged.name,
-        version: staged.version,
-        description: staged.description,
+        ...staged,
         root: target,
         scope,
+        origin: "qi",
         sourceRoot,
+        digest,
+        source: localSource,
       };
     } catch (error) {
       await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
@@ -160,9 +324,34 @@ export class SkillCatalog {
     }
   }
 
+  /** Human-operated immutable acquisition. This method is intentionally not exposed by the model Skill Tool. */
+  async installImmutable(
+    source: ImmutableSkillSource,
+    options: { scope?: SkillScope; expectedName?: string } = {},
+  ): Promise<InstalledSkill> {
+    const acquired = await acquireImmutableSkillSource(source);
+    try {
+      const installed = await this.install({
+        source: acquired.root,
+        scope: options.scope ?? "user",
+        ...(options.expectedName === undefined ? {} : { expectedName: options.expectedName }),
+      });
+      await writeSkillLock(
+        installed.scope === "workspace" ? this.workspaceSkillsRoot : this.userSkillsRoot,
+        installed,
+        installed.digest,
+        acquired.provenance,
+      );
+      return { ...installed, source: acquired.provenance };
+    } finally {
+      await acquired.cleanup();
+    }
+  }
+
   async exportWorkspaceDraft(name: string, destination: string): Promise<ExportedWorkspaceSkillDraft> {
     const sourceRoot = await this.#workspaceSkillRoot(name);
     const source = await this.#loader.load(sourceRoot);
+    assertSkillDirectoryName(source.name, sourceRoot.split(/[\\/]/).at(-1)!);
     const files = await collectInstallFiles(sourceRoot);
     const digest = await digestInstallFiles(files);
     const requestedDestination = resolve(destination);
@@ -268,13 +457,19 @@ export class SkillCatalog {
       const markerRemoved = backupRemoved
         ? await rm(recoveryMarker, { force: true }).then(() => true, () => false)
         : false;
+      const localSource = {
+        type: "local" as const,
+        resolved: portableLocalSource("workspace", this.workspaceRoot, sourceRoot),
+        subdir: ".",
+      };
+      await writeSkillLock(this.workspaceSkillsRoot, published, publishedDigest, localSource);
       return {
-        name: published.name,
-        version: published.version,
-        description: published.description,
+        ...published,
         root: target,
         scope: "workspace",
+        origin: "qi",
         sourceRoot,
+        source: localSource,
         previousDigest: actualDigest,
         digest: publishedDigest,
         fileCount: candidateFiles.length,
@@ -320,7 +515,7 @@ export class SkillCatalog {
     return realpath(target);
   }
 
-  async #discoverScope(root: string, scope: SkillScope): Promise<CatalogSkill[]> {
+  async #discoverScope(root: string, scope: SkillScope, origin: SkillOrigin): Promise<CatalogSkill[]> {
     let info;
     try {
       info = await lstat(root);
@@ -335,8 +530,67 @@ export class SkillCatalog {
       if (!skillNamePattern.test(summary.name)) throw new TypeError(`Invalid Skill name in ${root}: ${summary.name}`);
       if (names.has(summary.name)) throw new Error(`Duplicate Skill name ${summary.name} in ${scope} scope`);
       names.add(summary.name);
-      return { ...summary, scope };
+      return { ...summary, scope, origin };
     });
+  }
+
+  async #discoverAgentScope(root: string | undefined, scope: SkillScope): Promise<CatalogSkill[]> {
+    if (!root) return [];
+    try {
+      const summaries = await this.#discoverCompatibilityRoot(root);
+      const names = new Set<string>();
+      return summaries.map((summary) => {
+        if (!skillNamePattern.test(summary.name)) throw new TypeError(`Invalid Skill name in ${root}: ${summary.name}`);
+        if (names.has(summary.name)) throw new Error(`Duplicate Skill name in ${root}: ${summary.name}`);
+        names.add(summary.name);
+        return { ...summary, scope, origin: "agent" as const };
+      });
+    } catch {
+      // Optional third-party roots are untrusted. Invalid metadata is omitted without blocking Qi startup.
+      return [];
+    }
+  }
+
+  async #discoverActivatedAgentScope(): Promise<CatalogSkill[]> {
+    if (!this.userAgentSkillsRoot || !this.userAgentLockPath || !this.agentActivationPath) return [];
+    const lock = await readAgentSkillLock(this.userAgentLockPath);
+    const activations = await readAgentSkillActivations(this.agentActivationPath);
+    const active: CatalogSkill[] = [];
+    for (const [name, entry] of Object.entries(lock)) {
+      if (activations[name]?.lockHash !== agentSkillLockHash(entry)) continue;
+      const root = await this.#agentLockEntryRoot(name, entry);
+      if (!root) continue;
+      try {
+        const summary = await this.#loader.inspect(root);
+        if (summary.name === name) active.push({ ...summary, scope: "user", origin: "agent" });
+      } catch {
+        // Drifted or malformed global entries remain inactive until explicitly repaired and reactivated.
+      }
+    }
+    return active.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async #agentLockEntryRoot(name: string, entry: AgentSkillLockEntry): Promise<string | undefined> {
+    if (!this.userAgentSkillsRoot || typeof entry.skillPath !== "string") return undefined;
+    const directRoot = resolve(this.userAgentSkillsRoot, name);
+    if (await exists(directRoot)) return directRoot;
+    const lockRoot = dirname(this.userAgentSkillsRoot);
+    const root = resolve(lockRoot, dirname(entry.skillPath.replaceAll("\\", "/")));
+    const relativeRoot = relative(this.userAgentSkillsRoot, root);
+    if (relativeRoot === "" || relativeRoot === "." || relativeRoot.startsWith("..") || isAbsolute(relativeRoot)) return undefined;
+    return root;
+  }
+
+  async #discoverCompatibilityRoot(root: string): Promise<SkillSummary[]> {
+    let info;
+    try {
+      info = await lstat(root);
+    } catch (error) {
+      if (isMissing(error)) return [];
+      throw error;
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) return [];
+    return this.#loader.discover(await realpath(root));
   }
 
   async #resolveSource(source: string): Promise<string> {
@@ -417,15 +671,7 @@ interface InstallFile {
 async function collectInstallFiles(sourceRoot: string): Promise<InstallFile[]> {
   const root = await validateSourceRoot(sourceRoot);
   const files: InstallFile[] = [];
-  await addFile(resolve(root, "SKILL.md"), "SKILL.md", files);
-  for (const name of installDirectories) await walkOptional(resolve(root, name), root, files);
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (/^(?:licen[cs]e|notice)(?:\.[A-Za-z0-9_-]+)?$/i.test(entry.name)) {
-      if (entry.isSymbolicLink()) throw new Error(`Skill install refuses symbolic link ${entry.name}`);
-      if (!entry.isFile()) continue;
-      await addFile(resolve(root, entry.name), entry.name, files);
-    }
-  }
+  await walkOptional(root, root, files);
   const total = files.reduce((sum, file) => sum + file.size, 0);
   if (files.length > maximumInstallFiles) throw new Error(`Skill contains more than ${maximumInstallFiles} installable files`);
   if (total > maximumInstallBytes) throw new Error(`Skill install exceeds ${maximumInstallBytes} bytes`);
@@ -441,6 +687,10 @@ async function walkOptional(path: string, root: string, files: InstallFile[]): P
     throw error;
   }
   for (const entry of entries) {
+    if (path === root && entry.name.startsWith(".")) {
+      if (entry.isDirectory()) throw new Error(`Skill install refuses hidden management directory ${entry.name}`);
+    }
+    if (rejectedDirectoryNames.has(entry.name)) throw new Error(`Skill install refuses package/VCS directory ${entry.name}`);
     if (ignoredNames.has(entry.name) || entry.name.endsWith(".pyc") || entry.name.endsWith(".pyo")) continue;
     const child = resolve(path, entry.name);
     if (entry.isSymbolicLink()) throw new Error(`Skill install refuses symbolic link ${relative(root, child)}`);
@@ -461,6 +711,43 @@ async function validateSourceRoot(path: string): Promise<string> {
   const info = await lstat(path);
   if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`Skill source must be a real directory: ${path}`);
   return realpath(path);
+}
+
+function portableLocalSource(scope: SkillScope, workspaceRoot: string, sourceRoot: string): string {
+  if (scope !== "workspace") return "<local>";
+  const candidate = relative(workspaceRoot, sourceRoot).replaceAll("\\", "/");
+  return candidate && !candidate.startsWith("..") ? candidate : "<external-local>";
+}
+
+async function writeSkillLock(
+  skillsRoot: string,
+  skill: Pick<SkillSummary, "name" | "version" | "license">,
+  digest: string,
+  source: SkillSourceProvenance | { type: "local"; resolved: string; subdir: string },
+): Promise<void> {
+  const scope = skillsRoot.endsWith(`${sep}.qi${sep}skills`) ? "workspace" : "user";
+  const lockPath = scope === "workspace"
+    ? resolve(dirname(skillsRoot), "skills.lock.json")
+    : resolve(dirname(skillsRoot), "skills.lock.json");
+  let current: { schemaVersion: 1; skills: Record<string, unknown> } = { schemaVersion: 1, skills: {} };
+  try {
+    current = JSON.parse(await readFile(lockPath, "utf8")) as typeof current;
+    if (current.schemaVersion !== 1 || typeof current.skills !== "object" || current.skills === null) {
+      throw new TypeError(`Invalid Skill lock: ${lockPath}`);
+    }
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+  }
+  current.skills[skill.name] = {
+    version: skill.version,
+    digest,
+    ...(skill.license === undefined ? {} : { license: skill.license }),
+    source,
+  };
+  await mkdir(dirname(lockPath), { recursive: true });
+  const temporary = `${lockPath}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(current, null, 2)}\n`, { flag: "wx" });
+  await rename(temporary, lockPath);
 }
 
 async function ensureRealDirectory(path: string): Promise<string> {

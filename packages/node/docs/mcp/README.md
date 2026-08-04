@@ -4,9 +4,10 @@ A quarantine and binding boundary between MCP discovery and Qi's authorized Tool
 
 ## Purpose
 
-`McpBridge` discovers remote tool metadata without making it executable. A separate explicit binding maps a
-reviewed remote candidate into a local tool definition, with normal schema, capability, artifact, and settlement
-controls.
+`McpDeclarationCatalog` reads inert declarations from `.qi/mcp/*.toml` and
+`$QI_HOME/resources/mcp/*.toml`; Workspace names shadow user names. `McpConnectionManager` wraps the pinned
+official client for stdio, Streamable HTTP, and explicitly selected legacy SSE. Discovery snapshots Tools,
+Resources, Resource Templates, Prompts, and server instructions without making any executable.
 
 ## Non-goals
 
@@ -16,14 +17,18 @@ controls.
 
 ## Core model
 
-`McpTransport` lists and invokes remote tools. Discovery creates quarantined `McpToolCandidate` records. Only an
-explicit `McpToolBinding` enters the local catalog, where every call is independently authorized.
+`McpReviewStore` fingerprints normalized remote metadata in machine-private project state. A human binding fixes
+server, kind/name, fingerprint, effect (`read/write/execute/publish/spend`), and exact resources. Models see one
+cached `mcp_catalog` and one Agent-only live `mcp` proxy instead of one Tool schema per remote capability.
 
 ## Behavioral invariants
 
-- Discovered tools are inert until bound.
+- Declarations and discovered capabilities are inert until explicitly refreshed and bound.
 - Binding is explicit and schema-aware.
 - Each invocation receives a fresh capability decision.
+- Reconnect/list-changed fingerprint drift disables new calls until re-review.
+- stdio requires Execute plus the business effect; HTTP/SSE requires Network plus the business effect.
+- Spend leases have one use; Publish and Spend default disabled.
 - Oversized output becomes an Artifact reference instead of unbounded context.
 
 ## Failure semantics
@@ -54,7 +59,8 @@ console.log(await bridge.discover()); // [] — discovery alone registers nothin
 
 ## Public API
 
-`McpBridge` and the remote tool, transport, candidate, and binding interfaces.
+The legacy `McpBridge`, production declaration/review/connection managers, proxy Tools, sealed OAuth provider,
+fingerprint helpers, and MCP types.
 
 ## Change guide
 
@@ -63,9 +69,10 @@ before registry exposure.
 
 ## Verification
 
-`tests/mcp-bridge.test.mjs` covers quarantine, explicit binding, per-call authority, and Artifact fallback.
+`tests/mcp-bridge.test.mjs` covers the portable bridge. `tests/skills-mcp-production.test.mjs` covers declaration
+isolation, drift, exact resources, sealed OAuth, schemas, and all three transports with local servers.
 
 ## Further reading
 
-- [Trust boundary](docs/trust-boundary.md)
-- [Tool execution contract](../tools/docs/execution-contract.md)
+- [Trust boundary](trust-boundary.md)
+- [Tool execution contract](../tools/execution-contract.md)

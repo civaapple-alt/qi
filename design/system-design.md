@@ -188,8 +188,10 @@ control. `@civaapple/qi-tui` owns reusable projections and terminal components o
 
 Extensions attach through existing boundaries:
 
-- **Skills** expose validated metadata and progressively loaded instructions; they never grant authority.
-- **MCP** discovery is quarantined until a remote schema is compiled, reviewed, and explicitly bound.
+- **Skills** expose validated metadata, immutable source/tree provenance, progressively loaded resources, and an
+  execute-authorized bounded script path; no metadata or script grants authority.
+- **MCP** declarations stay inert; human discovery fingerprints Tools/Resources/Templates/Prompts/instructions,
+  and only exact reviewed bindings enter a frozen Run through a compact catalog/live proxy pair.
 - **CodeAct** expresses short programs, but every nested Tool call retains normal authorization and Action events.
 - **Graph Governor** narrows observations, tools, and model routes; deterministic guards still win.
 - **Coordinator** runs depth-1 isolated Subagents under strict child leases and durable settlement.

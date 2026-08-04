@@ -62,3 +62,30 @@ test("slash completion before existing text inserts a command line and preserves
     { lines: ["/model", "existing draft"], cursorLine: 0, cursorCol: 6 },
   );
 });
+
+test("/skill completion lists active Skill names and preserves the task suffix", async () => {
+  const provider = new WorkspaceAutocompleteProvider(
+    [{ name: "skills", description: "skills" }],
+    process.cwd(),
+    undefined,
+    new Set(),
+    ["qianwen-model-selector", "qianwen-text", "web-design-guidelines"],
+  );
+  const suggestions = await provider.getSuggestions(["/skill:qian"], 0, 11, {
+    signal: new AbortController().signal,
+  });
+  assert.deepEqual(suggestions?.items.map((item) => item.value), [
+    "/skill:qianwen-model-selector",
+    "/skill:qianwen-text",
+  ]);
+  assert.deepEqual(
+    provider.applyCompletion(
+      ["/skill:qian review this"],
+      0,
+      "/skill:qian".length,
+      suggestions.items[1],
+      "/skill:qian",
+    ),
+    { lines: ["/skill:qianwen-text review this"], cursorLine: 0, cursorCol: "/skill:qianwen-text".length },
+  );
+});

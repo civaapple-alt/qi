@@ -60,7 +60,7 @@ test("Skill catalog merges user and Workspace scopes with Workspace precedence",
     await writeFile(join(userOnly, "SKILL.md"), "---\nname: user-only\ndescription: User-only Skill\n---\nUSER_ONLY\n");
     await writeFile(join(workspaceShared, "SKILL.md"), "---\nname: shared\nversion: 2.0.0\ndescription: Workspace copy\n---\nWORKSPACE_INSTRUCTIONS\n");
 
-    const catalog = new SkillCatalog({ workspaceRoot: workspace, userSkillsRoot: userSkills, compatibilityRoots: [] });
+    const catalog = new SkillCatalog({ workspaceRoot: workspace, userHome: join(root, "home"), userSkillsRoot: userSkills, compatibilityRoots: [] });
     const discovered = await catalog.discover();
     assert.deepEqual(discovered.map(({ name, version, scope }) => ({ name, version, scope })), [
       { name: "shared", version: "2.0.0", scope: "workspace" },
@@ -71,7 +71,7 @@ test("Skill catalog merges user and Workspace scopes with Workspace precedence",
   });
 });
 
-test("Skill catalog installs a compatible local Skill atomically and omits executable/cache content", async () => {
+test("Skill catalog installs a complete compatible Skill tree while omitting caches", async () => {
   await temporary(async (root) => {
     const workspace = join(root, "workspace");
     const userSkills = join(root, "home", ".qi", "skills");
@@ -87,6 +87,7 @@ test("Skill catalog installs a compatible local Skill atomically and omits execu
 
     const catalog = new SkillCatalog({
       workspaceRoot: workspace,
+      userHome: join(root, "home"),
       userSkillsRoot: userSkills,
       compatibilityRoots: [compatibility],
     });
@@ -95,9 +96,10 @@ test("Skill catalog installs a compatible local Skill atomically and omits execu
       { name: installed.name, version: installed.version, scope: installed.scope },
       { name: "skill-creator", version: "unversioned", scope: "user" },
     );
-    await assert.rejects(access(join(userSkills, "skill-creator", "scripts", "init.py")));
+    assert.equal(await readFile(join(userSkills, "skill-creator", "scripts", "init.py"), "utf8"), "print('init')\n");
     assert.equal(await readFile(join(userSkills, "skill-creator", "agents", "openai.yaml"), "utf8"), "name: skill-creator\n");
     await assert.rejects(access(join(userSkills, "skill-creator", "scripts", "__pycache__", "init.pyc")));
+    assert.equal(await readFile(join(userSkills, "skill-creator", "LICENSE"), "utf8"), "license\n");
     await assert.rejects(catalog.install({ source: "skill-creator" }), /already installed/);
 
     const draft = join(workspace, "skill-drafts", "local-helper");
@@ -105,6 +107,117 @@ test("Skill catalog installs a compatible local Skill atomically and omits execu
     await writeFile(join(draft, "SKILL.md"), "---\nname: local-helper\ndescription: Local helper\n---\nHelp locally.\n");
     const workspaceInstall = await catalog.install({ source: "skill-drafts/local-helper", scope: "workspace" });
     assert.equal(workspaceInstall.root, join(workspace, ".qi", "skills", "local-helper"));
+  });
+});
+
+test("generic Agent Skills are metadata-only candidates until explicitly migrated", async () => {
+  await temporary(async (root) => {
+    const workspace = join(root, "workspace");
+    const userSkills = join(root, "home", ".qi", "skills");
+    const compatibility = join(root, "generic-agent", "skills");
+    const source = join(compatibility, "external-review");
+    await mkdir(join(source, "references"), { recursive: true });
+    await writeFile(
+      join(source, "SKILL.md"),
+      "---\nname: external-review\ndescription: Review from a generic Agent directory\n---\nDo not activate until migrated.\n",
+    );
+    await writeFile(join(source, "references", "rules.md"), "untrusted rules\n");
+
+    const catalog = new SkillCatalog({ workspaceRoot: workspace, userHome: join(root, "home"), userSkillsRoot: userSkills, compatibilityRoots: [compatibility] });
+    const candidates = await catalog.discoverCompatibility([]);
+    assert.deepEqual(candidates.map(({ name, source }) => ({ name, source })), [
+      { name: "external-review", source: "compatibility" },
+    ]);
+    await assert.rejects(catalog.load("external-review"), /not installed/);
+    await assert.rejects(catalog.readResource("external-review", "references/rules.md"), /not installed/);
+
+    const installed = await catalog.install({ source: "external-review", scope: "user" });
+    assert.equal(installed.scope, "user");
+    assert.match((await catalog.load("external-review")).instructions, /Do not activate/);
+    assert.deepEqual(await catalog.discoverCompatibility(), []);
+    assert.equal((await catalog.discover()).some((skill) => skill.name === "external-review"), true);
+  });
+});
+
+test("Workspace .agents Skills are active and global .agents Skills require activation", async () => {
+  await temporary(async (root) => {
+    const workspace = join(root, "workspace");
+    const userHome = join(root, "home");
+    const globalSkill = join(userHome, ".agents", "skills", "global-review");
+    const projectSkill = join(workspace, ".agents", "skills", "project-review");
+    await mkdir(globalSkill, { recursive: true });
+    await mkdir(projectSkill, { recursive: true });
+    await writeFile(join(globalSkill, "SKILL.md"), "---\nname: global-review\ndescription: Global Agent Skill\n---\nGlobal instructions.\n");
+    await writeFile(join(projectSkill, "SKILL.md"), "---\nname: project-review\ndescription: Project Agent Skill\n---\nProject instructions.\n");
+    await writeFile(join(userHome, ".agents", ".skill-lock.json"), JSON.stringify({
+      version: 3,
+      skills: {
+        "global-review": {
+          sourceType: "github",
+          skillPath: "skills/global-review/SKILL.md",
+          skillFolderHash: "global-review-hash",
+        },
+      },
+    }));
+
+    const catalog = new SkillCatalog({ workspaceRoot: workspace, userHome, userSkillsRoot: join(userHome, ".qi", "resources", "skills"), compatibilityRoots: [] });
+    const discovered = await catalog.discover();
+    assert.deepEqual(
+      discovered.filter((skill) => skill.name.endsWith("review")).map(({ name, scope, origin }) => ({ name, scope, origin })),
+      [
+        { name: "project-review", scope: "workspace", origin: "agent" },
+      ],
+    );
+    assert.equal((await catalog.discoverAgentCandidates()).some((skill) => skill.name === "global-review"), true);
+    await assert.rejects(catalog.load("global-review"), /not installed/);
+    await catalog.activateAgentSkill("global-review");
+    assert.equal((await catalog.discover()).some((skill) => skill.name === "global-review"), true);
+    assert.match((await catalog.load("global-review")).instructions, /Global instructions/);
+    assert.match((await catalog.load("project-review")).instructions, /Project instructions/);
+  });
+});
+
+test("Home-directory Workspace does not auto-activate the global .agents root", async () => {
+  await temporary(async (root) => {
+    const userHome = join(root, "home");
+    const globalSkill = join(userHome, ".agents", "skills", "global-review");
+    await mkdir(globalSkill, { recursive: true });
+    await writeFile(join(globalSkill, "SKILL.md"), "---\nname: global-review\ndescription: Global Agent Skill\n---\nGlobal instructions.\n");
+    await writeFile(join(userHome, ".agents", ".skill-lock.json"), JSON.stringify({
+      version: 3,
+      skills: {
+        "global-review": {
+          sourceType: "github",
+          skillPath: "skills/global-review/SKILL.md",
+          skillFolderHash: "global-review-hash",
+        },
+      },
+    }));
+
+    const catalog = new SkillCatalog({ workspaceRoot: userHome, userHome, userSkillsRoot: join(userHome, ".qi", "resources", "skills"), compatibilityRoots: [] });
+    assert.deepEqual(await catalog.discover(), []);
+    assert.deepEqual((await catalog.discoverAgentCandidates()).map((skill) => skill.name), ["global-review"]);
+    await assert.rejects(catalog.load("global-review"), /not installed/);
+  });
+});
+
+test("Codex and Claude Skill roots are not scanned by default", async () => {
+  await temporary(async (root) => {
+    const workspace = join(root, "workspace");
+    const userHome = join(root, "home");
+    for (const vendor of [".codex", ".claude"]) {
+      const skill = join(userHome, vendor, "skills", `${vendor.slice(1)}-only`);
+      await mkdir(skill, { recursive: true });
+      await writeFile(join(skill, "SKILL.md"), `---\nname: ${vendor.slice(1)}-only\ndescription: Must be explicit\n---\nHidden by default.\n`);
+    }
+    const catalog = new SkillCatalog({ workspaceRoot: workspace, userHome, userSkillsRoot: join(userHome, ".qi", "resources", "skills") });
+    assert.equal((await catalog.discover()).some((skill) => skill.name === "codex-only" || skill.name === "claude-only"), false);
+    assert.deepEqual(await catalog.discoverCompatibility(), []);
+    await assert.rejects(catalog.load("codex-only"), /not installed/);
+    await assert.rejects(catalog.load("claude-only"), /not installed/);
+    const migrated = await catalog.install({ source: join(userHome, ".codex", "skills", "codex-only") });
+    assert.equal(migrated.name, "codex-only");
+    assert.match((await catalog.load("codex-only")).instructions, /Hidden by default/);
   });
 });
 
@@ -119,6 +232,7 @@ test("Workspace Skill draft export and digest-guarded update preserve create-onl
     );
     const catalog = new SkillCatalog({
       workspaceRoot: workspace,
+      userHome: join(root, "home"),
       userSkillsRoot: join(root, "user-skills"),
       compatibilityRoots: [],
     });

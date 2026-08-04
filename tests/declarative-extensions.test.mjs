@@ -29,10 +29,11 @@ test("Workspace .qi accepts only declaration allowlist content", async () => {
     assert.deepEqual(valid.files, ["packages.toml", "skills/review/SKILL.md"]);
 
     await writeFile(join(root, ".qi", "skills", "review", "run.js"), "process.exit(0)");
-    await assert.rejects(
-      () => validateWorkspaceQiDirectory(root),
-      /Executable content is forbidden/,
-    );
+    const withSkillScript = await validateWorkspaceQiDirectory(root);
+    assert.ok(withSkillScript.files.includes("skills/review/run.js"));
+    await mkdir(join(root, ".qi", "agents"), { recursive: true });
+    await writeFile(join(root, ".qi", "agents", "run.js"), "process.exit(0)");
+    await assert.rejects(() => validateWorkspaceQiDirectory(root), /Executable content is forbidden/);
   } finally {
     await removeFixture(root);
   }

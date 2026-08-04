@@ -8,12 +8,45 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ## [Unreleased]
 
+### Added
+
+- Production Skill subsystem: Agent Skills frontmatter, complete bounded resource trees, binary Artifacts,
+  immutable Git/GitHub/archive sources and locks, readiness diagnostics, explicit `/skill:<name>` activation,
+  and Execute-authorized bounded scripts without dependency installation.
+- Production MCP subsystem using the pinned official 2.0 client: inert TOML declarations, stdio/Streamable HTTP/
+  explicit legacy SSE, fingerprinted Tools/Resources/Templates/Prompts/instructions review, drift isolation,
+  compact `mcp_catalog`/`mcp` proxies, sealed static/OAuth credentials, and CLI/TUI management.
+- Separate default-off `publish` and one-use `spend` capabilities with CLI flags and permission controls.
+- Project `.agents/skills` is directly active; global `~/.agents/skills` is lock-listed at startup and can be
+  activated directly from the `/skills` list (`/skills activate <name>` remains available for scripts), with state
+  under `$QI_HOME/resources` before use.
+- `~/.codex/skills` and `~/.claude/skills` are excluded from default `/skills` scanning and require explicit paths
+  or configured compatibility roots.
+- TUI `/skill:` autocomplete now offers active Skill names with prefix filtering; selecting a name still requires a
+  user task before execution.
+
+### Changed
+
+- `.qi/skills/**` now uses its dedicated full-tree validator while generic `.qi` declarations remain
+  non-executable; Workspace Skill and MCP configuration changes are rejected during an active Run.
+
 ### Fixed
 
 - Depth-1 Subagent wall-time limits now keep their abort timer alive until child settlement, avoiding
   unsettled Runs on Node 22 when the model stream has no other active handles.
 - TUI CodeAct capability discovery is settled before the first Run builds its tool catalog, so a slow
   Docker/Podman probe cannot make an available `codeact` tool disappear from the initial request.
+
+### Security
+
+- Skill archives, paths, links, sizes, remote identities, scripts, and MCP transports now fail closed at their
+  dedicated trust boundaries. MCP annotations/output remain untrusted, exact composite leases gate calls,
+  non-read disconnects are never retried, and schema drift disables reviewed bindings.
+
+### Documentation
+
+- Expanded ADR-0004 and added ADR-0036, plus updated Skill/MCP package and CLI contracts with executable
+  evidence for six pinned real Skills and all three MCP transports.
 
 ## [0.7.3] - 2026-08-03
 

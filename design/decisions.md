@@ -68,8 +68,16 @@ before it can enter the Tool Registry.
 - Only validated metadata enters normal context. Instructions and declared resources load on demand.
 - Skills contribute knowledge, never authority.
 - Bare-name installation resolves only from explicit local compatibility roots; it does not search the network.
-- Installation validates recognized content in a temporary sibling and publishes atomically; it remains
+  Human-operated installation may additionally acquire a Git/GitHub source pinned to an exact commit or an
+  HTTPS archive pinned to SHA-256. Model-operated installation remains local and Workspace-only.
+- Installation validates the complete regular-file Skill tree in a temporary sibling, rejects links, special
+  files, path ambiguity, package caches and unsafe archives, and publishes atomically; it remains
   create-only and cannot silently overwrite an existing Skill.
+- Standard `license`, `compatibility`, `metadata`, and experimental `allowed-tools` fields are retained for
+  disclosure and readiness diagnostics. They never grant authority; unknown frontmatter is diagnostic only.
+- Bundled scripts remain inert after installation. The dedicated Skill Tool may execute only `scripts/**`
+  through a frozen runtime profile and the normal execute capability, Action lifecycle, environment scrubber,
+  Effect Journal, timeout, output and cancellation boundaries. It never installs dependencies automatically.
 - Ordinary file tools never receive `.qi` authority. The dedicated Skill service may export an installed
   Workspace Skill to a new ordinary draft directory, then update it only when the exported digest is still
   current.
@@ -77,6 +85,18 @@ before it can enter the Tool Registry.
   They use sibling staging, backup, and recovery markers under Effect Journal control; uncertain publication is
   indeterminate and is never retried automatically.
 - Model-facing Skill mutation is limited to Workspace scope and cannot install or update globally.
+
+- Qi reads project `.agents/skills` as a read-only active source, while global `~/.agents/skills` is visible only
+  through its `.skill-lock.json` entries until a human activates a Skill. Activation state is stored under
+  `$QI_HOME/resources` and is bound to the lock entry hash; lock drift deactivates the Skill. Active precedence is
+  project `.qi/skills`, project `.agents/skills`, user `$QI_HOME/resources/skills`, then activated global
+  `~/.agents/skills`. Agent roots are never modified and do not grant authority. `~/.codex/skills` and
+  `~/.claude/skills` are not scanned by default; an explicit local path or configured compatibility root is required.
+  The TUI autocompletes active names after `/skill:` but requires a user task before starting a Skill Run. If the
+  Workspace root is the user's home directory, the overlapping `.agents/skills` path remains global and lock-gated.
+
+Workspace and user Skill locks record immutable source identity and content-tree digest. A Skill may describe an
+MCP dependency or bundle an MCP declaration as a resource, but neither form activates or binds a server.
 
 ## ADR-0005: keep provisional activity outside durable Session truth
 
@@ -738,6 +758,43 @@ Compatibility: `/tasks stop` for ProcessTasks moves to `/jobs stop`; a short not
 Required evidence: coordinator batch / full-resultRef tests; CLI delegate envelope/lease tests; TUI Jobs vs Tasks
 panel and collapsed timeline tests; `artifact_get` capability tests; `qi_session_inspect` / extract-session
 delegation projection tests.
+
+## ADR-0036: quarantine MCP capabilities behind immutable review snapshots
+
+Pressure: the existing `McpBridge` proves quarantine and binding with an in-memory transport, but a usable MCP
+client also needs process/HTTP lifecycle, credentials, Resources and Prompts without turning remote metadata or
+server startup into ambient authority or unbounded model context.
+
+Decision:
+
+- User declarations live under `$QI_HOME/resources/mcp`; Workspace declarations under `.qi/mcp` shadow equal
+  names. Declarations are secret-free and inert until a human connects and reviews them.
+- Stdio, Streamable HTTP and explicit legacy SSE are supported through the official TypeScript client behind a
+  Node port. SSE is never a silent downgrade. Connections start lazily, use bounded output/time/lifetime, and
+  close with the owning Runtime.
+- Tools, Resources, Resource Templates, Prompts and server instructions enter a machine-private candidate cache.
+  Only explicit bindings are callable. A canonical metadata/schema fingerprint is frozen into the binding and
+  every Action resource; list-change or reconnect drift quarantines the capability again.
+- One cached `mcp_catalog` Tool and one live `mcp` proxy keep provider context bounded. Live MCP is Agent-only;
+  remote text and instructions remain labelled untrusted data and never become system policy.
+- A binding declares its business effect. Runtime composition creates an exact lease only when its transport
+  prerequisite (execute for stdio, network for HTTP/SSE) and business capability are both enabled. Spend uses a
+  one-use human lease. Discovery or Skill metadata never creates a lease.
+- Static and OAuth credentials are referenced by alias and resolved from the encrypted credential store only
+  after authority. OAuth uses protected-resource discovery, PKCE S256, resource indicators and audience-bound
+  tokens; secrets never enter TOML, model context, logs or Session events.
+- Known remote errors fail deterministically. Once a non-read request may have been dispatched, transport loss
+  is indeterminate and is never automatically retried. Read operations may retry once after a fresh connection.
+- Sampling, elicitation, Roots, Tasks and MCP UI are not advertised in this stage. Their SDK hooks remain behind
+  ports rather than being accepted implicitly.
+
+Rejected: auto-binding every discovered tool, treating annotations as effect authority, model-written server
+configuration, floating executable installers, automatic SSE fallback, and injecting server instructions into
+the system prefix.
+
+Required evidence: all three transports; secret-free declaration parsing; binding and fingerprint drift;
+transport/business capability conjunction; prompt/resource/output bounds; OAuth token sealing; dispatch-aware
+failed versus indeterminate settlement; explicit rejection of unsupported client capabilities.
 
 ## Changing a decision
 

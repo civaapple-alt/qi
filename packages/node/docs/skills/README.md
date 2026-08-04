@@ -16,9 +16,21 @@ It treats repository content as data, not executable authority.
 ## Core model
 
 `SkillLoader` validates roots, frontmatter, metadata, and progressively disclosed content. `SkillCatalog` merges
-the Workspace `.qi/skills` scope with the user `~/.qi/skills` scope; a same-named Workspace Skill wins.
+the Workspace `.qi/skills` scope with the user `$QI_HOME/resources/skills` scope; a same-named Workspace Skill wins.
 Agent definitions are parsed declaratively. Shared frontmatter helpers enforce required fields without evaluating
 source code. `version` is optional and projects as `unversioned` when absent.
+
+Qi directly enables Workspace `<workspace>/.agents/skills` as a read-only active Skill source. Global
+`~/.agents/skills` is listed from `.skill-lock.json` metadata at startup but requires explicit human activation;
+activation state is stored under `$QI_HOME/resources` and is bound to the lock entry hash. Activated global Skills
+then use the normal Skill Tool, while the source directory remains unchanged. Qi roots have higher precedence and
+can be used as optional content-addressed snapshots. `discoverCompatibility()` remains metadata-only for other configured roots such as
+`~/.codex/skills` and `~/.claude/skills`, which are not scanned by default and require an explicit local path or
+configured compatibility root before inspection or installation.
+
+The TUI completes active Skill names after `/skill:`; the completed `/skill:<name>` command still requires a task
+before starting a Run. When the Workspace is the user's home directory, the overlapping `.agents/skills` path is
+kept behind the global lock and activation state rather than being treated as a directly active project root.
 
 ## Behavioral invariants
 
@@ -26,7 +38,7 @@ source code. `version` is optional and projects as `unversioned` when absent.
 - Skill roots that are symbolic links are rejected at the trust boundary.
 - Agent definition files are read as declarations and never executed.
 - Full resources remain unloaded until explicitly requested.
-- Installation copies a bounded allowlist of files through a sibling staging directory and atomic rename.
+- Installation copies the complete bounded ordinary-file tree through a sibling staging directory and atomic rename.
 - Installation never follows symbolic links, overwrites an existing Skill, or grants runtime capabilities.
 - Workspace updates require an exported ordinary-directory draft plus a fresh digest, and retain recovery state
   when atomic publication cannot be confirmed.
@@ -56,8 +68,19 @@ const parsed = parseFrontmatter(
 `SkillLoader`, `SkillCatalog`, skill metadata/result types, agent definition types, and frontmatter parsing helpers.
 
 `SkillCatalog.install()` accepts an explicit local directory or a bare name found under configured compatibility
-roots such as `~/.codex/skills` (including `.system/<name>`). It has no implicit network registry. User scope is
-the API default; callers must request Workspace scope explicitly.
+ roots such as a caller-configured `~/.codex/skills` (including `.system/<name>`). It has no implicit network registry. User scope is
+the API default; callers must request Workspace scope explicitly. Installing a compatibility candidate is a
+copy-and-validate migration; the source directory remains unchanged.
+
+Human-operated `installImmutable()` additionally accepts an exact Git/GitHub commit or an HTTPS tar archive with
+SHA-256. It rejects floating identities, redirects, lifecycle execution, links, special files, non-portable paths,
+and trees above 512 files / 8 MiB per file / 64 MiB total / depth 16. Provenance and the content-tree digest are
+recorded in `.qi/skills.lock.json` or `$QI_HOME/resources/skills.lock.json`.
+
+`compatibility`, `allowed-tools`, and `metadata["qi.required-*"]` produce readiness diagnostics only. Unknown
+frontmatter is retained as informational extension data. `runSkillScript()` accepts only regular `scripts/**`
+files, bounded argv/cwd/timeout, and frozen interpreter profiles; it never installs dependencies or supplies
+provider/MCP credentials.
 
 `exportWorkspaceDraft()` and `updateWorkspace()` are the create-draft/update pair for existing Workspace Skills.
 They do not weaken the generic `.qi` file boundary; callers must still provide effect and path authority.
@@ -69,10 +92,10 @@ selection, context, or only presentation; none may imply authority.
 
 ## Verification
 
-`tests/skills-agent.test.mjs` covers progressive disclosure, scope precedence, bounded local installation,
-frontmatter, symlink roots, and non-execution.
+`tests/skills-agent.test.mjs` and `tests/skills-mcp-production.test.mjs` cover progressive disclosure, scope
+precedence, full trees/binary resources, locks, scripts, unsafe paths, and six pinned real-world samples.
 
 ## Further reading
 
-- [Loading security](docs/loading-security.md)
-- [Skill and extension design](../../design/system-design.md#8-extensions-skills-mcp-codeact-graph-delegation-scheduling-and-introspection)
+- [Loading security](loading-security.md)
+- [Skill and extension design](../../../../design/system-design.md#8-extensions-skills-mcp-codeact-graph-delegation-scheduling-and-introspection)

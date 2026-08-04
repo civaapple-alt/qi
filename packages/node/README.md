@@ -23,8 +23,8 @@ Controlled entrypoints:
 | `./workspace` | local/container/worktree/process adapters and SQLite EffectJournal |
 | `./tools` | filesystem, Git, Shell, Verify, Network, and Artifact Tool implementations |
 | `./media` | image URL/clipboard ingestion, MIME/magic validation, preprocessing, Artifact storage, and `read_image` |
-| `./skills` | declaration-only Skill/Agent loading and dedicated Skill writes |
-| `./mcp` | quarantined MCP discovery and explicit binding |
+| `./skills` | progressive Agent Skills, immutable source locks, full resource trees, and bounded script execution |
+| `./mcp` | inert declarations, official transports, quarantined fingerprint review, sealed OAuth, and proxy Tools |
 | `./codeact` | container-isolated short programs with ordinary nested Tool authority |
 | `./scheduler` | bounded durable timer/event watchers |
 | `./stream` | committed catch-up/live delivery and SSE |

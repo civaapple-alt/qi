@@ -107,6 +107,8 @@ export function mergeCapabilities(
     ...(pickBoolean(projectCaps?.execute ?? globalCaps?.execute, "execute")),
     ...(pickBoolean(projectCaps?.background ?? globalCaps?.background, "background")),
     ...(pickBoolean(projectCaps?.delegate ?? globalCaps?.delegate, "delegate")),
+    ...(pickBoolean(projectCaps?.publish ?? globalCaps?.publish, "publish")),
+    ...(pickBoolean(projectCaps?.spend ?? globalCaps?.spend, "spend")),
   };
   return resolveCapabilities(configured, overrides);
 }
@@ -205,7 +207,7 @@ function validateCapabilities(value: unknown, path: string): QiCapabilityConfig 
   }
   const table = value as Record<string, unknown>;
   const out: QiCapabilityConfig = {};
-  for (const key of ["write", "verify", "network", "execute", "background", "delegate"] as const) {
+  for (const key of ["write", "verify", "network", "execute", "background", "delegate", "publish", "spend"] as const) {
     if (table[key] === undefined) continue;
     if (typeof table[key] !== "boolean") throw new TypeError(`${path}: capabilities.${key} must be boolean`);
     (out as Record<string, boolean>)[key] = table[key] as boolean;

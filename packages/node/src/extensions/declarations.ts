@@ -4,6 +4,7 @@ import { extname, relative, resolve, sep } from "node:path";
 export const WORKSPACE_QI_FILES = new Set([
   "packages.toml",
   "packages.lock.json",
+  "skills.lock.json",
   "qi.verify.json",
 ]);
 export const WORKSPACE_QI_DIRECTORIES = new Set([
@@ -52,9 +53,9 @@ export async function validateDeclarativeTree(
   root: string,
   options: DeclarationValidationOptions & { readonly workspaceQiRoot?: boolean } = {},
 ): Promise<ValidatedDeclarationTree> {
-  const maximumFiles = options.maxFiles ?? 2_000;
+  const maximumFiles = options.maxFiles ?? 4_000;
   const maximumFileBytes = options.maxFileBytes ?? 2 * 1024 * 1024;
-  const maximumTotalBytes = options.maxTotalBytes ?? 32 * 1024 * 1024;
+  const maximumTotalBytes = options.maxTotalBytes ?? 96 * 1024 * 1024;
   const rootInfo = await lstat(root);
   if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
     throw new Error(`Declarative root must be a real directory: ${root}`);
@@ -77,14 +78,16 @@ export async function validateDeclarativeTree(
         continue;
       }
       if (!info.isFile()) throw new Error(`Unsupported declarative entry: ${relativePath}`);
-      if (executableExtensions.has(extname(entry.name).toLowerCase())) {
+      const workspaceSkillFile = options.workspaceQiRoot && relativePath.startsWith("skills/");
+      if (!workspaceSkillFile && executableExtensions.has(extname(entry.name).toLowerCase())) {
         throw new Error(`Executable content is forbidden in declarative trees: ${relativePath}`);
       }
       const extension = extname(entry.name).toLowerCase();
-      if (!declarationExtensions.has(extension)) {
+      if (!workspaceSkillFile && !declarationExtensions.has(extension)) {
         throw new Error(`Unsupported declarative file type: ${relativePath}`);
       }
-      if (info.size > maximumFileBytes) throw new Error(`Declarative file is too large: ${relativePath}`);
+      const effectiveFileLimit = workspaceSkillFile ? Math.max(maximumFileBytes, 8 * 1024 * 1024) : maximumFileBytes;
+      if (info.size > effectiveFileLimit) throw new Error(`Declarative file is too large: ${relativePath}`);
       files.push(relativePath);
       totalBytes += info.size;
       if (files.length > maximumFiles) throw new Error(`Declarative tree exceeds ${maximumFiles} files`);

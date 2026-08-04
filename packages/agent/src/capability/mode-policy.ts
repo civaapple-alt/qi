@@ -11,6 +11,7 @@ const askTools = new Set([
   "fetch",
   "web_map",
   "skill",
+  "mcp_catalog",
   "artifact",
   "artifact_get",
   "qi_introspect",

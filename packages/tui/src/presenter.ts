@@ -85,7 +85,16 @@ export interface PresentedSkill {
   readonly version: string;
   readonly description: string;
   readonly scope: "workspace" | "user";
+  readonly origin?: "qi" | "agent";
   readonly shadowedUserRoot?: string;
+}
+
+export interface PresentedSkillCandidate {
+  readonly name: string;
+  readonly version: string;
+  readonly description: string;
+  readonly root: string;
+  readonly source?: "compatibility" | "global-agent";
 }
 
 type TodoItemState = "done" | "active" | "pending" | "parked" | "failed";
@@ -162,6 +171,7 @@ export class TuiPresenter {
   #noticeKind: "info" | "run" | undefined;
   #noticeExpiresAt: number | undefined;
   #skills: readonly PresentedSkill[] = [];
+  #skillCandidates: readonly PresentedSkillCandidate[] = [];
   #actionActivity = new Map<string, Extract<RuntimeActivity, { type: "action.output" }>>();
   #modelActivity = new Map<
     string,
@@ -371,8 +381,17 @@ export class TuiPresenter {
     return this.launch.discoveryTip;
   }
 
-  setSkills(skills: readonly PresentedSkill[]): void {
+  setSkills(skills: readonly PresentedSkill[], candidates: readonly PresentedSkillCandidate[] = []): void {
     this.#skills = [...skills];
+    this.#skillCandidates = [...candidates];
+  }
+
+  skills(): readonly PresentedSkill[] {
+    return this.#skills;
+  }
+
+  skillCandidates(): readonly PresentedSkillCandidate[] {
+    return this.#skillCandidates;
   }
 
   inspections(): readonly InspectionEntry[] {
@@ -1297,13 +1316,25 @@ export class TuiPresenter {
   }
 
   renderSkills(): string[] {
-    const lines = ["Skills  (/skill install [--workspace] <name-or-path>)"];
-    if (this.#skills.length === 0) return [...lines, "  No installed Skills were discovered."];
+    const lines = ["Skills  (/skills · select a discovered Skill to view/activate · install [--workspace] <name-or-path>)"];
+    if (this.#skills.length === 0 && this.#skillCandidates.length === 0) {
+      return [...lines, "  No installed Skills were discovered."];
+    }
     for (const skill of this.#skills) {
       lines.push(
-        `  ${skill.name}  ${skill.version} · ${skill.scope}${skill.shadowedUserRoot ? " · shadows user Skill" : ""}`,
+        `  ${skill.name}  ${skill.version} · ${skill.scope}${skill.origin === "agent" ? " · .agents" : ""}${skill.shadowedUserRoot ? " · shadows user Skill" : ""}`,
         `    ${oneLine(skill.description, 120)}`,
       );
+    }
+    if (this.#skillCandidates.length > 0) {
+      lines.push("", "  External candidates (activate global .agents Skill or migrate an explicit source):");
+      for (const skill of this.#skillCandidates) {
+        lines.push(
+          `  ${skill.name}  ${skill.version} · ${skill.source === "global-agent" ? "global .agents · inactive" : "external · not active"}`,
+          `    ${oneLine(skill.description, 120)}`,
+          `    source ${skill.root}`,
+        );
+      }
     }
     return lines;
   }

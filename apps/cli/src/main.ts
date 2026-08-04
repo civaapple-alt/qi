@@ -32,10 +32,12 @@ import {
   TuiRuntime,
 } from "./runtime.js";
 import { runPackageCliCommand } from "./package-command.js";
+import { runExtensionCliCommand } from "./extension-command.js";
 
 const execFileAsync = promisify(execFile);
 
 async function main(): Promise<void> {
+  if (await runExtensionCliCommand(process.argv.slice(2))) return;
   if (await runPackageCliCommand(process.argv.slice(2))) return;
   const parsed = await parseTuiCliArguments(process.argv.slice(2));
   if (parsed.kind === "help" || parsed.kind === "version") {
@@ -102,6 +104,8 @@ async function main(): Promise<void> {
       options.allowExecute = policy.allowExecute;
       options.allowBackground = policy.allowBackground;
       options.allowDelegate = policy.allowDelegate;
+      options.allowPublish = policy.allowPublish;
+      options.allowSpend = policy.allowSpend;
       options.maxSteps = policy.maxSteps;
       options.maxActionsPerStep = policy.maxActionsPerStep;
       options.delegateConfig = policy.delegateConfig;
@@ -147,6 +151,8 @@ async function main(): Promise<void> {
         allowNetwork: options.allowNetwork,
         allowBackground: options.allowBackground,
         allowDelegate: options.allowDelegate,
+        allowPublish: options.allowPublish,
+        allowSpend: options.allowSpend,
         ...(options.shell === undefined ? {} : { shell: options.shell }),
         ...(sessionId === undefined ? {} : { sessionId }),
         projectConfigPath: policy.projectConfigPath,
@@ -176,7 +182,7 @@ async function main(): Promise<void> {
       };
       presenter = new TuiPresenter(await launchInfo(launchOptions, runtime, authStatus.authStatus));
       presenter.update(runtime.events(), runtime.view());
-      presenter.setSkills(runtime.skillCatalog());
+      presenter.setSkills(runtime.skillCatalog(), runtime.skillCandidates());
       if (pendingNotice) {
         presenter.setNotice(pendingNotice);
         pendingNotice = undefined;
@@ -255,6 +261,8 @@ async function main(): Promise<void> {
     allowNetwork: options.allowNetwork,
     allowBackground: options.allowBackground,
     allowDelegate: options.allowDelegate,
+    allowPublish: options.allowPublish,
+    allowSpend: options.allowSpend,
     ...(options.shell === undefined ? {} : { shell: options.shell }),
     ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
     ...(options.projectConfigPath === undefined ? {} : { projectConfigPath: options.projectConfigPath }),
@@ -278,7 +286,7 @@ async function main(): Promise<void> {
     authStatus.authStatus,
   ));
   presenter.update(runtime.events(), runtime.view());
-  presenter.setSkills(runtime.skillCatalog());
+  presenter.setSkills(runtime.skillCatalog(), runtime.skillCandidates());
   const enabledPermissions = ["read", ...runtime.capabilityLabels()];
   const disabledPermissions = ["write", "verify", "network", "execute", "background", "delegate"]
     .filter((capability) => !enabledPermissions.includes(capability));
@@ -325,6 +333,30 @@ async function main(): Promise<void> {
         if (!closing) readline.prompt();
         return;
       }
+      const activateMatch = /^(activate|deactivate)\s+([a-z0-9]+(?:-[a-z0-9]+)*)$/i.exec(command.argument.trim());
+      if (activateMatch) {
+        const operation = activateMatch[1]!.toLowerCase();
+        const name = activateMatch[2]!;
+        const task = (operation === "activate"
+          ? runtime.activateAgentSkill(name).then(() => `Activated global Agent Skill ${name}.`)
+          : runtime.deactivateAgentSkill(name).then((changed) => changed
+            ? `Deactivated global Agent Skill ${name}.`
+            : `Global Agent Skill ${name} was not active.`))
+          .then((notice) => {
+            presenter?.setSkills(runtime.skillCatalog(), runtime.skillCandidates());
+            presenter?.setPanel("skills", notice);
+            process.stdout.write(`${presenter?.render().join("\\n") ?? ""}\\n`);
+          })
+          .catch((error: unknown) => {
+            process.stderr.write(`skill error: ${message(error)}\\n`);
+          })
+          .finally(() => {
+            active.delete(task);
+            if (!closing) readline.prompt();
+          });
+        active.add(task);
+        return;
+      }
       let request;
       try {
         const installArgument = command.name === "skill"
@@ -342,7 +374,7 @@ async function main(): Promise<void> {
         ? runtime.installSkill(request.source, request.scope).then((installed) => `Installed ${installed.name} ${installed.version} in ${installed.scope} scope.`)
         : runtime.refreshSkills().then((skills) => `Discovered ${skills.length} active Skill${skills.length === 1 ? "" : "s"}.`))
         .then((notice) => {
-          presenter?.setSkills(runtime.skillCatalog());
+          presenter?.setSkills(runtime.skillCatalog(), runtime.skillCandidates());
           presenter?.setPanel("skills", notice);
           process.stdout.write(`${presenter?.render().join("\n") ?? ""}\n`);
         })
@@ -353,6 +385,48 @@ async function main(): Promise<void> {
           active.delete(task);
           if (!closing) readline.prompt();
         });
+      active.add(task);
+      return;
+    }
+    if (command?.name.startsWith("skill:")) {
+      const skillName = command.name.slice("skill:".length);
+      if (!skillName || !command.argument.trim()) {
+        process.stderr.write(`/${command.name} requires a task.\n`);
+        if (!closing) readline.prompt();
+        return;
+      }
+      const task = runtime.runWithSkill(skillName, command.argument)
+        .then(() => undefined)
+        .catch((error: unknown) => { process.stderr.write(`skill error: ${message(error)}\n`); })
+        .finally(() => { active.delete(task); if (!closing) readline.prompt(); });
+      active.add(task);
+      return;
+    }
+    if (command?.name === "mcp") {
+      if (runtime.active || active.size > 0) {
+        process.stderr.write("A Run or TUI operation is active; wait before managing MCP.\n");
+        if (!closing) readline.prompt();
+        return;
+      }
+      const parts = command.argument.trim().split(/\s+/).filter(Boolean);
+      const operation = parts.shift() ?? "status";
+      const execute = async (): Promise<unknown> => {
+        if (operation === "status") return runtime.mcpStatuses();
+        if (operation === "refresh" && parts.length === 1) return runtime.refreshMcp(parts[0]!);
+        if (operation === "login" && parts.length === 1) return { authorizationUrl: await runtime.beginMcpLogin(parts[0]!) };
+        if (operation === "finish" && parts.length === 2) { await runtime.finishMcpLogin(parts[0]!, parts[1]!); return { status: "logged-in" }; }
+        if (operation === "logout" && parts.length === 1) { await runtime.logoutMcp(parts[0]!); return { status: "logged-out" }; }
+        if (operation === "bind" && parts.length >= 4) {
+          const [server, kind, name, effect, ...resourcePatterns] = parts;
+          return runtime.bindMcp({ server: server!, kind: kind! as import("@civaapple/qi-node/mcp").McpBinding["kind"], name: name!, effect: effect! as import("@civaapple/qi-agent/capability").Effect, ...(resourcePatterns.length ? { resourcePatterns } : {}) });
+        }
+        if (operation === "unbind" && parts.length === 3) return { unbound: await runtime.unbindMcp(parts[0]!, parts[1]! as import("@civaapple/qi-node/mcp").McpBinding["kind"], parts[2]!) };
+        throw new Error("Usage: /mcp status|refresh|login|finish|logout|bind|unbind ...");
+      };
+      const task = execute()
+        .then((result) => { process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); })
+        .catch((error: unknown) => { process.stderr.write(`mcp error: ${message(error)}\n`); })
+        .finally(() => { active.delete(task); if (!closing) readline.prompt(); });
       active.add(task);
       return;
     }

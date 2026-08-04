@@ -12,6 +12,7 @@ import {
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import { SHELL_PROFILE_IDS, type ShellProfileId } from "@civaapple/qi-node/tools";
 import type { ProcessTaskView } from "@civaapple/qi-agent/kernel";
+import type { PanelItem } from "@civaapple/qi-tui";
 import type { AuthSession } from "../auth.js";
 import {
   DELEGATE_BATCH_MAX,
@@ -30,7 +31,7 @@ import {
   type ResolvedDelegateConfig,
 } from "../config.js";
 import { t, type Locale, type MessageKey } from "../i18n.js";
-import type { TuiPresenter } from "../presenter.js";
+import type { PresentedSkill, PresentedSkillCandidate, TuiPresenter } from "../presenter.js";
 import type { TimelineDensity } from "../presenter.js";
 import { formatProviderLabel } from "../provider.js";
 import {
@@ -67,6 +68,8 @@ export const CAPABILITY_IDS = [
   "execute",
   "background",
   "delegate",
+  "publish",
+  "spend",
 ] as const;
 
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
@@ -127,6 +130,9 @@ export interface PanelFlowContext {
     },
   ) => void;
   readonly openInspect: (panel: "overview" | "config" | "context" | "runs" | "steps" | "actions" | "agents" | "skills" | "jobs" | "tasks" | "providers", title: string) => void;
+  readonly discoveredSkills: () => readonly PresentedSkill[];
+  readonly skillCandidates: () => readonly PresentedSkillCandidate[];
+  readonly activateAgentSkill: (name: string) => void;
   readonly openHistoryList: (kind: "runs" | "steps" | "actions" | "agents") => void;
   readonly addMount: (path: string) => void;
   readonly removeMount: (mountId: string) => void;
@@ -864,6 +870,8 @@ export function openPermissionsPanel(ctx: PanelFlowContext): void {
         execute: selected.has("execute"),
         background: selected.has("background"),
         delegate: selected.has("delegate"),
+        publish: selected.has("publish"),
+        spend: selected.has("spend"),
       };
       ctx.panels.closeAll();
       ctx.saveCapabilities(capabilities);
@@ -1208,23 +1216,61 @@ export function capabilityIdsFromLaunchLabels(labels: readonly string[]): Capabi
     else if (label === "host execute" || label === "execute") ids.push("execute");
     else if (label === "background tasks" || label === "background") ids.push("background");
     else if (label === "delegate") ids.push("delegate");
+    else if (label === "publish") ids.push("publish");
+    else if (label === "spend") ids.push("spend");
   }
   return ids;
 }
 
 export function openSkillsHubPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
+  const active = ctx.discoveredSkills();
+  const candidates = ctx.skillCandidates();
+  const items: PanelItem[] = [
+    ...active.map((skill) => ({
+      id: `active:${skill.name}`,
+      label: `✓ ${skill.name}`,
+      description: `${skill.scope}${skill.origin === "agent" ? " · .agents" : ""} · active · ${skill.version}`,
+      current: true,
+    })),
+    ...candidates.map((skill) => ({
+      id: `candidate:${skill.name}`,
+      label: `○ ${skill.name}`,
+      description: skill.source === "global-agent"
+        ? `global .agents · inactive · Enter to activate · ${skill.version}`
+        : `external · not active · install explicitly · ${skill.version}`,
+    })),
+    { id: "install", label: t(locale, "skills.install"), description: t(locale, "skills.install.desc") },
+  ];
+  if (active.length === 0 && candidates.length === 0) {
+    items.unshift({
+      id: "empty",
+      label: "No installed Skills were discovered.",
+      description: "Install a Skill or add one to this Workspace.",
+      disabled: true,
+    });
+  }
   ctx.panels.push(new ListPanel({
     title: t(locale, "skills.title"),
-    hints: t(locale, "skills.hints"),
-    items: [
-      { id: "list", label: t(locale, "skills.list"), description: t(locale, "skills.list.desc") },
-      { id: "install", label: t(locale, "skills.install"), description: t(locale, "skills.install.desc") },
-    ],
+    hints: active.length > 0 || candidates.length > 0
+      ? `${t(locale, "skills.hints")} · Enter on ○ to activate`
+      : t(locale, "skills.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items,
     onClose: ctx.panels.dismiss,
     onSelect: (item) => {
-      if (item.id === "list") {
+      if (item.id.startsWith("active:")) {
         ctx.openInspect("skills", "/skills");
+        return;
+      }
+      if (item.id.startsWith("candidate:")) {
+        const candidate = candidates.find((skill) => item.id === `candidate:${skill.name}`);
+        if (candidate?.source === "global-agent") {
+          ctx.activateAgentSkill(candidate.name);
+        } else {
+          ctx.presenter.setNotice("This external candidate is not directly activatable; use Install skill.");
+          ctx.render();
+        }
         return;
       }
       openSkillInstallScopePanel(ctx);

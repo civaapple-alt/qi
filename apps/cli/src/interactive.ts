@@ -178,7 +178,7 @@ export class InteractiveTui {
     // CURSOR_MARKER still positions the (hidden) caret for CJK IME candidate windows.
     this.#tui = new TUI(this.#terminal, false);
     this.#presenter.update(runtime.events(), runtime.view());
-    this.#presenter.setSkills(runtime.skillCatalog());
+    this.#presenter.setSkills(runtime.skillCatalog(), runtime.skillCandidates());
     this.#presenter.setChildViewLookup((childSessionId) => runtime.childView(childSessionId as SessionId));
     this.#dashboard = new DashboardComponent(presenter);
     this.#footer = new FooterComponent(runtime, presenter);
@@ -1278,6 +1278,7 @@ export class InteractiveTui {
         this.#presenter.launch.workspaceRoot,
         fdPath,
         preserve,
+        this.#runtime.skillCatalog().map((skill) => skill.name),
       ),
     );
     install();
@@ -1422,7 +1423,8 @@ export class InteractiveTui {
     }
     this.#startSkillTask(async () => {
       const installed = await this.#runtime.installSkill(trimmed, scope);
-      this.#presenter.setSkills(this.#runtime.skillCatalog());
+      this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());
+      this.#syncAutocomplete();
       this.#presenter.setNotice(
         `Installed ${installed.name} ${installed.version} in ${installed.scope} scope.`,
       );
@@ -1438,6 +1440,65 @@ export class InteractiveTui {
       this.#presenter.setNotice(message(error));
       this.#render();
     }
+  }
+
+  #openSkillsHubPanel(): void {
+    this.#startSkillTask(async () => {
+      const skills = await this.#runtime.refreshSkills();
+      this.#presenter.setSkills(skills, this.#runtime.skillCandidates());
+      this.#syncAutocomplete();
+      openSkillsHubPanel(this.#panelFlow());
+    });
+  }
+
+  #activateAgentSkill(name: string): void {
+    const trimmed = name.trim();
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmed)) {
+      this.#presenter.setNotice("Usage: /skills activate <global .agents Skill name>");
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const activated = await this.#runtime.activateAgentSkill(trimmed);
+      this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());
+      this.#syncAutocomplete();
+      this.#presenter.setNotice(`Activated global Agent Skill ${activated.name}.`);
+      this.#openInspectPanel("skills", "/skills");
+    }, "Skill");
+  }
+
+  #activateAgentSkillFromPanel(name: string): void {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+      this.#presenter.setNotice("Invalid Skill name.");
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const activated = await this.#runtime.activateAgentSkill(name);
+      this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());
+      this.#syncAutocomplete();
+      this.#presenter.setNotice(`Activated global Agent Skill ${activated.name}.`);
+      this.#panels.closeAll();
+      openSkillsHubPanel(this.#panelFlow());
+    }, "Skill");
+  }
+
+  #deactivateAgentSkill(name: string): void {
+    const trimmed = name.trim();
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmed)) {
+      this.#presenter.setNotice("Usage: /skills deactivate <global .agents Skill name>");
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const changed = await this.#runtime.deactivateAgentSkill(trimmed);
+      this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());
+      this.#syncAutocomplete();
+      this.#presenter.setNotice(
+        changed ? `Deactivated global Agent Skill ${trimmed}.` : `Global Agent Skill ${trimmed} was not active.`,
+      );
+      this.#openInspectPanel("skills", "/skills");
+    }, "Skill");
   }
 
   #stopJobFromArgument(argument: string, reopenJobPicker = false): void {
@@ -1581,7 +1642,8 @@ export class InteractiveTui {
         if (panel === "skills") {
           this.#startSkillTask(async () => {
             const skills = await this.#runtime.refreshSkills();
-            this.#presenter.setSkills(skills);
+            this.#presenter.setSkills(skills, this.#runtime.skillCandidates());
+            this.#syncAutocomplete();
             this.#openInspectPanel("skills", title);
           });
           return;
@@ -1592,6 +1654,9 @@ export class InteractiveTui {
         }
         this.#openInspectPanel(panel, title);
       },
+      discoveredSkills: () => this.#presenter.skills(),
+      skillCandidates: () => this.#presenter.skillCandidates(),
+      activateAgentSkill: (name) => this.#activateAgentSkillFromPanel(name),
       openHistoryList: (kind) => {
         openHistoryListPanel(this.#panelFlow(), kind);
       },
@@ -2323,6 +2388,16 @@ export class InteractiveTui {
       openSettingsPanel(this.#panelFlow());
       return;
     }
+    if (name.startsWith("skill:")) {
+      const skillName = name.slice("skill:".length);
+      if (!skillName || !argument.trim()) {
+        this.#presenter.setNotice(`/${name} requires a task, for example /${name} review this page`);
+        this.#render();
+        return;
+      }
+      this.#startTurn(() => this.#runtime.runWithSkill(skillName, argument));
+      return;
+    }
     if (name === "memory") {
       this.#handleMemoryCommand(argument);
       return;
@@ -2345,15 +2420,69 @@ export class InteractiveTui {
       return;
     }
     if (name === "skills") {
+      if (/^activate\b/i.test(argument.trim())) {
+        this.#activateAgentSkill(argument.trim().replace(/^activate\s+/i, ""));
+        return;
+      }
+      if (/^deactivate\b/i.test(argument.trim())) {
+        this.#deactivateAgentSkill(argument.trim().replace(/^deactivate\s+/i, ""));
+        return;
+      }
       if (/^install\b/i.test(argument.trim())) {
         this.#installSkillFromArgument(argument);
         return;
       }
       if (!argument.trim()) {
-        openSkillsHubPanel(this.#panelFlow());
+        this.#openSkillsHubPanel();
         return;
       }
-      openSkillsHubPanel(this.#panelFlow());
+      this.#openSkillsHubPanel();
+      return;
+    }
+    if (name === "mcp") {
+      const parts = argument.trim().split(/\s+/).filter(Boolean);
+      const operation = parts.shift() ?? "status";
+      this.#startManagementTask(async () => {
+        if (operation === "status") {
+          this.#presenter.setNotice(JSON.stringify(await this.#runtime.mcpStatuses(), null, 2));
+          return;
+        }
+        if (operation === "refresh" && parts.length === 1) {
+          const result = await this.#runtime.refreshMcp(parts[0]!);
+          this.#presenter.setNotice(`MCP ${parts[0]} refreshed; ${result.drifted.length} binding(s) drifted.`);
+          return;
+        }
+        if (operation === "login" && parts.length === 1) {
+          const url = await this.#runtime.beginMcpLogin(parts[0]!);
+          this.#presenter.setNotice(`Open this authorization URL, then use /mcp finish ${parts[0]} <callback-url>:\n${url}`);
+          return;
+        }
+        if (operation === "finish" && parts.length === 2) {
+          await this.#runtime.finishMcpLogin(parts[0]!, parts[1]!);
+          this.#presenter.setNotice(`MCP ${parts[0]} OAuth login completed.`);
+          return;
+        }
+        if (operation === "logout" && parts.length === 1) {
+          await this.#runtime.logoutMcp(parts[0]!);
+          this.#presenter.setNotice(`MCP ${parts[0]} OAuth credentials removed.`);
+          return;
+        }
+        if (operation === "bind" && parts.length >= 4) {
+          const [server, kind, capabilityName, effect, ...resources] = parts;
+          if (!new Set(["tool", "resource", "resource-template", "prompt", "instructions"]).has(kind!)) throw new Error("MCP kind must be tool, resource, resource-template, prompt, or instructions");
+          if (!new Set(["read", "write", "execute", "publish", "spend"]).has(effect!)) throw new Error("MCP effect must be read, write, execute, publish, or spend");
+          await this.#runtime.bindMcp({ server: server!, kind: kind! as import("@civaapple/qi-node/mcp").McpBinding["kind"], name: capabilityName!, effect: effect! as import("@civaapple/qi-agent/capability").Effect, ...(resources.length ? { resourcePatterns: resources } : {}) });
+          this.#presenter.setNotice(`Bound MCP ${server}/${kind}/${capabilityName} as ${effect}.`);
+          return;
+        }
+        if (operation === "unbind" && parts.length === 3) {
+          const [server, kind, capabilityName] = parts;
+          const changed = await this.#runtime.unbindMcp(server!, kind! as import("@civaapple/qi-node/mcp").McpBinding["kind"], capabilityName!);
+          this.#presenter.setNotice(changed ? `Unbound MCP ${server}/${kind}/${capabilityName}.` : "MCP binding was not present.");
+          return;
+        }
+        throw new Error("Usage: /mcp status | refresh <server> | login <server> | finish <server> <callback-url> | logout <server> | bind <server> <kind> <name> <effect> [resource-pattern...] | unbind <server> <kind> <name>");
+      }, "MCP");
       return;
     }
     if (name === "skill") {

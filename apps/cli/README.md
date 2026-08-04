@@ -81,7 +81,9 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan` / `qianwenai` / a `$QI_HOME/providers` overlay id). For a full custom vendor (wire dialect, window, thinking), use Providers → **Add OpenAI-compatible provider** (writes `$QI_HOME/providers/<name>.toml` and seals the key). For thin multi-alias Chat Completions, use **OpenAI Compatible** with a **Name** (e.g. `zhipu`) under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
-| `/skills` | Skills hub: list discovered Skills, or Install → scope → name/path form |
+| `/skills` | Skills hub: view active/inactive status; select a discovered global candidate to activate, or Install → scope → name/path form |
+| `/skill:<name> <task>` | Start an ordinary Run with one explicitly activated, digest-pinned Skill |
+| `/mcp …` | Status/refresh/login/logout and explicit bind/unbind for quarantined MCP capabilities |
 | `/tasks` | List depth-1 Subagent research Tasks for the selected Run; Enter opens tracking |
 | `/jobs [stop …]` | Interactive background Job list; select a running Job and press Enter to stop it |
 | `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path form) / unmount (picker); slash args still work |
@@ -250,6 +252,10 @@ live Session. Mount and sensitive-path events are audit facts. Before a
 Run, the runtime reconciles additions, removals, and changed mount identities into the Session
 ([ADR 0015](../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts)).
 
+`publish` and `spend` are separate, default-off capabilities. Use `--allow-publish` / `--no-publish` and
+`--allow-spend` / `--no-spend`, or matching project/user `[capabilities]` keys. Spend grants one use and must be
+explicitly enabled again after consumption.
+
 When host execute is enabled, `[shell]` in **`$QI_HOME/config.toml`** (or `QI_CONFIG`) selects profiles.
 `direct` keeps the argv `shell` tool; `pwsh`, `cmd`, and `bash` are probed and, when allowed and available,
 expose a separate `script` tool. Project `policy.toml` `[shell]` is ignored. On first launch without `[shell]`,
@@ -358,20 +364,40 @@ persist to `~/.qi/config.toml`, and apply on the next Run. Extra tool calls in t
 `/settings` → **Subagent / delegate** and `/subagent` (alias `/delegate`) edit the child envelope above;
 batch fan-out max **4** and depth **1** are fixed product limits shown in the hub.
 
-The Skill catalog combines `<workspace>/.qi/skills` and `$QI_HOME/resources/skills`; Workspace wins on a name
-collision. Only independently omittable metadata entries enter initial model context, plus a short required
+The active Skill catalog combines `<workspace>/.qi/skills`, `<workspace>/.agents/skills`, `$QI_HOME/resources/skills`,
+and activated entries from `~/.agents/skills`; project `.qi/skills` wins on a name collision. Workspace Agent Skills
+are directly usable read-only. Global Agent Skills appear from `.skill-lock.json` as inactive candidates and become
+usable when selected directly in the `/skills` panel (`/skills activate <name>` remains available for scripts); activation state is stored under `$QI_HOME/resources`. `~/.codex/skills` and
+`~/.claude/skills` are not scanned by default; use an explicit local path or configured compatibility root. Only independently omittable metadata entries enter initial model context, plus a short required
 progressive-discovery hint in the advertised `skill` Tool schema and an optional context index. The `skill` tool
 progressively loads a selected
 `SKILL.md` or named resource. `/skills` → **Install skill** picks user vs Workspace scope, then a form for a
-compatible Skill name or local path (for example from `~/.codex/skills/.system`); Qi does not search or
-download from the network. With write authority, the model can only install to the Workspace and the Action
+compatible Skill name or local path (for example from `~/.codex/skills/.system`); Qi does not fetch because a
+model mentioned a remote Skill. Human `qi skills install` additionally supports exact Git/GitHub commits or
+SHA-256-pinned HTTPS archives. With write authority, the model can only install to the Workspace and the Action
 remains capability-checked and Effect-Journaled.
+
+`/skill:<name> <task>` freezes Skill scope, tree digest, and instruction digest into the Run. Typing `/skill:` in
+the editor offers active Skill names with prefix filtering; the selected name must be followed by a task. The body
+is user-role untrusted workflow context. Resources stay progressive; binary data becomes an Artifact.
+`skill.run-script` is Agent/Execute-only, restricted to `scripts/**`, fixed interpreter profiles, argv arrays,
+Workspace cwd, and bounded timeout/output. Qi never runs dependency installers or lifecycle scripts.
 
 The same dedicated `skill` Tool can export an existing Workspace Skill to a new ordinary draft directory and
 publish a digest-guarded update. Ordinary file tools still cannot access `.qi`. The read-only
 `qi_session_inspect` Tool lets Ask, Plan, and Agent inspect bounded Session projections from the current project
 EventStore (including Subagent `operation=delegations` / `resultRef` pointers for `artifact_get`); this
 capability adds no TUI command, panel, or query API.
+
+MCP declarations live at `<workspace>/.qi/mcp/<server>.toml` and
+`$QI_HOME/resources/mcp/<server>.toml` (Workspace shadows user) and remain inert until `/mcp refresh`. A human
+binds an exact Tool/Resource/Template/Prompt/instructions fingerprint to an effect and resource patterns.
+Ask/Plan may inspect only frozen local `mcp_catalog`; live `mcp` is Agent-only. stdio requires Execute plus the
+business capability; HTTP/SSE requires Network plus it. OAuth state, PKCE verifier, discovery, client registration,
+and tokens stay sealed. Drift blocks new calls. Remote text is labeled untrusted and binary output is an Artifact.
+
+Credential-free JSON management is available as `qi skills list|activate|deactivate|install ... --json` and
+`qi mcp status|refresh|bind|unbind|logout ... --json`. Secrets are never accepted as command-line options.
 
 See [the interaction contract](docs/interaction-model.md) for projection and rendering boundaries.
 The cross-package timeline and attention decision is

@@ -67,7 +67,12 @@ const expectedRuntimeExports = {
     "ToolInputError", "ToolOutputError", "ToolRegistry", "defineTool",
   ],
   "@civaapple/qi-agent/effects": ["effectIdempotencyKey", "effectIntentHash"],
-  "@civaapple/qi-node/mcp": ["McpBridge"],
+  "@civaapple/qi-node/mcp": [
+    "McpBindingDriftError", "McpBridge", "McpConnectionManager", "McpDeclarationCatalog",
+    "McpRemoteToolError", "McpReviewStore", "McpSchemaError", "SealedMcpOAuthProvider",
+    "SealedMcpOAuthProviderFactory", "bindingKey", "candidateFromRaw", "createMcpCatalogTool",
+    "createMcpLiveTool", "fingerprintMcpValue", "mcpTargetResource", "parseDeclaration",
+  ],
   "@civaapple/qi-agent/memory": [
     "ContinuityController", "MemoryController", "MemoryIndexPendingError",
     "memoryRelevanceScore", "memoryScopeKey",
@@ -97,8 +102,12 @@ const expectedRuntimeExports = {
     "validateWorkspaceQiDirectory",
   ],
   "@civaapple/qi-node/skills": [
-    "SkillCatalog", "SkillLoader", "SkillStaleError", "SkillUpdateIndeterminateError",
-    "loadAgentDefinition", "parseFrontmatter", "requireString",
+    "DEFAULT_SKILL_MAX_BYTES", "DEFAULT_SKILL_MAX_DEPTH", "DEFAULT_SKILL_MAX_FILES",
+    "DEFAULT_SKILL_MAX_FILE_BYTES", "SKILL_NAME_PATTERN", "SkillCatalog", "SkillLoader",
+    "SkillStaleError", "SkillUpdateIndeterminateError", "acquireImmutableSkillSource",
+    "agentSkillLockHash", "assertSkillDirectoryName", "evaluateSkillReadiness", "loadAgentDefinition",
+    "parseFrontmatter", "parseSkillMetadata", "readAgentSkillActivations", "readAgentSkillLock",
+    "requireString", "runSkillScript", "writeAgentSkillActivations",
   ],
   "@civaapple/qi-node/stream": ["EventStreamService", "SessionEventHub", "encodeSseEvent", "sseStream"],
   "@civaapple/qi-node/tools": [

@@ -2,12 +2,14 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   SkillStaleError,
   SkillUpdateIndeterminateError,
+  evaluateSkillReadiness,
+  runSkillScript,
   type SkillCatalog,
 } from "@civaapple/qi-node/skills";
 import { ToolFailure, defineTool } from "@civaapple/qi-node/tools";
 import { Type, type Static } from "@sinclair/typebox";
 
-const SkillNameSchema = Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,63}$" });
+const SkillNameSchema = Type.String({ pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 64 });
 /** Single object schema so Chat Completions hosts that require parameters.type=object accept it. */
 const SkillToolInputSchema = Type.Object(
   {
@@ -15,6 +17,7 @@ const SkillToolInputSchema = Type.Object(
       Type.Literal("list"),
       Type.Literal("load"),
       Type.Literal("read-resource"),
+      Type.Literal("run-script"),
       Type.Literal("install-workspace"),
       Type.Literal("export-workspace-draft"),
       Type.Literal("update-workspace"),
@@ -23,6 +26,9 @@ const SkillToolInputSchema = Type.Object(
     path: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
     source: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
     expectedDigest: Type.Optional(Type.String({ pattern: "^sha256:[a-f0-9]{64}$" })),
+    args: Type.Optional(Type.Array(Type.String({ maxLength: 8_192 }), { maxItems: 100 })),
+    workdir: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
+    timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 120_000 })),
   },
   { additionalProperties: false },
 );
@@ -37,6 +43,7 @@ export function createTuiSkillTool(catalog: SkillCatalog, workspaceRoot: string)
     input: SkillToolInputSchema,
     output: Type.Unknown(),
     effect: (input: SkillToolInput) =>
+      input.operation === "run-script" ? "execute" :
       ["install-workspace", "export-workspace-draft", "update-workspace"].includes(input.operation)
         ? "write"
         : "read",
@@ -45,6 +52,10 @@ export function createTuiSkillTool(catalog: SkillCatalog, workspaceRoot: string)
         case "list": return ["skill-catalog:local"];
         case "load": return [`skill:${input.name ?? "*"}`];
         case "read-resource": return [`skill:${input.name ?? "*"}/${input.path ?? "*"}`];
+        case "run-script": return [
+          `skill-script:${input.name ?? "*"}/${input.path ?? "*"}`,
+          `host-workspace:${input.workdir ?? "."}`,
+        ];
         case "install-workspace": return [
           input.source && isBareSkillName(input.source)
             ? `skill-source:local:${input.source}`
@@ -61,16 +72,17 @@ export function createTuiSkillTool(catalog: SkillCatalog, workspaceRoot: string)
         ];
       }
     },
-    execute: async (input: SkillToolInput) => {
+    execute: async (input: SkillToolInput, context) => {
       switch (input.operation) {
         case "list":
           return {
-            skills: (await catalog.discover()).map(({ name, version, description, scope, shadowedUserRoot }) => ({
-              name,
-              version,
-              description,
-              scope,
-              ...(shadowedUserRoot ? { shadowsUserSkill: true } : {}),
+            skills: await Promise.all((await catalog.discover()).map(async ({ name, version, description, scope, shadowedUserRoot }) => {
+              const loaded = await catalog.load(name);
+              return {
+                name, version, description, scope,
+                readiness: await evaluateSkillReadiness(loaded),
+                ...(shadowedUserRoot ? { shadowsUserSkill: true } : {}),
+              };
             })),
           };
         case "load": {
@@ -83,19 +95,49 @@ export function createTuiSkillTool(catalog: SkillCatalog, workspaceRoot: string)
             scope: skill.scope,
             instructions: skill.instructions,
             resources: skill.resources,
+            resourceDetails: skill.resourceDetails,
+            license: skill.license,
+            compatibility: skill.compatibility,
+            metadata: skill.metadata,
+            allowedTools: skill.allowedTools,
+            warnings: skill.warnings,
+            readiness: await evaluateSkillReadiness(skill),
           };
         }
         case "read-resource": {
           const name = requireSkillField(input.name, "name", "read-resource");
           const path = requireSkillField(input.path, "path", "read-resource");
           const content = await catalog.readResource(name, path);
-          let text;
+          let text: string | undefined;
           try {
             text = new TextDecoder("utf-8", { fatal: true }).decode(content);
           } catch {
-            throw new ToolFailure("SKILL_RESOURCE_BINARY", `Skill resource ${path} is not UTF-8 text`);
+            const stored = await context.artifactStore.put(content, "application/octet-stream");
+            return { name, path, binary: true, artifactRef: stored.ref, size: stored.size, sha256: stored.sha256 };
           }
           return { name, path, text };
+        }
+        case "run-script": {
+          const name = requireSkillField(input.name, "name", "run-script");
+          const path = requireSkillField(input.path, "path", "run-script");
+          const skill = await catalog.load(name);
+          const result = await runSkillScript({
+            skillRoot: skill.root,
+            workspaceRoot: root,
+            request: {
+              path,
+              ...(input.args === undefined ? {} : { args: input.args }),
+              ...(input.workdir === undefined ? {} : { workdir: input.workdir }),
+              ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+            },
+            ...(context.signal === undefined ? {} : { signal: context.signal }),
+            ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
+          });
+          const { stdoutFull, stderrFull, ...bounded } = result;
+          if (!result.truncated) return { name, path, ...bounded };
+          const complete = Buffer.from(JSON.stringify({ stdout: stdoutFull ?? result.stdout, stderr: stderrFull ?? result.stderr }), "utf8");
+          const stored = await context.artifactStore.put(complete, "application/json");
+          return { name, path, ...bounded, outputRef: stored.ref };
         }
         case "install-workspace": {
           const name = requireSkillField(input.name, "name", "install-workspace");

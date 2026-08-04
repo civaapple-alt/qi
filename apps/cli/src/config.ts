@@ -35,6 +35,8 @@ export interface QiCapabilityConfig {
   readonly execute?: boolean;
   readonly background?: boolean;
   readonly delegate?: boolean;
+  readonly publish?: boolean;
+  readonly spend?: boolean;
 }
 
 export interface QiShellConfig {
@@ -142,6 +144,8 @@ export interface CapabilityOverrides {
   readonly execute?: boolean;
   readonly background?: boolean;
   readonly delegate?: boolean;
+  readonly publish?: boolean;
+  readonly spend?: boolean;
 }
 
 export interface ResolvedCapabilities {
@@ -151,6 +155,8 @@ export interface ResolvedCapabilities {
   readonly allowExecute: boolean;
   readonly allowBackground: boolean;
   readonly allowDelegate: boolean;
+  readonly allowPublish: boolean;
+  readonly allowSpend: boolean;
 }
 
 export function defaultUserConfigPath(
@@ -745,6 +751,8 @@ export function resolveCapabilities(
       allowExecute: false,
       allowBackground: false,
       allowDelegate: false,
+      allowPublish: false,
+      allowSpend: false,
     };
   }
   return {
@@ -754,6 +762,8 @@ export function resolveCapabilities(
     allowExecute: overrides.execute ?? configured?.execute ?? false,
     allowBackground: overrides.background ?? configured?.background ?? false,
     allowDelegate: overrides.delegate ?? configured?.delegate ?? false,
+    allowPublish: overrides.publish ?? configured?.publish ?? false,
+    allowSpend: overrides.spend ?? configured?.spend ?? false,
   };
 }
 
@@ -829,7 +839,7 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
   let capabilities: QiCapabilityConfig | undefined;
   if (root.capabilities !== undefined) {
     const table = requireTable(root.capabilities, `${path}: capabilities`);
-    assertOnlyKeys(table, ["write", "verify", "network", "execute", "background", "delegate"], `${path}: capabilities`);
+    assertOnlyKeys(table, ["write", "verify", "network", "execute", "background", "delegate", "publish", "spend"], `${path}: capabilities`);
     capabilities = {
       ...booleanField(table, "write", path),
       ...booleanField(table, "verify", path),
@@ -837,6 +847,8 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
       ...booleanField(table, "execute", path),
       ...booleanField(table, "background", path),
       ...booleanField(table, "delegate", path),
+      ...booleanField(table, "publish", path),
+      ...booleanField(table, "spend", path),
     };
   }
   let shell: QiShellConfig | undefined;

@@ -26,6 +26,7 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
     readonly workspaceRoot: string,
     readonly fdPath?: string,
     readonly preserveDraftCommands: ReadonlySet<string> = new Set(),
+    readonly skillNames: readonly string[] = [],
   ) {
     this.#inner = new CombinedAutocompleteProvider([...commands], workspaceRoot);
   }
@@ -37,6 +38,19 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
     options: { signal: AbortSignal; force?: boolean },
   ): Promise<AutocompleteSuggestions | null> {
     const before = (lines[cursorLine] ?? "").slice(0, cursorCol);
+    const skillPrefix = activeSkillPrefix(before);
+    if (skillPrefix !== undefined) {
+      const needle = skillPrefix.slice("/skill:".length).toLowerCase();
+      const items = this.skillNames
+        .filter((name) => name.toLowerCase().startsWith(needle))
+        .slice(0, MAX_SUGGESTIONS)
+        .map((name) => ({
+          value: `/skill:${name}`,
+          label: `/skill:${name}`,
+          description: "Active Skill",
+        }));
+      return items.length === 0 ? null : { prefix: skillPrefix, items };
+    }
     const prefix = atPrefix(before);
     if (prefix !== undefined) {
       const query = prefix.slice(1).replace(/^"|"$/g, "");
@@ -74,6 +88,11 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
         cursorLine: 0,
         cursorCol: item.value.length + 1,
       };
+    }
+    if (prefix.startsWith("/skill:")) {
+      const next = [...lines];
+      next[cursorLine] = `${beforePrefix}${item.value}${after}`;
+      return { lines: next, cursorLine, cursorCol: beforePrefix.length + item.value.length };
     }
     if (prefix.startsWith("@")) {
       const next = [...lines];
@@ -121,6 +140,11 @@ export async function validateWorkspaceMentions(input: string, workspaceRoot: st
 
 function atPrefix(text: string): string | undefined {
   const match = /(?:^|\s)(@(?:"[^"]*|[^\s]*))$/.exec(text);
+  return match?.[1];
+}
+
+function activeSkillPrefix(text: string): string | undefined {
+  const match = /(?:^|\s)(\/skill:[a-z0-9-]*)$/i.exec(text);
   return match?.[1];
 }
 

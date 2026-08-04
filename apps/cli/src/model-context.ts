@@ -18,6 +18,8 @@ export interface ModelContextCapabilities {
   readonly execute: boolean;
   readonly background: boolean;
   readonly delegate: boolean;
+  readonly publish?: boolean;
+  readonly spend?: boolean;
 }
 
 export interface ModelContextMount {

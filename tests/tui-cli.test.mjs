@@ -99,10 +99,24 @@ test("CLI defaults data to QI_HOME/projects/<project-id> and honors --safe", asy
     assert.equal(parsed.options.allowNetwork, false);
     assert.equal(parsed.options.allowBackground, false);
     assert.equal(parsed.options.allowDelegate, false);
+    assert.equal(parsed.options.allowPublish, false);
+    assert.equal(parsed.options.allowSpend, false);
     assert.equal(parsed.options.maxSteps, 32);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("CLI exposes separate publish and one-use spend policy flags", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-cli-publish-spend-"));
+  try {
+    const workspace = join(root, "workspace"); await mkdir(workspace);
+    const parsed = await parseTuiCliArguments(["--workspace", workspace, "--no-config", "--allow-publish", "--allow-spend"], { cwd: root, environment: { QI_HOME: join(root, "home") } });
+    assert.equal(parsed.kind, "run");
+    assert.equal(parsed.options.allowPublish, true);
+    assert.equal(parsed.options.allowSpend, true);
+    await assert.rejects(() => parseTuiCliArguments(["--workspace", workspace, "--no-config", "--allow-spend", "--no-spend"], { cwd: root }), /cannot be used together/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("CLI max_steps precedence is flag over project over user over default and enforces 8..1000", async () => {

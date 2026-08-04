@@ -53,6 +53,8 @@ export interface TuiCliOptions {
   allowNetwork: boolean;
   allowBackground: boolean;
   allowDelegate: boolean;
+  allowPublish: boolean;
+  allowSpend: boolean;
   memoryEnabled: boolean;
   memoryAutoAcceptProject: boolean;
   image: import("./config.js").QiImageConfig;
@@ -92,16 +94,18 @@ const HELP_TEXT =
   "qi install|update SOURCE [--scope user|project] [--workspace PATH]\n" +
   "qi remove PACKAGE_ID [--scope user|project] [--workspace PATH]\n" +
   "qi list [--scope user|project] [--workspace PATH]\n" +
+  "qi skills list|activate|deactivate|install SOURCE [--scope user|workspace] [--commit SHA --subdir PATH|--sha256 DIGEST] [--json]\n" +
+  "qi mcp status|refresh|bind|unbind|logout [args] [--workspace PATH] [--json]\n" +
   "  WORKSPACE defaults to the current directory (same as `qi --workspace .`).\n" +
   "  Options: [--workspace PATH] [--data PATH] [--provider ID] [--model ID] [--effort LEVEL] [--base-url URL]\n" +
   "           [--session ID] [--max-steps 8..1000] [--config PATH|--no-config] [--add-dir PATH]…\n" +
   "           [--allow-write|--no-write] [--allow-verify|--no-verify] [--allow-network|--no-network]\n" +
   "           [--allow-execute|--no-execute] [--allow-background|--no-background]\n" +
-  "           [--allow-delegate|--no-delegate] [--safe]\n";
+  "           [--allow-delegate|--no-delegate] [--allow-publish|--no-publish] [--allow-spend|--no-spend] [--safe]\n";
 
 const BOOLEAN_FLAGS = [
-  "--allow-write", "--allow-verify", "--allow-network", "--allow-execute", "--allow-background", "--allow-delegate",
-  "--no-write", "--no-verify", "--no-network", "--no-execute", "--no-background", "--no-delegate", "--safe", "--no-config",
+  "--allow-write", "--allow-verify", "--allow-network", "--allow-execute", "--allow-background", "--allow-delegate", "--allow-publish", "--allow-spend",
+  "--no-write", "--no-verify", "--no-network", "--no-execute", "--no-background", "--no-delegate", "--no-publish", "--no-spend", "--safe", "--no-config",
 ] as const;
 
 const VALUE_FLAGS = [
@@ -175,6 +179,8 @@ export async function parseTuiCliArguments(
     ...capabilityOverride(flags, "execute"),
     ...capabilityOverride(flags, "background"),
     ...capabilityOverride(flags, "delegate"),
+    ...capabilityOverride(flags, "publish"),
+    ...capabilityOverride(flags, "spend"),
   };
   const configuredPath = values.get("--config") ?? defaultUserConfigPath();
   if (positionalWorkspace !== undefined && values.has("--workspace")) {
@@ -298,6 +304,8 @@ export async function refreshLaunchCapabilities(
   allowExecute: boolean;
   allowBackground: boolean;
   allowDelegate: boolean;
+  allowPublish: boolean;
+  allowSpend: boolean;
   maxSteps: number;
   maxActionsPerStep: number;
   outputReserveTokensPreferred?: number;
@@ -371,7 +379,7 @@ function buildLaunchMounts(
 
 function capabilityOverride(
   flags: ReadonlySet<string>,
-  name: "write" | "verify" | "network" | "execute" | "background" | "delegate",
+  name: "write" | "verify" | "network" | "execute" | "background" | "delegate" | "publish" | "spend",
 ): Partial<CapabilityOverrides> {
   const positive = `--allow-${name}`;
   const negative = `--no-${name}`;

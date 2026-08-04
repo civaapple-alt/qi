@@ -80,6 +80,8 @@ auto_accept_project = false
       allowExecute: false,
       allowBackground: true,
       allowDelegate: false,
+      allowPublish: false,
+      allowSpend: false,
     });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -495,6 +497,8 @@ test("capability overrides can narrow config or enter safe mode", () => {
     allowExecute: false,
     allowBackground: true,
     allowDelegate: false,
+    allowPublish: false,
+    allowSpend: false,
   });
   assert.deepEqual(resolveCapabilities(configured, { safe: true, write: true }), {
     allowWrite: false,
@@ -503,6 +507,8 @@ test("capability overrides can narrow config or enter safe mode", () => {
     allowExecute: false,
     allowBackground: false,
     allowDelegate: false,
+    allowPublish: false,
+    allowSpend: false,
   });
 });
 

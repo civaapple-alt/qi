@@ -75,6 +75,7 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
     panel: "plan",
   },
   { name: "skills", descriptionKey: "cmd.skills", category: "inspect", visibility: "primary", panel: "skills" },
+  { name: "mcp", descriptionKey: "cmd.mcp", argumentHint: "[status|refresh <server>|bind <server> <kind> <name> <effect>|unbind <server> <kind> <name>]", category: "manage", visibility: "primary" },
   { name: "tasks", descriptionKey: "cmd.tasks", category: "inspect", visibility: "primary", panel: "tasks" },
   { name: "jobs", descriptionKey: "cmd.jobs", argumentHint: "[stop <N|ID>]", category: "inspect", visibility: "primary", panel: "jobs" },
   { name: "mounts", descriptionKey: "cmd.mounts", argumentHint: "[add <path>|unmount <id>]", category: "inspect", visibility: "primary" },

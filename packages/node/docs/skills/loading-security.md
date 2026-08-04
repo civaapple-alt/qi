@@ -22,18 +22,26 @@ checks.
 Qi discovers two local roots:
 
 1. `<workspace>/.qi/skills`
-2. `~/.qi/skills`
+2. `$QI_HOME/resources/skills`
 
 The active catalog is merged by declared Skill name. A Workspace Skill shadows the same-named user Skill so a
 repository can pin task-specific behavior without modifying the user's reusable copy. Discovery exposes only
 name, optional version (`unversioned` when absent), description, scope, and root identity.
 
+Qi discovers `<workspace>/.agents/skills` as a read-only active root. Global `~/.agents/skills` is read only through
+the entries in `.skill-lock.json`; a human activation record under `$QI_HOME/resources` is required before its
+Skill can be loaded. The activation record is bound to the lock entry hash, so lock drift removes activation.
+Project `.qi/skills` takes precedence over project `.agents/skills`, which takes precedence over user
+`$QI_HOME/resources/skills`, which takes precedence over an activated global `~/.agents/skills`. `~/.codex/skills`
+and `~/.claude/skills` are not scanned by default; an explicit path or configured compatibility root is required.
+
 ## Installation boundary
 
-Installation is local-only. A source is either an explicit directory or a bare name resolved from configured
-compatibility roots such as `~/.codex/skills/.system`. Qi validates the source, copies `SKILL.md`, recognized
-resource directories, Agent metadata, and root license/notice files into a hidden sibling staging directory, then
-renames it atomically. It rejects symlinks, oversize files/packages, destination overwrite, and cache artifacts.
+Model-operated installation is local-only. A human may additionally select an immutable Git/GitHub commit or a
+digest-pinned HTTPS tar archive. Qi validates the complete ordinary-file tree, copies it into a hidden sibling
+staging directory, re-loads metadata, then renames atomically. Links/junctions, special files, path escape, case
+collision, Windows-reserved paths, VCS/package/cache payloads, oversized trees, overwrite, redirect, and floating
+remote identities fail closed. Archive download and expanded-entry sizes are both bounded.
 
 A user-issued TUI command may install to user or Workspace scope. A model-issued installation is write-authorized,
 Effect-Journaled, and restricted to Workspace scope. The model may publish a draft from an ordinary Workspace
@@ -49,6 +57,22 @@ Publication uses staging, backup, and a recovery marker beside the target under 
 restores the backup. If restoration or publication cannot be confirmed, the Action is `indeterminate`, the
 recovery marker is retained, and automatic retry is forbidden. This dedicated, authorized, Effect-Journaled path
 is the only model-facing mechanism that may modify `.qi/skills`.
+
+Human immutable installs record commit/SHA-256, subdirectory, license, and a canonical tree digest. Remote content
+is never fetched because a model mentioned a Skill. `allowed-tools` and Skill-shipped MCP declarations are
+advisory data; neither starts a process, connects a server, imports credentials, nor creates a lease.
+
+`/skill:<name> <task>` activates one complete `SKILL.md` for an ordinary Run and records name, scope, tree digest,
+and instruction digest in ContextBlock provenance. Other resources remain individually addressable; binary bytes
+become Artifacts instead of being decoded as UTF-8.
+
+The TUI autocompletes active names after `/skill:` and requires the operator to provide a task; selecting a name
+does not execute it by itself. If the Workspace root is the user's home directory, its `.agents/skills` path is
+treated as the global Agent root and still requires lock-backed human activation.
+
+Scripts require the separate `skill.run-script` execute path. Only `scripts/**`, argv arrays, Workspace cwd, a
+bounded timeout, and startup-frozen interpreter profiles are accepted. Host execution remains a full local-code
+trust boundary and settles through the ordinary Action/Effect Journal path; Ask and Plan modes deny it.
 
 ## Declarative Agents
 
