@@ -34,6 +34,7 @@ test("Web workbench serves real Session projections, history and committed live 
     assert.match(application, /Git workspace change/);
     assert.match(application, /run\.displayTitle/);
     assert.match(application, /function omittedSummary/);
+    assert.match(application, /function skillLabel/);
     assert.match(application, /artifact-store write/);
     assert.match(application, /Todo status is navigation only/);
     assert.doesNotMatch(application, /narrative\.runs\.slice\(\)\.reverse\(\)/);
@@ -104,7 +105,7 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
   writer.append("context.compiled", {
     runId,
     stepId,
-    includedBlockIds: ["user-task"],
+    includedBlockIds: ["user-task", "skill:active:workspace:review-code:0123456789abcdef"],
     omittedBlockIds: ["history:omitted:run_prior"],
     estimatedTokens: 320,
     budgetTokens: 8_000,
@@ -154,6 +155,7 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
   const run = narrative.runs[0];
   assert.equal(run.input, "Fix the total calculation");
   assert.equal(run.displayTitle, "Fix the total calculation");
+  assert.deepEqual(run.skills, [{ name: "review-code", scope: "workspace" }]);
   assert.equal(run.displayStatus, "responded");
   assert.ok(run.startedAt);
   assert.match(run.startedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -231,6 +233,65 @@ test("Web narrative shows full git request on INVALID_GIT_ARGUMENT failures", ()
     "git status · ref HEAD · ref is only valid for rev-parse and show",
   );
   assert.equal(action.result?.details?.command, "git status · ref HEAD");
+});
+
+test("Web observes automatic Skill Tool calls without exposing Skill instructions", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = "ses_web_skill_call";
+  const runId = "run_web_skill_call";
+  const stepId = "stp_web_skill_call";
+  const actionId = "act_web_skill_call";
+  const actor = { kind: "runtime", id: "test" };
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { title: "Skill call" }, actor);
+  writer.append("run.triggered", { runId, trigger: "user", input: "Use the relevant Skill" }, actor);
+  writer.append("run.started", { runId }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId,
+    toolName: "skill",
+    input: { operation: "load", name: "review-code" },
+    resources: ["skill:review-code"],
+    effect: "read",
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+  writer.append("authority.requested", { runId, stepId, actionId }, actor);
+  writer.append("authority.granted", { runId, stepId, actionId, leaseId: "lea_web_skill" }, actor);
+  writer.append("action.started", { runId, stepId, actionId }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId,
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        name: "review-code",
+        scope: "user",
+        version: "1.0.0",
+        instructions: "do not expose this body",
+      }),
+    }],
+  }, actor);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, actor);
+
+  const view = store.load(sessionId);
+  assert.ok(view);
+  const narrative = projectWebSession(view, store.read(sessionId).events);
+  const run = narrative.runs[0];
+  assert.deepEqual(run.skills, []);
+  assert.deepEqual(run.skillCalls, [{
+    name: "review-code",
+    scope: "user",
+    operation: "load",
+    status: "completed",
+    errorCode: undefined,
+  }]);
+  assert.equal(run.summary.skillStatus, "succeeded");
+  const action = run.steps[0].actions[0];
+  assert.equal(action.result, undefined);
+  assert.doesNotMatch(JSON.stringify(narrative), /do not expose this body/);
 });
 
 test("Web narrative shortens Accepted Plan titles and projects Thinking, Work Plan, and tool cards", () => {

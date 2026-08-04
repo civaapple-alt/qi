@@ -132,7 +132,7 @@ effective effort/context defaults, and persists edits without placing the API ke
 `max_output_tokens`.
 
 **Qianwen AI Token Plan** uses `provider = "qianwenai"`, `QIANWENAI_API_KEY`, and
-`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` (default model `qwen3.8-max-preview`).
+`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` (default model `qwen3.8-max`).
 Qwen models use Responses; `glm-5-2` / `deepseek-v4-pro` use Chat Completions. Thinking accepts
 `reasoning_effort = "low" | "medium" | "high" | "max"`. See
 [`packages/ai/docs/model/provider-adapters.md`](packages/ai/docs/model/provider-adapters.md).

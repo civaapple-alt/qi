@@ -174,6 +174,18 @@ test("Workspace .agents Skills are active and global .agents Skills require acti
     assert.equal((await catalog.discover()).some((skill) => skill.name === "global-review"), true);
     assert.match((await catalog.load("global-review")).instructions, /Global instructions/);
     assert.match((await catalog.load("project-review")).instructions, /Project instructions/);
+
+    // Global removal happens outside Qi. A later discovery/Run refresh must revoke the stale
+    // activation record without affecting the project-local Agent Skill.
+    await writeFile(join(userHome, ".agents", ".skill-lock.json"), JSON.stringify({ version: 3, skills: {} }));
+    await rm(globalSkill, { recursive: true, force: true });
+    assert.equal((await catalog.discover()).some((skill) => skill.name === "global-review"), false);
+    assert.equal((await catalog.discoverAgentCandidates()).some((skill) => skill.name === "global-review"), false);
+    assert.deepEqual(JSON.parse(await readFile(join(userHome, ".qi", "resources", "skills.activation.json"))), {
+      version: 1,
+      active: {},
+    });
+    await assert.rejects(catalog.load("global-review"), /not installed/);
   });
 });
 

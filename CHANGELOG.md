@@ -32,6 +32,18 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Fixed
 
+- Skill management now keeps `/skills` to two explicit actions—global activation management and installation—with a
+  permissions-style Space toggle plus Enter apply flow; individual Skill lists are confined to activation management.
+- Global Agent Skill activations are now reconciled during startup and Run refreshes, so an external
+  `npx skills remove <name> -g` removes the stale Qi activation record and prevents later Runs from loading it.
+- Skill-aware TUI/Web projections now observe model-initiated `skill` Tool calls, hide Skill instruction bodies,
+  distinguish failed Skill execution from a fallback Run response, and suggest `.env.example`/`.env.template`
+  when a `.env` write is blocked.
+- TUI and Web Run views now identify explicitly activated Skills while preserving the original task input; Skill
+  instruction bodies remain outside the bounded UI projections.
+- Qianwen AI Token Plan now catalogs the formal `qwen3.8-max` model and replays Qwen Responses reasoning
+  items with their required `id` and `summary` fields during tool continuations, preventing the provider's
+  `summary must be a list for reasoning` 400 response. The replay metadata remains process-local.
 - Depth-1 Subagent wall-time limits now keep their abort timer alive until child settlement, avoiding
   unsettled Runs on Node 22 when the model stream has no other active handles.
 - TUI CodeAct capability discovery is settled before the first Run builds its tool catalog, so a slow

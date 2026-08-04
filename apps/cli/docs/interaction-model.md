@@ -101,7 +101,8 @@ Provider login details:
   Default model `glm-latest`. Thinking models expose `low`/`medium`/`high` effort; models such as
   `minimax-m2.7` omit effort. `/model` Max output tokens maps to `max_output_tokens`.
 - **Qianwen AI Token Plan** (`qianwenai`): Responses at the Token Plan OpenAI-compatible host with
-  `QIANWENAI_API_KEY`. Default model `qwen3.8-max-preview`. Thinking via `reasoning.effort`
+  `QIANWENAI_API_KEY`. Default model `qwen3.8-max`. Thinking via `reasoning.effort`; tool continuations
+  replay Qwen's required reasoning item metadata in adapter-local state.
   (`low`/`medium`/`high`/`max`). Do not mix with DashScope pay-as-you-go Base URL/keys.
 - Sealed provider accounts are marked **configured** in Providers. Switch without re-entering the key via
   **Switch to this provider**, or `/login use <provider>` (e.g. `/login use deepseek` / `qianwenai`). Model/base
@@ -305,10 +306,15 @@ Authorized paths use `mount:<id>/…`; write/edit/move/remove remain confined to
 `/skills` projects the current merged catalog from the four active roots: project `.qi/skills`, project
 `.agents/skills`, user `$QI_HOME/resources/skills`, and activated global `~/.agents/skills`. The Qi roots take
 precedence over the corresponding Agent roots. Workspace Agent Skills are directly usable read-only; global Agent
-Skills are shown from `.skill-lock.json` as inactive until selected in the `/skills` panel (`/skills activate <name>`
+Skills are shown from `.skill-lock.json` as inactive until selected in `/skills` → **Enable / disable global Skills**;
+that panel uses the same Space-to-toggle / Enter-to-apply interaction as `/permissions` (`/skills activate|deactivate <name>`
 remains available for scripts), with state stored under
 `$QI_HOME/resources`. `~/.codex/skills` and `~/.claude/skills` are not scanned by default; explicit local paths remain available. Catalog metadata may enter the Run context; full
 instructions and resources enter only after a `skill` Action requests them.
+
+The `/skills` hub intentionally contains only activation management and installation. Individual Skill names are shown
+only inside activation management; this panel does not implicitly start a Run. Use an enabled Skill explicitly with
+`/skill:<name> <task>`. Workspace/user Qi Skills are always active and are not toggleable.
 
 `/skills` → **Install skill** opens a scope list (user vs Workspace) then a form for a Skill name or local path.
 Installation is disabled while a Run or another TUI management action is active. A model does not receive

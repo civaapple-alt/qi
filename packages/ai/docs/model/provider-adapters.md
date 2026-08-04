@@ -160,8 +160,9 @@ not be mixed with pay-as-you-go DashScope (`dashscope.aliyuncs.com` + `sk-ws-…
 [个人版快速开始](https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-quickstart) and
 [Responses API](https://platform.qianwenai.com/docs/api-reference/chat/openai-responses).
 
-Default model is `qwen3.8-max-preview`. `requestMetadata` is off. Qwen catalog models use Responses with
-vendor `reasoning.effort`. Third-party plan models (`glm-5-2`, `deepseek-v4-pro`) are not in the Responses
+Default model is `qwen3.8-max`. `requestMetadata` is off. Qwen catalog models use Responses with
+vendor `reasoning.effort`; tool continuations replay the provider reasoning item (`id` plus `summary`)
+from adapter-local state. Third-party plan models (`glm-5-2`, `deepseek-v4-pro`) are not in the Responses
 model enum and use Chat Completions on the same host (`enable_thinking` + `reasoning_effort`). Note the
 wire id is `glm-5-2` (hyphen), not `glm-5.2`. Qi stays stateless (`store: false`, no `previous_response_id`,
 no session-cache header). Built-in Harness tools and multimodal generation endpoints remain out of the
@@ -169,6 +170,7 @@ portable Tool surface.
 
 | Model | Wire | Context | Modalities | Thinking |
 | --- | --- | ---: | --- | --- |
+| `qwen3.8-max` | Responses | 1,048,576 | text + image | `low` / `medium` / `high` / `max`, default `high` |
 | `qwen3.8-max-preview` | Responses | 1,048,576 | text + image | `low` / `medium` / `high` / `max`, default `high` |
 | `qwen3.7-max` | Responses | 1,048,576 | text | same |
 | `qwen3.7-plus` | Responses | 1,048,576 | text + image | same |

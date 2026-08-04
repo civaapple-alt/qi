@@ -23,7 +23,9 @@ source code. `version` is optional and projects as `unversioned` when absent.
 Qi directly enables Workspace `<workspace>/.agents/skills` as a read-only active Skill source. Global
 `~/.agents/skills` is listed from `.skill-lock.json` metadata at startup but requires explicit human activation;
 activation state is stored under `$QI_HOME/resources` and is bound to the lock entry hash. Activated global Skills
-then use the normal Skill Tool, while the source directory remains unchanged. Qi roots have higher precedence and
+then use the normal Skill Tool, while the source directory remains unchanged. Every catalog refresh reconciles this
+state with the external lock file, automatically removing activations whose lock entry was removed or changed. An
+already-running Run keeps its immutable loaded context; later Runs fail closed. Qi roots have higher precedence and
 can be used as optional content-addressed snapshots. `discoverCompatibility()` remains metadata-only for other configured roots such as
 `~/.codex/skills` and `~/.claude/skills`, which are not scanned by default and require an explicit local path or
 configured compatibility root before inspection or installation.

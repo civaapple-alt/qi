@@ -75,6 +75,8 @@ content-exposing tools (`read`, content `search`, `edit`, `write`) fail closed w
 `SENSITIVE_PATH_GRANT_REQUIRED` until the operator grants that Workspace-relative path. Grants are project
 durable and Session-audited; authorized bodies round-trip as raw text for precise `edit`. See
 [ADR 0001](../../../design/decisions.md#adr-0001-gate-sensitive-paths-before-content-reaches-the-model).
+For `.env`, the failure includes a safe recovery hint to create `.env.example` or `.env.template` when only a
+shareable configuration template is needed; those example files are not classified as sensitive by default.
 
 After `EDIT_TARGET_NOT_FOUND` or `EDIT_TARGETS_OVERLAP`, reread the file and retry `edit` with current unique
 fragments (merge overlapping intent into one hunk). A generally authorized shell process can still change

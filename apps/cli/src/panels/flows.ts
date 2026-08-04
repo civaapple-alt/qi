@@ -132,7 +132,7 @@ export interface PanelFlowContext {
   readonly openInspect: (panel: "overview" | "config" | "context" | "runs" | "steps" | "actions" | "agents" | "skills" | "jobs" | "tasks" | "providers", title: string) => void;
   readonly discoveredSkills: () => readonly PresentedSkill[];
   readonly skillCandidates: () => readonly PresentedSkillCandidate[];
-  readonly activateAgentSkill: (name: string) => void;
+  readonly saveAgentSkillActivation: (names: readonly string[]) => void;
   readonly openHistoryList: (kind: "runs" | "steps" | "actions" | "agents") => void;
   readonly addMount: (path: string) => void;
   readonly removeMount: (mountId: string) => void;
@@ -1226,54 +1226,71 @@ export function openSkillsHubPanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   const active = ctx.discoveredSkills();
   const candidates = ctx.skillCandidates();
-  const items: PanelItem[] = [
-    ...active.map((skill) => ({
-      id: `active:${skill.name}`,
-      label: `✓ ${skill.name}`,
-      description: `${skill.scope}${skill.origin === "agent" ? " · .agents" : ""} · active · ${skill.version}`,
-      current: true,
-    })),
-    ...candidates.map((skill) => ({
-      id: `candidate:${skill.name}`,
-      label: `○ ${skill.name}`,
-      description: skill.source === "global-agent"
-        ? `global .agents · inactive · Enter to activate · ${skill.version}`
-        : `external · not active · install explicitly · ${skill.version}`,
-    })),
-    { id: "install", label: t(locale, "skills.install"), description: t(locale, "skills.install.desc") },
-  ];
-  if (active.length === 0 && candidates.length === 0) {
-    items.unshift({
-      id: "empty",
-      label: "No installed Skills were discovered.",
-      description: "Install a Skill or add one to this Workspace.",
-      disabled: true,
-    });
-  }
+  const activeGlobal = active.filter((skill) => skill.scope === "user" && skill.origin === "agent");
+  const globalCandidates = candidates.filter((skill) => skill.source === "global-agent");
   ctx.panels.push(new ListPanel({
     title: t(locale, "skills.title"),
-    hints: active.length > 0 || candidates.length > 0
-      ? `${t(locale, "skills.hints")} · Enter on ○ to activate`
-      : t(locale, "skills.hints"),
+    hints: t(locale, "skills.hints"),
     maxVisible: maxVisible(ctx.terminalRows),
-    items,
+    items: [
+      {
+        id: "activation",
+        label: t(locale, "skills.activation"),
+        description: t(locale, "skills.activation.desc", {
+          enabled: String(activeGlobal.length),
+          available: String(globalCandidates.length),
+        }),
+      },
+      { id: "install", label: t(locale, "skills.install"), description: t(locale, "skills.install.desc") },
+    ],
     onClose: ctx.panels.dismiss,
     onSelect: (item) => {
-      if (item.id.startsWith("active:")) {
-        ctx.openInspect("skills", "/skills");
-        return;
-      }
-      if (item.id.startsWith("candidate:")) {
-        const candidate = candidates.find((skill) => item.id === `candidate:${skill.name}`);
-        if (candidate?.source === "global-agent") {
-          ctx.activateAgentSkill(candidate.name);
-        } else {
-          ctx.presenter.setNotice("This external candidate is not directly activatable; use Install skill.");
-          ctx.render();
-        }
+      if (item.id === "activation") {
+        openSkillActivationPanel(ctx);
         return;
       }
       openSkillInstallScopePanel(ctx);
+    },
+  }));
+}
+
+function openSkillActivationPanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const active = ctx.discoveredSkills();
+  const candidates = ctx.skillCandidates();
+  const enabled = active
+    .filter((skill) => skill.scope === "user" && skill.origin === "agent")
+    .map((skill) => skill.name);
+  const globalCandidates = candidates.filter((skill) => skill.source === "global-agent");
+  if (enabled.length === 0 && globalCandidates.length === 0) {
+    ctx.presenter.setNotice(t(locale, "skills.activation.empty"));
+    ctx.render();
+    return;
+  }
+  ctx.panels.push(new MultiSelectPanel({
+    title: t(locale, "skills.activation.title"),
+    hints: t(locale, "skills.activation.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    items: [
+      ...active
+        .filter((skill) => skill.scope === "user" && skill.origin === "agent")
+        .map((skill) => ({
+          id: skill.name,
+          label: skill.name,
+          description: `${t(locale, "skills.active")} · global .agents · ${skill.version}`,
+        })),
+      ...globalCandidates.map((skill) => ({
+        id: skill.name,
+        label: skill.name,
+        description: `${t(locale, "skills.inactive")} · global .agents · ${skill.version}`,
+      })),
+    ],
+    selectedIds: enabled,
+    currentIds: enabled,
+    onClose: ctx.panels.dismiss,
+    onApply: (selectedIds) => {
+      ctx.panels.closeAll();
+      ctx.saveAgentSkillActivation(selectedIds);
     },
   }));
 }

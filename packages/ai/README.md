@@ -29,9 +29,11 @@ Plan (`volcengine-agent-plan`) uses Responses at the Agent Plan base URL with `A
 `glm-latest`, and deep-thinking control via `thinking.type` plus `reasoning.effort` (`low`/`medium`/`high`).
 Qianwen AI Token Plan (`qianwenai`) uses
 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` with `QIANWENAI_API_KEY`, default
-`qwen3.8-max-preview` on Responses, and Chat Completions for `glm-5-2` / `deepseek-v4-pro`. Thinking uses
-`reasoning.effort` (Responses) or `enable_thinking` + `reasoning_effort` (Chat Completions). OpenAI Responses
-accepts images; DeepSeek rejects them. Custom OpenAI-compatible Chat Completions endpoints deny image input
+`qwen3.8-max` on Responses, and Chat Completions for `glm-5-2` / `deepseek-v4-pro`. Thinking uses
+`reasoning.effort` (Responses) or `enable_thinking` + `reasoning_effort` (Chat Completions). Qianwen Responses
+tool continuations replay the provider reasoning item (`id` + `summary`) from process-local adapter state;
+those fields never enter durable Session events. OpenAI Responses accepts images; DeepSeek rejects them.
+Custom OpenAI-compatible Chat Completions endpoints deny image input
 unless `imageInput` is explicitly enabled by the operator. Portable assistant messages may carry a `reasoning`
 part so thinking-mode tool turns can round-trip CoT. Chat Completions sends portable user text/images as a
 standard content array; image-bearing Tool results keep their Tool call/output message and add a following

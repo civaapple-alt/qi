@@ -30,7 +30,9 @@ name, optional version (`unversioned` when absent), description, scope, and root
 
 Qi discovers `<workspace>/.agents/skills` as a read-only active root. Global `~/.agents/skills` is read only through
 the entries in `.skill-lock.json`; a human activation record under `$QI_HOME/resources` is required before its
-Skill can be loaded. The activation record is bound to the lock entry hash, so lock drift removes activation.
+Skill can be loaded. The activation record is bound to the lock entry hash, so lock drift removes activation. Qi
+reconciles and deletes stale activation records during catalog refresh; an already-running Run keeps its immutable
+loaded context, while later Runs fail closed when the external Skill has been removed.
 Project `.qi/skills` takes precedence over project `.agents/skills`, which takes precedence over user
 `$QI_HOME/resources/skills`, which takes precedence over an activated global `~/.agents/skills`. `~/.codex/skills`
 and `~/.claude/skills` are not scanned by default; an explicit path or configured compatibility root is required.

@@ -146,6 +146,7 @@ test("TurnLoop denies unggranted .env content before the model sees the secret",
     });
     const events = store.read("ses_sensitive_deny").events;
     assert.ok(events.some((event) => event.type === "action.failed" && event.data.errorCode === "SENSITIVE_PATH_GRANT_REQUIRED"));
+    assert.match(JSON.stringify(events), /\.env\.example/);
     assert.doesNotMatch(JSON.stringify(events), new RegExp(secret));
   } finally {
     await rm(root, { recursive: true, force: true });

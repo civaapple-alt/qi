@@ -81,7 +81,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan` / `qianwenai` / a `$QI_HOME/providers` overlay id). For a full custom vendor (wire dialect, window, thinking), use Providers → **Add OpenAI-compatible provider** (writes `$QI_HOME/providers/<name>.toml` and seals the key). For thin multi-alias Chat Completions, use **OpenAI Compatible** with a **Name** (e.g. `zhipu`) under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
-| `/skills` | Skills hub: view active/inactive status; select a discovered global candidate to activate, or Install → scope → name/path form |
+| `/skills` | Skills hub with only two actions: activation management (Space toggles global Skills, Enter applies) and Install → scope → name/path form |
 | `/skill:<name> <task>` | Start an ordinary Run with one explicitly activated, digest-pinned Skill |
 | `/mcp …` | Status/refresh/login/logout and explicit bind/unbind for quarantined MCP capabilities |
 | `/tasks` | List depth-1 Subagent research Tasks for the selected Run; Enter opens tracking |
@@ -251,6 +251,8 @@ launch (including in-process `/sessions` New Session / resume); `/permissions` c
 live Session. Mount and sensitive-path events are audit facts. Before a
 Run, the runtime reconciles additions, removals, and changed mount identities into the Session
 ([ADR 0015](../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts)).
+When the intended file is only a shareable configuration template, the failure guidance points to `.env.example` or
+`.env.template`, which remain non-sensitive; `.env` itself still requires the explicit human grant.
 
 `publish` and `spend` are separate, default-off capabilities. Use `--allow-publish` / `--no-publish` and
 `--allow-spend` / `--no-spend`, or matching project/user `[capabilities]` keys. Spend grants one use and must be
@@ -346,7 +348,7 @@ accept `low`/`medium`/`high` (wire: `thinking.type` + `reasoning.effort`). `/mod
 `max_output_tokens` (for example `1024`).
 **Qianwen AI Token Plan** (`qianwenai`) uses `QIANWENAI_API_KEY` and
 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`. Default model is
-`qwen3.8-max-preview` (Responses). Third-party catalog ids `glm-5-2` / `deepseek-v4-pro` use Chat Completions.
+`qwen3.8-max` (Responses). Third-party catalog ids `glm-5-2` / `deepseek-v4-pro` use Chat Completions.
 Effort is `low`/`medium`/`high`/`max`. Do not mix Token Plan `sk-sp-…` keys with pay-as-you-go DashScope hosts.
 
 Main Runs default to 32 Steps. `max_steps` accepts 8–1000 in user or project TOML, with
@@ -367,7 +369,7 @@ batch fan-out max **4** and depth **1** are fixed product limits shown in the hu
 The active Skill catalog combines `<workspace>/.qi/skills`, `<workspace>/.agents/skills`, `$QI_HOME/resources/skills`,
 and activated entries from `~/.agents/skills`; project `.qi/skills` wins on a name collision. Workspace Agent Skills
 are directly usable read-only. Global Agent Skills appear from `.skill-lock.json` as inactive candidates and become
-usable when selected directly in the `/skills` panel (`/skills activate <name>` remains available for scripts); activation state is stored under `$QI_HOME/resources`. `~/.codex/skills` and
+usable through `/skills` → **启用 / 停用全局 Skill** (Space toggles, Enter applies; `/skills activate|deactivate <name>` remains available for scripts); activation state is stored under `$QI_HOME/resources`. Workspace/user Qi Skills are always active and are not toggleable. `~/.codex/skills` and
 `~/.claude/skills` are not scanned by default; use an explicit local path or configured compatibility root. Only independently omittable metadata entries enter initial model context, plus a short required
 progressive-discovery hint in the advertised `skill` Tool schema and an optional context index. The `skill` tool
 progressively loads a selected

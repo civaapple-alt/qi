@@ -542,13 +542,29 @@ test("Volcengine Agent Plan Responses sends thinking.type, reasoning.effort, and
 
 test("Qianwen AI Token Plan sends reasoning.effort without thinking.type", async () => {
   const bodies = [];
+  let call = 0;
   const client = {
     responses: {
       create(body) {
         bodies.push(body);
+        const output = call++ === 0
+          ? [
+            {
+              type: "reasoning",
+              id: "reason_qwen_1",
+              summary: [{ type: "summary_text", text: "Plan" }],
+            },
+            {
+              type: "function_call",
+              call_id: "call_qwen_1",
+              name: "read_file",
+              arguments: '{"path":"a.txt"}',
+            },
+          ]
+          : [];
         return asyncEvents([
           { type: "response.reasoning_summary_text.delta", delta: "Plan", sequence_number: 1 },
-          { type: "response.completed", sequence_number: 2, response: completedResponse() },
+          { type: "response.completed", sequence_number: 2, response: completedResponse({ output }) },
         ]);
       },
     },
@@ -564,7 +580,7 @@ test("Qianwen AI Token Plan sends reasoning.effort without thinking.type", async
     contextTokens: 1_048_576,
   });
   for await (const _event of enabled.stream(request({
-    model: { provider: "qianwenai", model: "qwen3.8-max-preview" },
+    model: { provider: "qianwenai", model: "qwen3.8-max" },
     tools: [],
     maxOutputTokens: 2048,
   }))) {
@@ -574,6 +590,35 @@ test("Qianwen AI Token Plan sends reasoning.effort without thinking.type", async
   assert.equal("thinking" in bodies[0], false);
   assert.deepEqual(bodies[0].reasoning, { effort: "medium" });
   assert.equal(bodies[0].max_output_tokens, 2048);
+
+  for await (const _event of enabled.stream(request({
+    model: { provider: "qianwenai", model: "qwen3.8-max" },
+    tools: [],
+    messages: [
+      { role: "user", content: [{ type: "text", text: "Use the tool" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Plan" },
+          { type: "tool-call", callId: "call_qwen_1", name: "read_file", input: { path: "a.txt" } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", callId: "call_qwen_1", output: { text: "ok" }, isError: false },
+        ],
+      },
+    ],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(bodies[1].input[1], {
+    type: "reasoning",
+    id: "reason_qwen_1",
+    summary: [{ type: "summary_text", text: "Plan" }],
+  });
+  assert.equal("content" in bodies[1].input[1], false);
 
   const disabled = new OpenAIResponsesModelPort(client, {
     providerNames: ["qianwenai"],
@@ -587,8 +632,8 @@ test("Qianwen AI Token Plan sends reasoning.effort without thinking.type", async
   }))) {
     // Drain.
   }
-  assert.equal("thinking" in bodies[1], false);
-  assert.deepEqual(bodies[1].reasoning, { effort: "none" });
+  assert.equal("thinking" in bodies[2], false);
+  assert.deepEqual(bodies[2].reasoning, { effort: "none" });
 });
 
 test("Volcengine Agent Plan disables thinking without reasoning.effort and omits thinking for non-thinking models", async () => {

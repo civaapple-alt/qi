@@ -31,7 +31,9 @@ export type ChatThinkingDialect =
 
 export type ResponsesThinkingDialect =
   | "reasoning_effort"
-  | "thinking_type_and_reasoning_effort";
+  | "thinking_type_and_reasoning_effort"
+  /** Responses providers that require the prior reasoning output item on tool continuation. */
+  | "reasoning_item";
 
 export type ChatOutputTokenField = "max_tokens" | "max_completion_tokens";
 

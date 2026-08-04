@@ -1467,22 +1467,6 @@ export class InteractiveTui {
     }, "Skill");
   }
 
-  #activateAgentSkillFromPanel(name: string): void {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
-      this.#presenter.setNotice("Invalid Skill name.");
-      this.#render();
-      return;
-    }
-    this.#startManagementTask(async () => {
-      const activated = await this.#runtime.activateAgentSkill(name);
-      this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());
-      this.#syncAutocomplete();
-      this.#presenter.setNotice(`Activated global Agent Skill ${activated.name}.`);
-      this.#panels.closeAll();
-      openSkillsHubPanel(this.#panelFlow());
-    }, "Skill");
-  }
-
   #deactivateAgentSkill(name: string): void {
     const trimmed = name.trim();
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmed)) {
@@ -1498,6 +1482,28 @@ export class InteractiveTui {
         changed ? `Deactivated global Agent Skill ${trimmed}.` : `Global Agent Skill ${trimmed} was not active.`,
       );
       this.#openInspectPanel("skills", "/skills");
+    }, "Skill");
+  }
+
+  #saveAgentSkillActivation(names: readonly string[]): void {
+    const desired = new Set(names);
+    const current = new Set(
+      this.#runtime.skillCatalog()
+        .filter((skill) => skill.scope === "user" && skill.origin === "agent")
+        .map((skill) => skill.name),
+    );
+    this.#startManagementTask(async () => {
+      for (const name of current) {
+        if (!desired.has(name)) await this.#runtime.deactivateAgentSkill(name);
+      }
+      for (const name of desired) {
+        if (!current.has(name)) await this.#runtime.activateAgentSkill(name);
+      }
+      const skills = await this.#runtime.refreshSkills();
+      this.#presenter.setSkills(skills, this.#runtime.skillCandidates());
+      this.#syncAutocomplete();
+      this.#presenter.setNotice("Skill activation updated.");
+      openSkillsHubPanel(this.#panelFlow());
     }, "Skill");
   }
 
@@ -1656,7 +1662,7 @@ export class InteractiveTui {
       },
       discoveredSkills: () => this.#presenter.skills(),
       skillCandidates: () => this.#presenter.skillCandidates(),
-      activateAgentSkill: (name) => this.#activateAgentSkillFromPanel(name),
+      saveAgentSkillActivation: (names) => this.#saveAgentSkillActivation(names),
       openHistoryList: (kind) => {
         openHistoryListPanel(this.#panelFlow(), kind);
       },

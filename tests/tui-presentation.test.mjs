@@ -19,6 +19,7 @@ import {
   QuestionPanel,
   loadProjectConfig,
   openJobsHubPanel,
+  openSkillsHubPanel,
   parseMountsCommand,
   parseSkillInstallCommand,
   parseJobStopCommand,
@@ -756,15 +757,13 @@ test("interactive TUI renders command help and exits through the editor", async 
     terminal.sendText("\u001b");
     await delay(25);
     terminal.sendText("/skills\r");
-    await waitUntil(() => /Install skill|安装技能|Discovered skills|已发现技能/.test(terminal.output));
+    await waitUntil(() => /Install skill|安装技能/.test(terminal.output));
     terminal.sendText("\r");
-    await waitUntil(() => /No installed Skills were discovered/.test(terminal.output));
+    await waitUntil(() => /No global .agents Skills to manage|没有可管理的全局/.test(terminal.output));
     assert.match(terminal.output, /\/skills/);
     assert.equal(presenter.inspections().length, 0);
     assert.equal(runtime.events().length, 0);
-    // Esc pops inspect → skills hub; second Esc returns to the composer.
-    terminal.sendText("\u001b");
-    await delay(25);
+    // The empty activation manager keeps the two-action hub visible; Esc returns to the composer.
     terminal.sendText("\u001b");
     await delay(25);
     terminal.sendText("/quit\r");
@@ -2223,7 +2222,24 @@ test("context panel shows ContextBlock kind shares, counts, and omitted tokens",
     maxSteps: 20,
     maxActionsPerStep: 6,
   });
-  presenter.update([], {
+  presenter.update([
+    {
+      type: "action.proposed",
+      data: { runId: "run_context", stepId: "stp_context", actionId: "act_skill", input: { operation: "load", name: "review-code" } },
+    },
+    {
+      type: "action.completed",
+      data: {
+        runId: "run_context",
+        stepId: "stp_context",
+        actionId: "act_skill",
+        modelOutput: [{
+          type: "text",
+          text: JSON.stringify({ name: "review-code", scope: "user", instructions: "hidden" }),
+        }],
+      },
+    },
+  ], {
     sessionId: "ses_context",
     createdAt: new Date(0).toISOString(),
     version: 1,
@@ -2236,7 +2252,7 @@ test("context panel shows ContextBlock kind shares, counts, and omitted tokens",
         trigger: "user",
         mode: "agent",
         status: "completed",
-        input: "inspect context",
+        input: "qqq",
         stepOrder: ["stp_context"],
         steps: {
           stp_context: {
@@ -2245,7 +2261,7 @@ test("context panel shows ContextBlock kind shares, counts, and omitted tokens",
             context: {
               estimatedTokens: 10_000,
               budgetTokens: 64_000,
-              includedBlockIds: ["constitution", "memory:1", "tool-catalog", "conversation:0"],
+              includedBlockIds: ["constitution", "memory:1", "tool-catalog", "conversation:0", "skill:active:user:review-code:0123456789abcdef"],
               omittedBlockIds: ["memory:2", "skills:catalog"],
               blockStats: [
                 {
@@ -2274,7 +2290,16 @@ test("context panel shows ContextBlock kind shares, counts, and omitted tokens",
             model: { text: "done", finishReason: "stop" },
           },
         },
-        actions: {},
+        actions: {
+          act_skill: {
+            actionId: "act_skill",
+            stepId: "stp_context",
+            toolName: "skill",
+            effect: "read",
+            status: "completed",
+            resources: ["skill:review-code"],
+          },
+        },
         evaluations: {},
         steering: [],
         delegations: {},
@@ -2301,6 +2326,57 @@ test("context panel shows ContextBlock kind shares, counts, and omitted tokens",
   assert.match(lines, /skill\s+0 ·\s+0% · 0 in \/ 1 out · 2\.0k omitted/);
   assert.match(lines, /non-block\s+4\.0k · conversation messages \+ advertised Tool schemas/);
   assert.match(lines, /candidates\s+8\.8k ContextBlock tokens before omission/);
+  const chat = presenter.renderChat().join("\n");
+  assert.match(chat, /⟦user⟧Skill · review-code · user/);
+  assert.match(chat, /⟦user⟧Skill tool · load · review-code · completed/);
+  assert.match(chat, /⟦user⟧qqq/);
+  assert.doesNotMatch(chat, /hidden/);
+});
+
+test("/skills exposes only activation management and installation", () => {
+  const pushed = [];
+  let applied;
+  const ctx = {
+    panels: {
+      depth: 0,
+      push(panel) { pushed.push(panel); },
+      closeAll() {},
+      dismiss() {},
+    },
+    presenter: {
+      setNotice() {},
+    },
+    locale: () => "zh",
+    terminalRows: 40,
+    discoveredSkills: () => [{
+      name: "global-review",
+      version: "1.0.0",
+      description: "Review code",
+      scope: "user",
+      origin: "agent",
+    }],
+    skillCandidates: () => [{
+      name: "future-skill",
+      version: "unversioned",
+      description: "Future workflow",
+      root: "C:\\skills\\future-skill",
+      source: "global-agent",
+    }],
+    saveAgentSkillActivation(names) { applied = [...names]; },
+    render() {},
+  };
+
+  openSkillsHubPanel(ctx);
+  const hub = pushed[0];
+  assert.match(hub.render(100).join("\n"), /启用 \/ 停用全局 Skill/);
+  assert.match(hub.render(100).join("\n"), /安装技能/);
+  assert.doesNotMatch(hub.render(100).join("\n"), /global-review|future-skill/);
+  hub.handleInput("\r");
+  const activation = pushed[1];
+  assert.match(activation.render(100).join("\n"), /Space 启用\/停用/);
+  activation.handleInput(" ");
+  activation.handleInput("\r");
+  assert.deepEqual(applied, []);
 });
 
 test("info notices expire while Run notices remain until explicitly cleared", () => {
@@ -3851,7 +3927,7 @@ test("FormPanel wraps long multi-line descriptions instead of truncating to one 
       `endpoint ${endpoint}`,
       "endpoint is read-only",
     ].join("\n"),
-    fields: [{ id: "model", label: "Model", initialValue: "qwen3.8-max-preview", required: true }],
+    fields: [{ id: "model", label: "Model", initialValue: "qwen3.8-max", required: true }],
     onSubmit() {},
     onClose() {},
   });

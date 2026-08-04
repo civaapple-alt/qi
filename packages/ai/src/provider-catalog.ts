@@ -30,6 +30,7 @@ const CHAT_THINKING = new Set<ChatThinkingDialect>([
 const RESPONSES_THINKING = new Set<ResponsesThinkingDialect>([
   "reasoning_effort",
   "thinking_type_and_reasoning_effort",
+  "reasoning_item",
 ]);
 const OUTPUT_FIELDS = new Set<ChatOutputTokenField>(["max_tokens", "max_completion_tokens"]);
 const DISCOVERY = new Set<ProviderModelDiscovery>(["none", "openai_compatible"]);

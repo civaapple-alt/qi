@@ -67,6 +67,8 @@ export interface WebActionProjection {
   workPlanExplanation: string | undefined;
   askQuestions: WebAskQuestionItem[] | undefined;
   process: WebProcessOutput | undefined;
+  /** Bounded metadata for an automatic `skill` Tool call; never the Skill body. */
+  skillCall: WebSkillCall | undefined;
 }
 
 export interface WebStepProjection {
@@ -100,6 +102,19 @@ export interface WebFormalPlanProjection {
   previewCollapsed: boolean;
 }
 
+export interface WebSkillUsage {
+  name: string;
+  scope: "workspace" | "user";
+}
+
+export interface WebSkillCall {
+  name: string | undefined;
+  scope: "workspace" | "user" | undefined;
+  operation: string | undefined;
+  status: ActionStatus;
+  errorCode: string | undefined;
+}
+
 export interface WebWorkPlanSnapshot {
   workPlanId: string;
   revision: number;
@@ -113,6 +128,10 @@ export interface WebRunProjection {
   input: string | undefined;
   /** Short label for sidebar / narrative title (Formal Plan aware). */
   displayTitle: string;
+  /** Bounded explicit Skill provenance; Skill instructions are never projected. */
+  skills: WebSkillUsage[];
+  /** Bounded automatic `skill` Tool calls; Skill instructions are never projected. */
+  skillCalls: WebSkillCall[];
   status: RunStatus;
   displayStatus: string;
   terminalReason: string | undefined;
@@ -134,6 +153,7 @@ export interface WebRunProjection {
     deniedActions: number;
     effects: string[];
     tools: string[];
+    skillStatus: "none" | "active" | "running" | "succeeded" | "failed" | "fallback";
   };
 }
 
@@ -166,6 +186,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
     if (!run) throw new Error(`Session projection references missing Run ${runId}`);
     const formalPlan = projectFormalPlan(view, run.planBinding);
     const workPlan = projectWorkPlan(view);
+    const skills = projectSkillUsages(run);
     const steps: WebStepProjection[] = run.stepOrder.map((stepId, index): WebStepProjection => {
       const step = run.steps[stepId];
       if (!step) throw new Error(`Run projection references missing Step ${stepId}`);
@@ -200,6 +221,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
           workPlanExplanation: undefined,
           askQuestions: undefined,
           process: undefined,
+          skillCall: undefined,
         }));
       return {
         stepId: step.stepId,
@@ -237,6 +259,8 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
       displayTitle: formalPlan
         ? `Accepted Plan · ${formalPlan.title} · rev ${formalPlan.revision}`
         : shorten(run.input?.trim() || `${run.trigger} Run`, 160),
+      skills,
+      skillCalls: [],
       status: run.status,
       displayStatus: run.status === "completed" && run.terminal?.reason === "response"
         ? "responded"
@@ -261,6 +285,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
         deniedActions: 0,
         effects: [],
         tools: [],
+        skillStatus: skills.length > 0 ? "active" : "none",
       },
     } satisfies WebRunProjection;
   });
@@ -309,6 +334,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
         if (action) {
           action.input = event.data.input;
           action.target = summarizeTarget(action.toolName, event.data.input, action.resources);
+          if (action.toolName === "skill") action.skillCall = projectSkillCall(action, undefined);
           action.milestones.proposed = event.sequence;
           actionTiming.set(action.actionId, { startAt: event.occurredAt, endAt: undefined });
           enrichStructuredAction(action);
@@ -346,8 +372,15 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
       case "action.completed": {
         const action = actionById.get(event.data.actionId);
         if (action) {
-          action.result = parseModelOutput(event.data.modelOutput);
-          action.resultSummary = summarizeResult(action.toolName, action.result);
+          const result = parseModelOutput(event.data.modelOutput);
+          if (action.toolName === "skill") {
+            action.skillCall = projectSkillCall(action, result);
+            action.result = undefined;
+            action.resultSummary = summarizeSkillCall(action.skillCall);
+          } else {
+            action.result = result;
+            action.resultSummary = summarizeResult(action.toolName, action.result);
+          }
           applyDiffFields(action);
           enrichStructuredAction(action);
           settleAction(action, event.sequence, event.occurredAt, actionTiming, stepById);
@@ -358,8 +391,15 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
         const action = actionById.get(event.data.actionId);
         if (action) {
           action.errorCode = event.data.errorCode;
-          action.result = parseModelOutput(event.data.modelOutput);
-          action.resultSummary = summarizeResult(action.toolName, action.result);
+          const result = parseModelOutput(event.data.modelOutput);
+          if (action.toolName === "skill") {
+            action.skillCall = projectSkillCall(action, result);
+            action.result = undefined;
+            action.resultSummary = summarizeSkillCall(action.skillCall);
+          } else {
+            action.result = result;
+            action.resultSummary = summarizeResult(action.toolName, action.result);
+          }
           applyDiffFields(action);
           enrichStructuredAction(action);
           settleAction(action, event.sequence, event.occurredAt, actionTiming, stepById);
@@ -388,6 +428,18 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
       }
     }
     const actions = run.steps.flatMap((step) => step.actions);
+    run.skillCalls = actions
+      .map((action) => action.skillCall)
+      .filter((call): call is WebSkillCall => call !== undefined);
+    const skillFailure = run.skillCalls.some((call) => ["failed", "denied", "indeterminate"].includes(call.status))
+      || (run.skills.length > 0 && actions.some((action) => action.status === "failed"));
+    const skillStatus = skillFailure
+      ? run.status === "completed" ? "fallback" : "failed"
+      : run.skillCalls.some((call) => !terminalActionStatuses.has(call.status))
+        ? "running"
+        : run.skillCalls.length > 0
+          ? "succeeded"
+          : run.skills.length > 0 ? "active" : "none";
     run.summary = {
       stepCount: run.steps.length,
       actionCount: actions.length,
@@ -397,6 +449,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
       deniedActions: actions.filter((action) => action.status === "denied").length,
       effects: [...new Set(actions.map((action) => action.effect))],
       tools: [...new Set(actions.map((action) => action.toolName))],
+      skillStatus,
     };
     const timing = runTiming.get(run.runId);
     run.startedAt = timing?.startAt;
@@ -411,6 +464,23 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
     runs,
     currentRunId: view.currentRunId,
   };
+}
+
+const activeSkillBlockPattern = /^skill:active:(workspace|user):([a-z0-9]+(?:-[a-z0-9]+)*):[a-f0-9]{16}$/;
+
+function projectSkillUsages(run: SessionView["runs"][string]): WebSkillUsage[] {
+  const usages = new Map<string, WebSkillUsage>();
+  for (const stepId of run.stepOrder) {
+    const step = run.steps[stepId];
+    for (const blockId of step?.context?.includedBlockIds ?? []) {
+      const match = activeSkillBlockPattern.exec(blockId);
+      if (!match) continue;
+      const [, scope, name] = match;
+      if (!scope || !name) continue;
+      usages.set(`${scope}:${name}`, { name, scope: scope as WebSkillUsage["scope"] });
+    }
+  }
+  return [...usages.values()].sort((left, right) => `${left.scope}:${left.name}`.localeCompare(`${right.scope}:${right.name}`));
 }
 
 function projectFormalPlan(
@@ -658,6 +728,27 @@ function summarizeResult(toolName: string, result: unknown): string | undefined 
   }
   if (typeof value.exitCode === "number") return `${toolName} exited ${value.exitCode}`;
   return undefined;
+}
+
+function projectSkillCall(action: WebActionProjection, result: unknown): WebSkillCall {
+  const input = record(action.input);
+  const output = record(result);
+  const scope = output?.scope === "workspace" || output?.scope === "user" ? output.scope : undefined;
+  const name = string(output?.name) ?? string(input?.name);
+  const operation = string(input?.operation);
+  return {
+    name,
+    scope,
+    operation,
+    status: action.status,
+    errorCode: action.errorCode,
+  };
+}
+
+function summarizeSkillCall(call: WebSkillCall | undefined): string | undefined {
+  if (!call) return undefined;
+  if (call.errorCode) return call.errorCode;
+  return [call.operation, call.name, call.scope].filter(Boolean).join(" · ") || "skill";
 }
 
 function extractDiff(result: unknown): {

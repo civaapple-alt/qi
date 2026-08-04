@@ -50,6 +50,11 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
   and is not Evidence.
 - Context omissions are labeled by projected category (for example an omitted history Run) instead of showing
   only an unexplained count.
+- Explicit Skill activations are projected as bounded `name`/`scope` metadata on each Run. Narrative and sidebar
+  render that metadata separately from the original task; Skill instruction bodies are not exposed by the Web UI.
+- Model-initiated `skill` Tool calls are projected separately with bounded operation/name/status metadata. Skill
+  `load` results never expose instruction bodies, and a failed Skill call that still yields a Run response is labeled
+  as a fallback rather than an unqualified Skill success.
 - `update_plan`, `ask_question`, process tools (`shell`/`script`/`verify`), and file mutations (`edit`/`write`/
   `move`/`remove`) use specialized narrative cards keyed by tool name (not Session mode), so Plan-mode Work Todos
   and Agent-mode clarification Questions render the same cards; generic JSON Tool result remains under a details

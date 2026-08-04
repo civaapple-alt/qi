@@ -163,6 +163,10 @@ export class SkillCatalog {
   }
 
   async discover(): Promise<CatalogSkill[]> {
+    // Global Agent Skill installation is mutable outside Qi (for example, `npx skills remove -g`).
+    // Reconcile the human activation record before exposing the catalog so a removed or lock-drifted
+    // Skill is both unusable and no longer left behind as stale local state.
+    await this.#reconcileAgentSkillActivations();
     // Lowest to highest precedence: global Agent, user Qi, project Agent, project Qi.
     const userAgent = await this.#discoverActivatedAgentScope();
     const user = await this.#discoverScope(this.userSkillsRoot, "user", "qi");
@@ -568,6 +572,20 @@ export class SkillCatalog {
       }
     }
     return active.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async #reconcileAgentSkillActivations(): Promise<void> {
+    if (!this.userAgentLockPath || !this.agentActivationPath) return;
+    const lock = await readAgentSkillLock(this.userAgentLockPath);
+    const current = await readAgentSkillActivations(this.agentActivationPath);
+    const reconciled = Object.fromEntries(
+      Object.entries(current).filter(([name, activation]) => {
+        const entry = lock[name];
+        return entry !== undefined && activation.lockHash === agentSkillLockHash(entry);
+      }),
+    );
+    if (Object.keys(reconciled).length === Object.keys(current).length) return;
+    await writeAgentSkillActivations(this.agentActivationPath, reconciled);
   }
 
   async #agentLockEntryRoot(name: string, entry: AgentSkillLockEntry): Promise<string | undefined> {

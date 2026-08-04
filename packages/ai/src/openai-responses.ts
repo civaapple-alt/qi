@@ -5,6 +5,7 @@ import type {
   ResponseFunctionToolCall,
   ResponseInputContent,
   ResponseInputItem,
+  ResponseReasoningItem,
   ResponseStreamEvent,
 } from "openai/resources/responses/responses";
 import {
@@ -23,6 +24,7 @@ import {
   type ProviderProfile,
   type ProviderThinkingEffort,
 } from "./provider-profile.js";
+import { resolveProviderWireHints } from "./provider-profile.js";
 import { resolveResponsesThinkingWire } from "./thinking-wire.js";
 
 export interface OpenAIResponsesClient {
@@ -53,10 +55,12 @@ export interface OpenAIResponsesModelPortOptions {
 
 const DEFAULT_CONTEXT_TOKENS = 128_000;
 
+type ReasoningReplayItem = Pick<ResponseReasoningItem, "id" | "summary">;
+
 /**
- * Stateless adapter from Qi's portable ModelPort to the OpenAI Responses API.
- * Every turn sends the complete portable conversation; no provider conversation ID
- * becomes durable application state.
+ * Adapter from Qi's portable ModelPort to the OpenAI Responses API.
+ * Every turn sends the complete portable conversation; transient provider reasoning
+ * replay metadata is kept only in this adapter and never becomes durable application state.
  */
 export class OpenAIResponsesModelPort implements ModelPort {
   readonly #client: OpenAIResponsesClient;
@@ -67,6 +71,8 @@ export class OpenAIResponsesModelPort implements ModelPort {
   readonly #imageInput: boolean;
   readonly #reasoningEffort: string | null | undefined;
   readonly #profile: ProviderProfile | undefined;
+  /** Provider transport state only; never serialized into portable messages or Session events. */
+  readonly #reasoningReplays = new Map<string, ReasoningReplayItem[]>();
 
   constructor(client: OpenAIResponsesClient, options: OpenAIResponsesModelPortOptions = {}) {
     this.#client = client;
@@ -117,12 +123,18 @@ export class OpenAIResponsesModelPort implements ModelPort {
       request.model.model,
       this.#reasoningEffort,
     );
+    const reasoningDialect = this.#profile === undefined
+      ? undefined
+      : resolveProviderWireHints(this.#profile, request.model.model).responsesThinking;
     const body: ResponseCreateParamsStreaming & {
       thinking?: { type: "enabled" | "disabled" };
       reasoning?: { effort: ProviderThinkingEffort | "none" | "minimal" | "medium" | "xhigh" };
     } = {
       model: request.model.model,
-      input: toResponseInput(request.messages, { imageInput: this.#imageInput }),
+      input: toResponseInput(request.messages, {
+        imageInput: this.#imageInput,
+        ...(reasoningDialect === "reasoning_item" ? { reasoningReplays: this.#reasoningReplays } : {}),
+      }),
       tools: request.tools.map((tool) => ({
         type: "function" as const,
         name: tool.name,
@@ -161,6 +173,7 @@ export class OpenAIResponsesModelPort implements ModelPort {
           if (event.delta) yield parseModelEvent({ type: "reasoning.delta", delta: event.delta });
           break;
         case "response.completed": {
+          this.#rememberReasoningItems(event.response);
           const completion = completedEvents(event.response);
           for (const mapped of completion) yield parseModelEvent(mapped);
           return;
@@ -202,13 +215,32 @@ export class OpenAIResponsesModelPort implements ModelPort {
       throw new TypeError(`Responses adapter does not serve provider ${model.provider}`);
     }
   }
+
+  #rememberReasoningItems(response: Response): void {
+    for (const item of response.output) {
+      if (item.type !== "reasoning") continue;
+      const text = reasoningSummaryText(item);
+      if (!text) continue;
+      const replay: ReasoningReplayItem = {
+        id: item.id,
+        summary: item.summary.map((part) => ({ type: part.type, text: part.text })),
+      };
+      const entries = this.#reasoningReplays.get(text) ?? [];
+      entries.push(replay);
+      this.#reasoningReplays.set(text, entries);
+    }
+  }
 }
 
 function toResponseInput(
   messages: readonly ModelMessage[],
-  options: { imageInput: boolean },
+  options: {
+    imageInput: boolean;
+    reasoningReplays?: ReadonlyMap<string, readonly ReasoningReplayItem[]>;
+  },
 ): ResponseInputItem[] {
   const input: ResponseInputItem[] = [];
+  const reasoningReplayUses = new Map<string, number>();
   // Keep function_call_output items contiguous for a parallel tool batch; defer synthetic
   // user media messages until that batch ends (same contract as Chat Completions).
   const pendingToolMedia: ResponseInputItem[] = [];
@@ -245,10 +277,27 @@ function toResponseInput(
             throw new TypeError("reasoning parts must belong to an assistant message");
           }
           flushToolMedia();
-          input.push({
-            type: "reasoning",
-            content: [{ type: "reasoning_text", text: part.text }],
-          } as ResponseInputItem);
+          if (options.reasoningReplays !== undefined) {
+            const candidates = options.reasoningReplays.get(part.text);
+            const used = reasoningReplayUses.get(part.text) ?? 0;
+            const replay = candidates?.[used];
+            reasoningReplayUses.set(part.text, used + 1);
+            if (replay === undefined) {
+              throw new TypeError(
+                "Responses reasoning history is missing the provider output item required for tool continuation",
+              );
+            }
+            input.push({
+              type: "reasoning",
+              id: replay.id,
+              summary: replay.summary,
+            });
+          } else {
+            input.push({
+              type: "reasoning",
+              content: [{ type: "reasoning_text", text: part.text }],
+            } as ResponseInputItem);
+          }
           break;
         case "image":
           if (!options.imageInput) {
@@ -307,6 +356,10 @@ function toResponseInput(
   }
   flushToolMedia();
   return input;
+}
+
+function reasoningSummaryText(item: ResponseReasoningItem): string {
+  return item.summary.map((part) => part.text).join("");
 }
 
 function splitToolResultOutput(output: unknown): {

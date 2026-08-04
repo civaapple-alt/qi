@@ -406,7 +406,7 @@
     "authSchemes": [
       "api-key"
     ],
-    "defaultModel": "qwen3.8-max-preview",
+    "defaultModel": "qwen3.8-max",
     "contextTokens": 1048576,
     "inputModalities": [
       "text",
@@ -415,7 +415,7 @@
     "outputReserveTokens": 65536,
     "modelDiscovery": "openai_compatible",
     "wire": {
-      "responsesThinking": "reasoning_effort"
+      "responsesThinking": "reasoning_item"
     },
     "capabilities": {
       "chatCompletions": true,
@@ -431,6 +431,30 @@
     "envModel": "QIANWENAI_MODEL",
     "models": [
       {
+        "id": "qwen3.8-max",
+        "displayName": "Qwen3.8 Max",
+        "contextTokens": 1048576,
+        "outputReserveTokens": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ],
+        "wire": {
+          "responsesThinking": "reasoning_item"
+        },
+        "thinking": {
+          "mode": "effort",
+          "supportedEfforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "allowDisable": false
+        }
+      },
+      {
         "id": "qwen3.8-max-preview",
         "displayName": "Qwen3.8 Max Preview",
         "contextTokens": 1048576,
@@ -440,7 +464,7 @@
           "image"
         ],
         "wire": {
-          "responsesThinking": "reasoning_effort"
+          "responsesThinking": "reasoning_item"
         },
         "thinking": {
           "mode": "effort",
@@ -463,7 +487,7 @@
           "text"
         ],
         "wire": {
-          "responsesThinking": "reasoning_effort"
+          "responsesThinking": "reasoning_item"
         },
         "thinking": {
           "mode": "effort",
@@ -487,7 +511,7 @@
           "image"
         ],
         "wire": {
-          "responsesThinking": "reasoning_effort"
+          "responsesThinking": "reasoning_item"
         },
         "thinking": {
           "mode": "effort",

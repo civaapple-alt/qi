@@ -110,7 +110,7 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   const qianwenai = getProviderProfile("qianwenai");
   assert.ok(qianwenai);
   assert.equal(qianwenai.displayName, "Qianwen AI Token Plan");
-  assert.equal(qianwenai.defaultModel, "qwen3.8-max-preview");
+  assert.equal(qianwenai.defaultModel, "qwen3.8-max");
   assert.equal(
     qianwenai.officialBaseURL,
     "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
@@ -121,6 +121,15 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.equal(qianwenai.envModel, "QIANWENAI_MODEL");
   assert.equal(qianwenai.capabilities.requestMetadata, false);
   assert.equal(qianwenai.capabilities.reasoning, true);
+  assert.equal(qianwenai.wire.responsesThinking, "reasoning_item");
+  assert.equal(providerModelContextTokens(qianwenai, "qwen3.8-max"), 1_048_576);
+  assert.equal(providerModelOutputReserveTokens(qianwenai, "qwen3.8-max"), 65_536);
+  assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.8-max")?.thinking, {
+    mode: "effort",
+    supportedEfforts: ["low", "medium", "high", "max"],
+    defaultEffort: "high",
+    allowDisable: false,
+  });
   assert.equal(providerModelContextTokens(qianwenai, "qwen3.8-max-preview"), 1_048_576);
   assert.equal(providerModelOutputReserveTokens(qianwenai, "qwen3.8-max-preview"), 65_536);
   assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.8-max-preview")?.thinking, {

@@ -27,6 +27,12 @@ Reusable Qi-specific terminal presentation and control components built on
   and History Center inspection.
 - Project `/context` diagnostics with per-ContextBlock-kind included token share, included/omitted counts,
   omitted token cost, and a separate conversation/Tool-schema subtotal when durable block statistics exist.
+- Explicit `/skill:<name> <task>` Runs show a bounded `Skill · <name> · <scope>` line before the original task;
+  the Skill instruction body is never rendered by the TUI.
+- Skill management distinguishes always-active Workspace/user Skills from toggleable global Agent Skills; `/skills`
+  exposes only activation management and installation, and the activation panel uses Space to toggle and Enter to apply.
+- Model-initiated `skill` Tool calls appear as bounded `Skill tool · <operation> · <name> · <status>` lines and
+  cards. Failed Skill calls remain visible even when the surrounding Run produces a fallback response.
 - Keep bounded file Diff previews for completed mutations in the current Run, and
   expose bounded process failure evidence instead of hiding it inside the ToolFailure envelope.
 - Project failed `git` cards with the full request (`git status · ref HEAD`, `git diff · maxCount 5`) and the

@@ -43,6 +43,25 @@ export interface ShellProfileSnapshot {
 /** Marker consumed by InteractiveTui to paint a full-width user message bar. */
 export const USER_MESSAGE_PREFIX = "⟦user⟧";
 
+const activeSkillBlockPattern = /^skill:active:(workspace|user):([a-z0-9]+(?:-[a-z0-9]+)*):[a-f0-9]{16}$/;
+
+function renderSkillActivationLines(run: RunView): string[] {
+  const skills = new Map<string, { name: string; scope: "workspace" | "user" }>();
+  for (const stepId of run.stepOrder) {
+    const step = run.steps[stepId];
+    for (const blockId of step?.context?.includedBlockIds ?? []) {
+      const match = activeSkillBlockPattern.exec(blockId);
+      if (!match) continue;
+      const [, scope, name] = match;
+      if (!scope || !name) continue;
+      skills.set(`${scope}:${name}`, { name, scope: scope as "workspace" | "user" });
+    }
+  }
+  return [...skills.values()]
+    .sort((left, right) => `${left.scope}:${left.name}`.localeCompare(`${right.scope}:${right.name}`))
+    .map(({ name, scope }) => `${USER_MESSAGE_PREFIX}Skill · ${name} · ${scope}`);
+}
+
 export interface TuiLaunchInfo {
   readonly workspaceRoot: string;
   readonly dataRoot: string;
@@ -1006,6 +1025,7 @@ export class TuiPresenter {
       options.showHandoff ? 1 : 0,
       run.status,
       run.input?.length ?? 0,
+      this.renderSkillUsageLines(run).join(","),
       actionSig,
       stepSig,
       expanded,
@@ -1316,27 +1336,16 @@ export class TuiPresenter {
   }
 
   renderSkills(): string[] {
-    const lines = ["Skills  (/skills · select a discovered Skill to view/activate · install [--workspace] <name-or-path>)"];
-    if (this.#skills.length === 0 && this.#skillCandidates.length === 0) {
-      return [...lines, "  No installed Skills were discovered."];
-    }
-    for (const skill of this.#skills) {
-      lines.push(
-        `  ${skill.name}  ${skill.version} · ${skill.scope}${skill.origin === "agent" ? " · .agents" : ""}${skill.shadowedUserRoot ? " · shadows user Skill" : ""}`,
-        `    ${oneLine(skill.description, 120)}`,
-      );
-    }
-    if (this.#skillCandidates.length > 0) {
-      lines.push("", "  External candidates (activate global .agents Skill or migrate an explicit source):");
-      for (const skill of this.#skillCandidates) {
-        lines.push(
-          `  ${skill.name}  ${skill.version} · ${skill.source === "global-agent" ? "global .agents · inactive" : "external · not active"}`,
-          `    ${oneLine(skill.description, 120)}`,
-          `    source ${skill.root}`,
-        );
-      }
-    }
-    return lines;
+    const zh = this.#locale === "zh";
+    const enabled = this.#skills.filter((skill) => skill.origin === "agent").length;
+    const available = this.#skillCandidates.filter((skill) => skill.source === "global-agent").length;
+    return [
+      zh ? "技能  (/skills)" : "Skills (/skills)",
+      zh ? "  1. 启用 / 停用全局 Skill" : "  1. Enable / disable global Skills",
+      zh ? `     ${enabled} 个已启用 · ${available} 个可启用` : `     ${enabled} enabled · ${available} available`,
+      zh ? "  2. 安装技能 → 选择范围 → 输入名称或路径" : "  2. Install skill → choose scope → enter a name or path",
+      zh ? "  启用后使用 /skill:<name> <task> 调用 Skill" : "  Use /skill:<name> <task> after enabling a Skill",
+    ];
   }
 
   renderJobs(): string[] {
@@ -1473,12 +1482,14 @@ export class TuiPresenter {
     const formalPlan = this.formalPlanRevision(run);
     if (formalPlan?.markdown) {
       return [
+        ...this.renderSkillUsageLines(run),
         `${USER_MESSAGE_PREFIX}Accepted Plan · ${formalPlan.title} · rev ${formalPlan.revision}`,
         "",
         ...this.renderFormalPlanPreview(formalPlan),
       ];
     }
     const input = run.input?.trim() ?? "";
+    const skillLines = this.renderSkillUsageLines(run);
     const imageLines = (run.content ?? [])
       .filter((part) => part.type === "image")
       .map((image, index) => {
@@ -1491,14 +1502,15 @@ export class TuiPresenter {
       });
     if (!input) {
       return imageLines.length > 0
-        ? [`${USER_MESSAGE_PREFIX}(image input)`, ...imageLines]
-        : [`${USER_MESSAGE_PREFIX}(no input recorded)`];
+        ? [...skillLines, `${USER_MESSAGE_PREFIX}(image input)`, ...imageLines]
+        : [...skillLines, `${USER_MESSAGE_PREFIX}(no input recorded)`];
     }
     const key = `paste:${run.runId}`;
     const rawLines = input.split(/\r?\n/);
     const isLongPaste = rawLines.length > 4 || input.length > 400;
     if (isLongPaste && !this.#expanded.has(key)) {
       return [
+        ...skillLines,
         `${USER_MESSAGE_PREFIX}[Pasted text · ${rawLines.length} lines · ${input.length} chars]`,
         `${USER_MESSAGE_PREFIX}${oneLine(rawLines[0] ?? "", 120)}`,
         ...(rawLines.length > 1 ? [`${USER_MESSAGE_PREFIX}…`, `${USER_MESSAGE_PREFIX}${oneLine(rawLines.at(-1) ?? "", 120)}`] : []),
@@ -1506,7 +1518,30 @@ export class TuiPresenter {
         `${USER_MESSAGE_PREFIX}Ctrl+O to expand`,
       ];
     }
-    return [...rawLines.map((line) => `${USER_MESSAGE_PREFIX}${line}`), ...imageLines];
+    return [...skillLines, ...rawLines.map((line) => `${USER_MESSAGE_PREFIX}${line}`), ...imageLines];
+  }
+
+  private renderSkillUsageLines(run: RunView): string[] {
+    const lines = renderSkillActivationLines(run);
+    const seen = new Set(lines);
+    for (const actionId of this.actionOrder(run)) {
+      const action = run.actions[actionId];
+      if (!action || action.toolName !== "skill") continue;
+      const events = this.actionEventsFor(actionId);
+      const input = record(events.proposed?.data.input);
+      const output = structuredOutput(events.terminal);
+      const name = typeof output?.name === "string" ? output.name : typeof input?.name === "string" ? input.name : "unknown";
+      const operation = typeof input?.operation === "string" ? input.operation : "use";
+      const result = action.status === "failed" || action.status === "denied" || action.status === "indeterminate"
+        ? action.status
+        : action.status;
+      const line = `${USER_MESSAGE_PREFIX}Skill tool · ${operation} · ${name} · ${result}`;
+      if (!seen.has(line)) {
+        seen.add(line);
+        lines.push(line);
+      }
+    }
+    return lines;
   }
 
   private formalPlanRevision(run: RunView): PlanRevisionView | undefined {

@@ -89,9 +89,12 @@ export function assertSensitiveContentAllowed(
   if (!isSensitiveWorkspacePath(normalized, policy)) return;
   const grants = new Set(sensitivePathGrantsFromContext(context));
   if (grants.has(normalized)) return;
+  const templateHint = normalized === ".env"
+    ? " For a shareable configuration template, create .env.example or .env.template instead; those files do not require a sensitive-path grant."
+    : "";
   throw new ToolFailure(
     "SENSITIVE_PATH_GRANT_REQUIRED",
-    `Sensitive path requires an explicit human grant before its content may reach the model: ${normalized}`,
+    `Sensitive path requires an explicit human grant before its content may reach the model: ${normalized}.${templateHint}`,
     { path: normalized, kind: "sensitive" as const },
   );
 }
