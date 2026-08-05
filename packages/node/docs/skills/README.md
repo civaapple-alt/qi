@@ -81,15 +81,21 @@ SHA-256. It rejects floating identities, redirects, lifecycle execution, links, 
 and trees above 512 files / 8 MiB per file / 64 MiB total / depth 16. Provenance and the content-tree digest are
 recorded in `.qi/skills.lock.json` or `$QI_HOME/resources/skills.lock.json`.
 
+For the common `skills/<name>` repository layout, `installGithubSkill(url, name)` is the human-operated
+convenience equivalent of `npx skills add <url> --skill <name>`: it resolves GitHub `HEAD` once to an exact commit,
+uses a sparse checkout of the declared Skill directory, and then calls the same immutable install path. A caller
+may provide a different contained subdirectory. This API is never exposed to model-operated installation.
+
 `compatibility`, `allowed-tools`, and `metadata["qi.required-*"]` produce readiness diagnostics only. Unknown
 frontmatter is retained as informational extension data. `runSkillScript()` accepts only regular `scripts/**`
 files, bounded argv/cwd/timeout, and frozen interpreter profiles; it never installs dependencies or supplies
 provider/MCP credentials.
 
-Claude-compatible plugin Skills are intentionally a separate catalog. They are available to the model through
-the `plugin_skill` Tool after a plugin is installed and enabled; they do not appear in the native `/skills`
-catalog or acquire authority from plugin metadata. Plugin Skill resources are read from the pinned immutable
-cache, and extensionless scripts must declare the exact `#!/usr/bin/env bash` interpreter line.
+Claude-compatible plugin Skills are intentionally a separate catalog. They are available only after the plugin
+and the individual Skill have been enabled, and only when upstream metadata permits model invocation; explicitly
+selected user-only Skills enter a Run through `/skill:<marketplace>:<plugin>:<skill>`. They do not appear in the
+native `/skills` catalog or acquire authority from plugin metadata. Plugin Skill resources are read from the
+pinned immutable cache, and extensionless scripts must declare the exact `#!/usr/bin/env bash` interpreter line.
 
 `exportWorkspaceDraft()` and `updateWorkspace()` are the create-draft/update pair for existing Workspace Skills.
 They do not weaken the generic `.qi` file boundary; callers must still provide effect and path authority.

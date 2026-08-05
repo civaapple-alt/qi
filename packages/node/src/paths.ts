@@ -246,7 +246,7 @@ export async function ensureQiLayout(
     ),
     ensureTextFile(
       resolve(root, "plugins", "enabled.json"),
-      `${JSON.stringify({ schemaVersion: 1, plugins: {} }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: 2, plugins: {} }, null, 2)}\n`,
     ),
   ]);
 }

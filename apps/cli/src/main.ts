@@ -11,7 +11,7 @@ import { AuthBackedModelPort } from "./auth-model-port.js";
 import { defaultUserConfigPath, findCompatibleEndpoint, loadUserConfig, removeCompatibleEndpoint } from "./config.js";
 import { persistLoginProviderDefaults } from "./login-persist.js";
 import { parseTuiCliArguments, qiCliVersion, refreshLaunchCapabilities, type TuiCliOptions } from "./cli.js";
-import { commandHelp, parseJobStopCommand, parseSkillInstallCommand, parseTuiCommand, tuiCommands } from "./commands.js";
+import { commandHelp, parseJobStopCommand, parseSkillInstallCommand, parseTuiCommand, tuiCommands, type SkillInstallCommand } from "./commands.js";
 import { InteractiveTui } from "./interactive.js";
 import {
   formatMemoryClaims,
@@ -306,7 +306,7 @@ async function main(): Promise<void> {
         ? []
         : [`verify ${runtime.verificationManifest.origin} ${runtime.verificationManifest.path} · ${runtime.verificationManifest.profiles.join(", ")}`]),
       ...(presenter.discoveryTip() === undefined ? [] : [presenter.discoveryTip()!]),
-      "commands /help · /settings · /memory · /goal · /login · /ask · /mode · /plan · /model · /effort · /next · /tasks · /jobs · /subagent · /skills · /mounts · /permissions · /shell · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
+      "commands /help · /settings · /memory · /goal · /login · /ask · /mode · /plan · /model · /effort · /next · /tasks · /jobs · /subagent · /plugins · /skills · /agents · /mcp · /skill:<name> · /plugin:<id> · /agent:<id> · /mounts · /permissions · /shell · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
       "",
     ].join("\n"),
   );
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
         active.add(task);
         return;
       }
-      let request;
+      let request: SkillInstallCommand | undefined;
       try {
         const installArgument = command.name === "skill"
           ? command.argument
@@ -373,7 +373,10 @@ async function main(): Promise<void> {
         return;
       }
       const task = (request
-        ? runtime.installSkill(request.source, request.scope).then((installed) => `Installed ${installed.name} ${installed.version} in ${installed.scope} scope.`)
+        ? ("skill" in request && typeof request.skill === "string"
+          ? runtime.installGithubSkill(request.source, request.skill, request.scope)
+          : runtime.installSkill(request.source, request.scope))
+          .then((installed) => `Installed ${installed.name} ${installed.version} in ${installed.scope} scope.`)
         : runtime.refreshSkills().then((skills) => `Discovered ${skills.length} active Skill${skills.length === 1 ? "" : "s"}.`))
         .then((notice) => {
           presenter?.setSkills(runtime.skillCatalog(), runtime.skillCandidates());

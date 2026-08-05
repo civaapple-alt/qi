@@ -324,8 +324,8 @@ Authorized paths use `mount:<id>/…`; write/edit/move/remove remain confined to
 `.agents/skills`, user `$QI_HOME/resources/skills`, and activated global `~/.agents/skills`. The Qi roots take
 precedence over the corresponding Agent roots. Workspace Agent Skills are directly usable read-only; global Agent
 Skills are shown from `.skill-lock.json` as inactive until selected in `/skills` → **Enable / disable global Skills**;
-that panel uses the same Space-to-toggle / Enter-to-apply interaction as `/permissions` (`/skills activate|deactivate <name>`
-remains available for scripts), with state stored under
+that panel uses the same Space-to-toggle / Enter-to-apply interaction as `/permissions` (`/skill enable|disable <name>`
+is the command form), with state stored under
 `$QI_HOME/resources`. `~/.codex/skills` and `~/.claude/skills` are not scanned by default; explicit local paths remain available. Catalog metadata may enter the Run context; full
 instructions and resources enter only after a `skill` Action requests them.
 

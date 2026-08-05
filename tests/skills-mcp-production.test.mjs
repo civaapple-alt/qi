@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import {
   SkillCatalog,
   SkillLoader,
+  acquireImmutableSkillSource,
   evaluateSkillReadiness,
   runSkillScript,
 } from "../packages/node/dist/skills/index.js";
@@ -65,6 +66,32 @@ test("Skill full-tree install preserves binary resources, advisory metadata, loc
   }
 });
 
+test("immutable named Skill acquisition sparsely checks out only its declared subtree", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-skill-sparse-source-"));
+  try {
+    const repository = join(root, "repository");
+    await execFileAsync("git", ["init", "-q", repository]);
+    await execFileAsync("git", ["-C", repository, "config", "user.email", "qi@example.test"]);
+    await execFileAsync("git", ["-C", repository, "config", "user.name", "Qi test"]);
+    await mkdir(join(repository, "skills", "sparse-demo"), { recursive: true });
+    await mkdir(join(repository, "unrelated"), { recursive: true });
+    await writeFile(join(repository, "skills", "sparse-demo", "SKILL.md"), "---\nname: sparse-demo\ndescription: Sparse immutable source fixture.\n---\nUse it.\n");
+    await writeFile(join(repository, "unrelated", "large.txt"), "this file must not be materialized by the sparse checkout\n");
+    await execFileAsync("git", ["-C", repository, "add", "."]);
+    await execFileAsync("git", ["-C", repository, "commit", "-qm", "fixture"]);
+    const commit = (await execFileAsync("git", ["-C", repository, "rev-parse", "HEAD"])).stdout.trim();
+    const acquired = await acquireImmutableSkillSource({ type: "git", repository, commit, subdir: "skills/sparse-demo" });
+    try {
+      assert.match(await readFile(join(acquired.root, "SKILL.md"), "utf8"), /sparse-demo/);
+      await assert.rejects(() => access(join(acquired.root, "..", "..", "unrelated", "large.txt")));
+    } finally {
+      await acquired.cleanup();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("credential-free Skill and MCP JSON management commands operate without starting a model", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-extension-cli-"));
   try {
@@ -85,10 +112,10 @@ test("credential-free Skill and MCP JSON management commands operate without sta
     );
     const main = join(process.cwd(), "apps", "cli", "dist", "main.js");
     const environment = { ...process.env, QI_HOME: qiHome };
-    const installed = JSON.parse((await execFileAsync(process.execPath, [main, "skills", "install", source, "--scope", "workspace", "--workspace", workspace, "--json"], { env: environment })).stdout);
+    const installed = JSON.parse((await execFileAsync(process.execPath, [main, "skill", "install", source, "--scope", "workspace", "--workspace", workspace, "--json"], { env: environment })).stdout);
     assert.equal(installed.name, "cli-skill");
-    const listed = JSON.parse((await execFileAsync(process.execPath, [main, "skills", "list", "--workspace", workspace, "--json"], { env: environment })).stdout);
-    assert.ok(listed.some((entry) => entry.name === "cli-skill"));
+    const listed = JSON.parse((await execFileAsync(process.execPath, [main, "skill", "list", "--workspace", workspace, "--json"], { env: environment })).stdout);
+    assert.ok(listed.native.some((entry) => entry.name === "cli-skill"));
     const mcp = JSON.parse((await execFileAsync(process.execPath, [main, "mcp", "status", "--workspace", workspace, "--json"], { env: environment })).stdout);
     assert.equal(mcp.length, 1);
     assert.equal(mcp[0].name, "context7@claude-plugins-official");

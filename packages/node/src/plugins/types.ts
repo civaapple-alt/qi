@@ -6,6 +6,7 @@ export type MarketplaceSource =
 
 export interface KnownMarketplace {
   readonly name: string;
+  readonly enabled: boolean;
   readonly source: MarketplaceSource;
   readonly installLocation: string;
   readonly declaredName?: string;
@@ -86,6 +87,9 @@ export interface PluginSkillRef {
   readonly name: string;
   readonly description: string;
   readonly path: string;
+  readonly userInvocable: boolean;
+  readonly modelInvocable: boolean;
+  readonly invocationMode: "user-only" | "model-only" | "user+model" | "not-directly-invocable";
   readonly version?: string;
 }
 
@@ -96,7 +100,10 @@ export interface PluginSkillSnapshot {
 
 export interface PluginSkillStatus {
   readonly ref: PluginSkillRef;
+  /** Effective availability in the current plugin pin. Kept as `enabled` for existing consumers. */
   readonly enabled: boolean;
+  readonly selected: boolean;
+  readonly blockedReason?: "plugin-disabled" | "pin-confirmation";
 }
 
 export interface PluginCommandRef {

@@ -1,5 +1,5 @@
 import { lstat, readFile, readdir } from "node:fs/promises";
-import { basename, extname, resolve } from "node:path";
+import { basename, extname, relative, resolve, sep } from "node:path";
 import { parseFrontmatter } from "../skills/frontmatter.js";
 import type {
   ConvertedMcpDeclaration,
@@ -66,7 +66,7 @@ export async function listPluginCommands(
     const { metadata, body: _body } = await readMarkdown(path);
     const description = typeof metadata.description === "string" ? metadata.description.trim() : name;
     refs.push(Object.freeze({
-      id: commandId(plugin, name),
+      id: commandId(marketplace, plugin, name),
       plugin,
       marketplace,
       name,
@@ -74,45 +74,6 @@ export async function listPluginCommands(
       path,
       kind: "command",
     }));
-  }
-  const skillsRoot = resolve(pluginRoot, "skills");
-  for (const skillName of await listSkillIds(pluginRoot)) {
-    const path = resolve(skillsRoot, skillName, "SKILL.md");
-    const { metadata } = await readMarkdown(path);
-    const userInvocable = metadata["user-invocable"] !== false;
-    const hasArgumentHint = typeof metadata["argument-hint"] === "string";
-    const disableModel = metadata["disable-model-invocation"] === true;
-    // Skills that look user-invocable are also exposed under /plugin: (Claude legacy command parity).
-    if (plugin !== "superpowers" && !userInvocable && !hasArgumentHint && !disableModel) continue;
-    const description = typeof metadata.description === "string" ? metadata.description.trim() : skillName;
-    refs.push(Object.freeze({
-      id: commandId(plugin, skillName),
-      plugin,
-      marketplace,
-      name: skillName,
-      description,
-      path,
-      kind: "skill",
-    }));
-  }
-  // Pure model skills (no command dir, no invocable markers): still expose one /plugin:<plugin> entry when
-  // the plugin has exactly one skill and no commands, so frontend-design-style plugins remain callable.
-  if (refs.length === 0) {
-    const skillIds = await listSkillIds(pluginRoot);
-    if (skillIds.length === 1) {
-      const skillName = skillIds[0]!;
-      const path = resolve(skillsRoot, skillName, "SKILL.md");
-      const { metadata } = await readMarkdown(path);
-      refs.push(Object.freeze({
-        id: plugin,
-        plugin,
-        marketplace,
-        name: skillName,
-        description: typeof metadata.description === "string" ? metadata.description.trim() : skillName,
-        path,
-        kind: "skill",
-      }));
-    }
   }
   return Object.freeze(refs);
 }
@@ -123,19 +84,22 @@ export async function listPluginSkills(
   marketplace: string,
   pluginKey = `${plugin}@${marketplace}`,
 ): Promise<readonly PluginSkillRef[]> {
-  const skillsRoot = resolve(pluginRoot, "skills");
   const refs: PluginSkillRef[] = [];
-  for (const skillName of await listSkillIds(pluginRoot)) {
-    const path = resolve(skillsRoot, skillName, "SKILL.md");
+  for (const { name: skillName, path } of await listSkillEntries(pluginRoot)) {
     const { metadata } = await readMarkdown(path);
+    const userInvocable = metadata["user-invocable"] !== false;
+    const modelInvocable = metadata["disable-model-invocation"] !== true;
     refs.push(Object.freeze({
-      id: `${plugin}:${skillName}@${marketplace}`,
+      id: `${marketplace}:${plugin}:${skillName}`,
       pluginKey,
       plugin,
       marketplace,
       name: skillName,
       description: typeof metadata.description === "string" ? metadata.description.trim() : skillName,
       path,
+      userInvocable,
+      modelInvocable,
+      invocationMode: invocationMode(userInvocable, modelInvocable),
       ...(typeof metadata.version === "string" && metadata.version.trim() ? { version: metadata.version.trim() } : {}),
     }));
   }
@@ -160,7 +124,7 @@ export async function listPluginAgents(
       const model = typeof metadata.model === "string" ? metadata.model.trim() : undefined;
       const advisoryTools = parseTools(metadata.tools);
       refs.push(Object.freeze({
-        id: `${plugin}:${name}`,
+        id: `${marketplace}:${plugin}:${name}`,
         plugin,
         marketplace,
         name,
@@ -172,7 +136,7 @@ export async function listPluginAgents(
     } catch {
       // Keep listing resilient: one broken agent frontmatter must not fail the whole catalog.
       refs.push(Object.freeze({
-        id: `${plugin}:${basename(fileName, ".md")}`,
+        id: `${marketplace}:${plugin}:${basename(fileName, ".md")}`,
         plugin,
         marketplace,
         name: basename(fileName, ".md"),
@@ -239,14 +203,16 @@ function classifySupport(components: readonly PluginComponentSummary[]): PluginS
   return "supported";
 }
 
-async function readPluginManifest(root: string): Promise<{ name?: string; description?: string }> {
+async function readPluginManifest(root: string): Promise<{ name?: string; description?: string; skills?: readonly string[] }> {
   const path = resolve(root, ".claude-plugin", "plugin.json");
   try {
     const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
     if (!isRecord(raw)) return {};
+    const skills = raw.skills === undefined ? undefined : stringArray(raw.skills, "plugin.skills");
     return {
       ...(typeof raw.name === "string" ? { name: raw.name.trim() } : {}),
       ...(typeof raw.description === "string" ? { description: raw.description.trim() } : {}),
+      ...(skills === undefined ? {} : { skills: Object.freeze(skills) }),
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
@@ -255,15 +221,43 @@ async function readPluginManifest(root: string): Promise<{ name?: string; descri
 }
 
 async function listSkillIds(pluginRoot: string): Promise<string[]> {
+  return (await listSkillEntries(pluginRoot)).map((entry) => entry.name);
+}
+
+async function listSkillEntries(pluginRoot: string): Promise<readonly { name: string; path: string }[]> {
+  const manifest = await readPluginManifest(pluginRoot);
+  if (manifest.skills !== undefined) {
+    const entries: Array<{ name: string; path: string }> = [];
+    const names = new Set<string>();
+    for (const declared of manifest.skills) {
+      const normalized = declared.replaceAll("\\", "/").replace(/^\.\//, "");
+      const skillRoot = resolve(pluginRoot, normalized);
+      const rel = relative(pluginRoot, skillRoot);
+      if (!normalized || normalized.startsWith("/") || rel === ".." || rel.startsWith(`..${sep}`) || rel.startsWith(sep)) {
+        throw new TypeError(`plugin.skills path escapes plugin root: ${declared}`);
+      }
+      const info = await lstat(skillRoot);
+      if (info.isSymbolicLink() || !info.isDirectory()) throw new TypeError(`plugin.skills entry must be a real directory: ${declared}`);
+      const path = resolve(skillRoot, "SKILL.md");
+      const skillInfo = await lstat(path);
+      if (skillInfo.isSymbolicLink() || !skillInfo.isFile()) throw new TypeError(`plugin.skills entry is missing SKILL.md: ${declared}`);
+      const name = basename(skillRoot);
+      if (names.has(name)) throw new TypeError(`Duplicate plugin Skill: ${name}`);
+      names.add(name);
+      entries.push({ name, path });
+    }
+    return entries.sort((left, right) => left.name.localeCompare(right.name));
+  }
   const skillsRoot = resolve(pluginRoot, "skills");
   try {
     const entries = await readdir(skillsRoot, { withFileTypes: true });
-    const ids: string[] = [];
+    const ids: Array<{ name: string; path: string }> = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith(".")) continue;
-      if (await existsFile(resolve(skillsRoot, entry.name, "SKILL.md"))) ids.push(entry.name);
+      const path = resolve(skillsRoot, entry.name, "SKILL.md");
+      if (await existsFile(path)) ids.push({ name: entry.name, path });
     }
-    return ids.sort();
+    return ids.sort((left, right) => left.name.localeCompare(right.name));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
@@ -345,8 +339,15 @@ function unescapeClaudeScalar(value: string): string {
     .replace(/^["']|["']$/g, "");
 }
 
-function commandId(plugin: string, name: string): string {
-  return plugin === name ? plugin : `${plugin}:${name}`;
+function commandId(marketplace: string, plugin: string, name: string): string {
+  return `${marketplace}:${plugin}:${name}`;
+}
+
+function invocationMode(userInvocable: boolean, modelInvocable: boolean): PluginSkillRef["invocationMode"] {
+  if (userInvocable && modelInvocable) return "user+model";
+  if (userInvocable) return "user-only";
+  if (modelInvocable) return "model-only";
+  return "not-directly-invocable";
 }
 
 function sanitizeMcpName(key: string, pluginName: string): string {

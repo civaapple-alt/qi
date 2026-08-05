@@ -40,7 +40,9 @@ and `~/.claude/skills` are not scanned by default; an explicit path or configure
 ## Installation boundary
 
 Model-operated installation is local-only. A human may additionally select an immutable Git/GitHub commit or a
-digest-pinned HTTPS tar archive. Qi validates the complete ordinary-file tree, copies it into a hidden sibling
+digest-pinned HTTPS tar archive. For a human-selected GitHub repository plus Skill name, Qi resolves the current
+`HEAD` to an exact commit before acquisition and defaults to the bounded `skills/<name>` directory; a non-standard
+contained subdirectory must be supplied explicitly. Qi validates the complete ordinary-file tree, copies it into a hidden sibling
 staging directory, re-loads metadata, then renames atomically. Links/junctions, special files, path escape, case
 collision, Windows-reserved paths, VCS/package/cache payloads, oversized trees, overwrite, redirect, and floating
 remote identities fail closed. Archive download and expanded-entry sizes are both bounded.
@@ -79,8 +81,9 @@ bounded timeout, and startup-frozen interpreter profiles are accepted. Host exec
 trust boundary and settles through the ordinary Action/Effect Journal path; Ask and Plan modes deny it.
 
 Claude-compatible plugin Skills use a separate `plugin_skill` catalog backed by the immutable plugin cache. They
-are never merged into native `/skills` names, and a Run snapshots enabled plugin keys before model execution.
-`plugin_skill` can list/load/read resources in every read-capable mode; `run-script` remains Execute-authorized.
+are never merged into native `/skills` names, and a Run snapshots enabled, individually selected Skills before
+model execution. Only model-invocable Skills appear through `plugin_skill`; user-only Skills require an explicit
+`/skill:<marketplace>:<plugin>:<skill>` Run. `run-script` remains Execute-authorized.
 Extensionless plugin scripts are accepted only with the exact `#!/usr/bin/env bash` shebang. Plugin hooks,
 lifecycle commands, visual companion servers, and dependency installers are rejected or explicitly unavailable.
 

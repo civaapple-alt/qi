@@ -81,11 +81,11 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan` / `qianwenai` / a `$QI_HOME/providers` overlay id). For a full custom vendor (wire dialect, window, thinking), use Providers → **Add OpenAI-compatible provider** (writes `$QI_HOME/providers/<name>.toml` and seals the key). For thin multi-alias Chat Completions, use **OpenAI Compatible** with a **Name** (e.g. `zhipu`) under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
-| `/skills` | Skills hub with only two actions: activation management (Space toggles global Skills, Enter applies) and Install → scope → name/path form |
-| `/skill:<name> <task>` | Start an ordinary Run with one explicitly activated, digest-pinned Skill |
-| `/plugins [query]` | List enabled marketplace plugin commands; invoke with `/plugin:<id> <task>` |
-| `/plugin:<id> <task>` | Start a Run with one enabled marketplace command/skill body |
-| `/agents [query]` | List enabled marketplace agents; invoke with `/agent:<id> <task>` |
+| `/skills` | Horizontal Skills browser: Native, Global Agent, Plugin Skills, and Install tabs; type to search and Enter opens the corresponding selection flow |
+| `/skill:<name> <task>` | Start a Run with a native Skill or `/skill:<marketplace>:<plugin>:<skill>` marketplace Skill |
+| `/plugins [query]` | Marketplace-first plugin browser: ←/→ cycles All, Installed, each enabled marketplace, and Add Marketplace; Add Marketplace lists registered sources and can enable/disable them. Disabling a marketplace also disables its installed plugins but retains their caches; re-enabling does not restore them. Enter offers install/enable/details, and Space enables/disables an installed plugin. A query selects a marketplace tab or seeds the search. |
+| `/plugin:<id> <task>` | Start a Run with one enabled marketplace command body |
+| `/agents [query]` | List enabled marketplace agents; invoke with `/agent:<marketplace>:<plugin>:<agent> <task>` |
 | `/agent:<id> <task>` | Start a Run with one enabled marketplace agent profile |
 | `/mcp` | Single MCP management panel: server status, refresh, OAuth, capability inspection, bind, and unbind; use `qi mcp …` for non-interactive management |
 | `/tasks` | List depth-1 Subagent research Tasks for the selected Run; Enter opens tracking |
@@ -391,15 +391,18 @@ batch fan-out max **4** and depth **1** are fixed product limits shown in the hu
 The active Skill catalog combines `<workspace>/.qi/skills`, `<workspace>/.agents/skills`, `$QI_HOME/resources/skills`,
 and activated entries from `~/.agents/skills`; project `.qi/skills` wins on a name collision. Workspace Agent Skills
 are directly usable read-only. Global Agent Skills appear from `.skill-lock.json` as inactive candidates and become
-usable through `/skills` → **启用 / 停用全局 Skill** (Space toggles, Enter applies; `/skills activate|deactivate <name>` remains available for scripts); activation state is stored under `$QI_HOME/resources`. Workspace/user Qi Skills are always active and are not toggleable; `/skills` → **始终启用的 Skill** lists them with a `/skill:<name> <task>` invoke hint. `~/.codex/skills` and
+usable through `/skills` → **启用 / 停用全局 Skill** (Space toggles, Enter applies; `/skill enable|disable <name>` is the command form); activation state is stored under `$QI_HOME/resources`. Workspace/user Qi Skills are always active and are not toggleable; `/skills` → **始终启用的 Skill** lists them with a `/skill:<name> <task>` invoke hint. `~/.codex/skills` and
 `~/.claude/skills` are not scanned by default; use an explicit local path or configured compatibility root. Only independently omittable metadata entries enter initial model context, plus a short required
 progressive-discovery hint in the advertised `skill` Tool schema and an optional context index. The `skill` tool
 progressively loads a selected
-`SKILL.md` or named resource. `/skills` → **Install skill** picks user vs Workspace scope, then a form for a
-compatible Skill name or local path (for example from `~/.codex/skills/.system`); Qi does not fetch because a
-model mentioned a remote Skill. Human `qi skills install` additionally supports exact Git/GitHub commits or
-SHA-256-pinned HTTPS archives. With write authority, the model can only install to the Workspace and the Action
-remains capability-checked and Effect-Journaled.
+`SKILL.md` or named resource. `/skills` → **Install** first chooses GitHub or local source, captures the
+repository plus Skill name (or an explicit local directory), and only then asks for user vs Workspace scope.
+`qi skill install https://github.com/shadcn/ui --skill shadcn` follows the same path: Qi resolves current GitHub
+`HEAD` to an exact commit, installs `skills/shadcn`, and records that commit in the Skill lock. A non-standard
+layout may use `--subdir`; exact Git/GitHub commits and SHA-256-pinned HTTPS archives remain available. Remote
+installation is human-initiated only, never triggered by a model mention; review `SKILL.md` before installing.
+With write authority, the model can only install to the Workspace and the Action remains capability-checked and
+Effect-Journaled.
 
 `/skill:<name> <task>` freezes Skill scope, tree digest, and instruction digest into the Run. Typing `/skill:` in
 the editor offers active Skill names with prefix filtering; the selected name must be followed by a task. The body
@@ -447,7 +450,7 @@ Registry-published stdio servers may use explicit `npx` or `uvx` declarations, f
 selectors. Refresh is the explicit point where the launcher may resolve, download, and start that package;
 discovered capabilities remain quarantined until separately bound.
 
-Credential-free JSON management is available as `qi skills list|activate|deactivate|install ... --json` and
+Credential-free JSON management is available as `qi skill list|enable|disable|install ... --json` and
 `qi mcp status|refresh|bind|unbind|logout ... --json`. Secrets are never accepted as command-line options.
 
 The `/plugins` and `/agents` panels show each installed plugin as `name@marketplace` with enablement state;
@@ -456,15 +459,16 @@ The `/plugins` and `/agents` panels show each installed plugin as `name@marketpl
 Claude-compatible marketplaces (ADR-0037) use an explicit `qi marketplace add` → `qi plugin install` →
 `qi plugin enable` flow, plus `qi marketplace sync|search`, `qi plugin list|commands`, and `qi agent list`.
 Both `superpowers`' self marketplace and `claude-plugins-official` are supported; install selectors use
-`plugin@marketplace`, while the legacy two-argument install form remains accepted. Plugin Skills are model-facing
-through `plugin_skill`, not native `/skills`; plugin MCP declarations remain inert under `$QI_HOME/resources/mcp`
+`plugin@marketplace`, while the legacy two-argument install form remains accepted. Plugin Skills are selected in
+`/skills`; their upstream `user-invocable` / `disable-model-invocation` policy controls slash and model discovery.
+Plugin MCP declarations remain inert under `$QI_HOME/resources/mcp`
 and still require `/mcp` refresh + bind. Hooks, LSP, and Superpowers' visual companion are unsupported. See
 `packages/node/docs/plugins/README.md`.
 
-Installing a plugin does not enable it. After `qi plugin enable <plugin>@<marketplace>`, restart the CLI before
-running a new task. For example, `/plugin:superpowers:using-superpowers <task>` explicitly activates the pinned
-Superpowers bootstrap; ordinary tasks also receive that bootstrap automatically when the canonical Superpowers
-plugin is enabled.
+Installing a plugin does not enable it. After `qi plugin enable <plugin>@<marketplace>`, select required Skills
+with `qi skill enable <marketplace>:<plugin>:<skill>` or `/skills`; the next Run sees the new snapshot without a
+restart. Superpowers remains the exception: ordinary tasks receive its bootstrap when the canonical plugin is
+enabled.
 
 See [the interaction contract](docs/interaction-model.md) for projection and rendering boundaries.
 The cross-package timeline and attention decision is

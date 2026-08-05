@@ -12,32 +12,50 @@ import {
 } from "@civaapple/qi-node/mcp";
 import { projectPaths } from "@civaapple/qi-node/paths";
 import { SkillCatalog, type ImmutableSkillSource, type SkillScope } from "@civaapple/qi-node/skills";
+import { MarketplaceRegistry, PluginCatalog, PluginInstaller } from "@civaapple/qi-node/plugins";
 
 /** Credential-free, non-interactive Skill/MCP management commands. */
 export async function runExtensionCliCommand(args: readonly string[]): Promise<boolean> {
-  if (args[0] !== "skills" && args[0] !== "mcp") return false;
+  if (args[0] !== "skill" && args[0] !== "mcp") return false;
   const parsed = parse(args.slice(1));
   const workspaceRoot = resolve(parsed.values.get("workspace") ?? ".");
   const paths = projectPaths({ workspaceRoot });
-  if (args[0] === "skills") {
+  if (args[0] === "skill") {
     const catalog = new SkillCatalog({ workspaceRoot, userSkillsRoot: resolve(paths.qiHome, "resources", "skills") });
+    const registry = new MarketplaceRegistry(paths.qiHome);
+    const pluginCatalog = new PluginCatalog(paths.qiHome, registry, new PluginInstaller(paths.qiHome, registry));
     const operation = parsed.positionals.shift() ?? "list";
-    if (operation === "list") return output(await catalog.discover(), parsed.json);
-    if (operation === "activate") {
+    if (operation === "list") return output({ native: await catalog.discover(), marketplace: await pluginCatalog.listInstalledSkills() }, parsed.json);
+    if (operation === "enable") {
       const name = required(parsed.positionals.shift(), "Skill name");
-      return output(await catalog.activateAgentSkill(name), parsed.json);
+      const plugin = await pluginCatalog.listInstalledSkills(name);
+      const native = (await catalog.discover()).some((entry) => entry.name === name);
+      return output(!native && (plugin.length > 0 || name.includes(":"))
+        ? await pluginCatalog.enableSkill(name)
+        : await catalog.activateAgentSkill(name), parsed.json);
     }
-    if (operation === "deactivate") {
+    if (operation === "disable") {
       const name = required(parsed.positionals.shift(), "Skill name");
-      return output({ name, deactivated: await catalog.deactivateAgentSkill(name) }, parsed.json);
+      const plugin = await pluginCatalog.listInstalledSkills(name);
+      const native = (await catalog.discover()).some((entry) => entry.name === name);
+      return output(!native && (plugin.length > 0 || name.includes(":"))
+        ? await pluginCatalog.disableSkill(name)
+        : { name, disabled: await catalog.deactivateAgentSkill(name) }, parsed.json);
     }
-    if (operation !== "install") throw new TypeError("Usage: qi skills list|activate|deactivate|install SOURCE [--scope user|workspace] [--commit SHA --subdir PATH | --sha256 DIGEST] [--json]");
+    if (operation !== "install") throw new TypeError("Usage: qi skill list|enable|disable|install SOURCE [--skill NAME | --scope user|workspace] [--commit SHA --subdir PATH | --sha256 DIGEST] [--json]");
     const source = required(parsed.positionals.shift(), "Skill SOURCE");
     const scope = (parsed.values.get("scope") ?? "user") as SkillScope;
     if (scope !== "user" && scope !== "workspace") throw new TypeError("--scope must be user or workspace");
-    const immutable = immutableSource(source, parsed.values);
+    const skillName = parsed.values.get("skill");
+    if (skillName && (parsed.values.has("commit") || parsed.values.has("sha256"))) {
+      throw new TypeError("--skill resolves and pins GitHub HEAD; do not combine it with --commit or --sha256");
+    }
+    const immutable = skillName ? undefined : immutableSource(source, parsed.values);
     const expectedName = parsed.values.get("name");
-    const installed = immutable
+    const subdir = parsed.values.get("subdir");
+    const installed = skillName
+      ? await catalog.installGithubSkill(source, skillName, { scope, ...(subdir === undefined ? {} : { subdir }) })
+      : immutable
       ? await catalog.installImmutable(immutable, { scope, ...(expectedName ? { expectedName } : {}) })
       : await catalog.install({ source, scope, ...(expectedName ? { expectedName } : {}) });
     return output(installed, parsed.json);

@@ -37,17 +37,17 @@ export function createTuiPluginSkillTool(catalog: PluginCatalog, workspaceRoot: 
     },
     execute: async (input: Input, context) => {
       if (input.operation === "list") {
-        return { skills: await catalog.listSkills() };
+        return { skills: (await catalog.listSkills()).filter((skill) => skill.modelInvocable) };
       }
       const pluginKey = requireField(input.pluginKey, "pluginKey", input.operation);
       const skill = requireField(input.skill, "skill", input.operation);
       if (input.operation === "load") {
-        const loaded = await catalog.loadSkill(pluginKey, skill);
+        const loaded = await catalog.loadModelSkill(pluginKey, skill);
         return { ...loaded.ref, instructions: loaded.body, instructionsSha256: loaded.digest };
       }
       if (input.operation === "read-resource") {
         const path = requireField(input.path, "path", input.operation);
-        const content = await catalog.readSkillResource(pluginKey, skill, path);
+        const content = await catalog.readModelSkillResource(pluginKey, skill, path);
         try {
           return { pluginKey, skill, path, text: new TextDecoder("utf-8", { fatal: true }).decode(content) };
         } catch {
@@ -56,7 +56,7 @@ export function createTuiPluginSkillTool(catalog: PluginCatalog, workspaceRoot: 
         }
       }
       const path = requireField(input.path, "path", input.operation);
-      const ref = await catalog.resolveSkill(pluginKey, skill);
+      const ref = await catalog.resolveModelSkill(pluginKey, skill);
       if (ref.name === "brainstorming" && path.startsWith("scripts/")) {
         throw new ToolFailure("PLUGIN_SKILL_SCRIPT_UNSUPPORTED", "Superpowers visual companion scripts are not available in Qi");
       }

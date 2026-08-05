@@ -97,7 +97,7 @@ const HELP_TEXT =
   "qi install|update SOURCE [--scope user|project] [--workspace PATH]\n" +
   "qi remove PACKAGE_ID [--scope user|project] [--workspace PATH]\n" +
   "qi list [--scope user|project] [--workspace PATH]\n" +
-  "qi skills list|activate|deactivate|install SOURCE [--scope user|workspace] [--commit SHA --subdir PATH|--sha256 DIGEST] [--json]\n" +
+  "qi skill list|enable|disable|install SOURCE [--scope user|workspace] [--commit SHA --subdir PATH|--sha256 DIGEST] [--json]\n" +
   "qi mcp status|refresh|bind|unbind|logout [args] [--workspace PATH] [--json]\n" +
   "  WORKSPACE defaults to the current directory (same as `qi --workspace .`).\n" +
   "  Options: [--workspace PATH] [--data PATH] [--provider ID] [--model ID] [--effort LEVEL] [--base-url URL]\n" +

@@ -25,6 +25,12 @@ export interface AcquiredSkillSource {
   cleanup(): Promise<void>;
 }
 
+/** A human-selected GitHub Skill, resolved to the commit that will be locked. */
+export interface ResolvedGithubSkillSource {
+  readonly source: Extract<ImmutableSkillSource, { type: "github" }>;
+  readonly skill: string;
+}
+
 const commitPattern = /^[0-9a-f]{40}$/i;
 const sha256Pattern = /^(?:sha256:)?([0-9a-f]{64})$/i;
 const maximumArchiveBytes = 64 * 1024 * 1024;
@@ -41,6 +47,13 @@ export async function acquireImmutableSkillSource(source: ImmutableSkillSource):
     assertRelativeSubdir(normalized.subdir);
     const checkout = resolve(staging, "checkout");
     await runGit(["clone", "--no-checkout", "--filter=blob:none", "--", normalized.repository, checkout]);
+    // Named Skills normally occupy a small directory inside a larger repository. Sparse checkout
+    // keeps the immutable acquisition bounded to that declared tree instead of materializing the
+    // rest of (for example) a component library repository.
+    if (normalized.subdir !== ".") {
+      await runGit(["-C", checkout, "sparse-checkout", "init", "--no-cone"]);
+      await runGit(["-C", checkout, "sparse-checkout", "set", "--no-cone", `${normalized.subdir}/**`]);
+    }
     await runGit(["-C", checkout, "checkout", "--detach", normalized.commit]);
     const actual = (await runGit(["-C", checkout, "rev-parse", "HEAD"])).trim();
     if (actual.toLowerCase() !== normalized.commit.toLowerCase()) throw new Error("Git checkout did not resolve to the pinned commit");
@@ -59,6 +72,33 @@ export async function acquireImmutableSkillSource(source: ImmutableSkillSource):
     await rm(staging, { recursive: true, force: true });
     throw error;
   }
+}
+
+/**
+ * Resolve GitHub HEAD before acquisition. The resulting immutable source is what gets written to
+ * the Skill lock, so a later install or Run never follows a moving branch name.
+ *
+ * The usual Skills layout is `skills/<name>`. A repository with a different layout can supply a
+ * contained `subdir`; SkillCatalog still verifies the frontmatter name before it is installed.
+ */
+export async function resolveGithubSkillSource(
+  url: string,
+  skill: string,
+  options: { subdir?: string } = {},
+): Promise<ResolvedGithubSkillSource> {
+  const normalized = githubSource({ type: "github", url, commit: "0".repeat(40), subdir: "." });
+  if (!skill || /[\\/]/.test(skill) || skill === "." || skill === "..") {
+    throw new TypeError("GitHub Skill name must be a single Skill directory name");
+  }
+  const output = await runGit(["ls-remote", normalized.repository, "HEAD"]);
+  const commit = /^([0-9a-f]{40})\s+HEAD\s*$/im.exec(output)?.[1];
+  if (!commit) throw new Error("GitHub repository did not return an exact HEAD commit");
+  const subdir = options.subdir ?? `skills/${skill}`;
+  assertRelativeSubdir(subdir);
+  return {
+    skill,
+    source: { type: "github", url, commit: commit.toLowerCase(), subdir },
+  };
 }
 
 async function acquireArchive(source: Extract<ImmutableSkillSource, { type: "archive" }>, staging: string): Promise<AcquiredSkillSource> {

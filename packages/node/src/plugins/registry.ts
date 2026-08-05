@@ -46,6 +46,7 @@ export class MarketplaceRegistry {
     const declaredName = await readMarketplaceName(installLocation);
     const entry: KnownMarketplace = Object.freeze({
       name,
+      enabled: true,
       source: source.kind === "local" ? Object.freeze({ kind: "local", path: installLocation }) : source,
       installLocation,
       ...(declaredName === undefined ? {} : { declaredName }),
@@ -60,6 +61,7 @@ export class MarketplaceRegistry {
 
   async sync(name: string): Promise<KnownMarketplace> {
     const current = await this.get(name);
+    if (!current.enabled) throw new Error(`Marketplace ${name} is disabled; enable it before syncing`);
     if (current.source.kind === "local") {
       await assertMarketplaceRoot(current.installLocation);
     } else {
@@ -88,10 +90,21 @@ export class MarketplaceRegistry {
 
   async loadCatalog(name: string): Promise<MarketplaceCatalog> {
     const marketplace = await this.get(name);
+    if (!marketplace.enabled) throw new Error(`Marketplace ${name} is disabled; enable it before browsing or installing plugins`);
     const raw = JSON.parse(
       await readFile(resolve(marketplace.installLocation, ".claude-plugin", "marketplace.json"), "utf8"),
     ) as unknown;
     return parseMarketplaceCatalog(raw);
+  }
+
+  async setEnabled(name: string, enabled: boolean): Promise<KnownMarketplace> {
+    const known = await this.#readKnown();
+    const current = known.marketplaces[name];
+    if (!current) throw new Error(`Unknown marketplace: ${name}`);
+    const updated = Object.freeze({ ...current, enabled });
+    known.marketplaces[name] = updated;
+    await this.#writeKnown(known);
+    return updated;
   }
 
   async #readKnown(): Promise<{ schemaVersion: 1; marketplaces: Record<string, KnownMarketplace> }> {
@@ -132,6 +145,7 @@ async function syncGithubMarketplace(repo: string, installLocation: string, ref 
   } catch {
     await runGit(["clone", "--depth", "1", "--branch", ref, url, installLocation]);
   }
+
   await assertMarketplaceRoot(installLocation);
   return readRevision(installLocation);
 }
@@ -183,6 +197,7 @@ function parseKnown(value: unknown, key: string): KnownMarketplace {
   const source = parseSource(value.source, key);
   return Object.freeze({
     name,
+    enabled: value.enabled !== false,
     source,
     installLocation,
     ...(typeof value.declaredName === "string" ? { declaredName: value.declaredName } : {}),

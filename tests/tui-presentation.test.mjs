@@ -39,6 +39,7 @@ import {
 import { createAskQuestionTool } from "../apps/cli/dist/ask-question-tool.js";
 import { createPlanDocumentTool, validateFormalPlan } from "../apps/cli/dist/plan-tool.js";
 import { McpBindingPanel } from "../apps/cli/dist/panels/mcp-binding-panel.js";
+import { PluginBrowserPanel } from "../apps/cli/dist/panels/plugin-browser-panel.js";
 import { mcpServerMaxVisible } from "../apps/cli/dist/panels/flows.js";
 import { visibleWidth } from "@civaapple/qi-tui";
 
@@ -111,6 +112,11 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.deepEqual(parseSkillInstallCommand("install skill-creator"), { source: "skill-creator", scope: "user" });
   assert.deepEqual(parseSkillInstallCommand('install --workspace "skill drafts/my-skill"'), {
     source: "skill drafts/my-skill",
+    scope: "workspace",
+  });
+  assert.deepEqual(parseSkillInstallCommand("install --workspace https://github.com/shadcn/ui --skill shadcn"), {
+    source: "https://github.com/shadcn/ui",
+    skill: "shadcn",
     scope: "workspace",
   });
   assert.throws(() => parseSkillInstallCommand("install"), /Usage/);
@@ -816,13 +822,12 @@ test("interactive TUI renders command help and exits through the editor", async 
     terminal.sendText("\u001b");
     await delay(25);
     terminal.sendText("/skills\r");
-    await waitUntil(() => /Install skill|安装技能|Always-on Skills|始终启用的 Skill/.test(terminal.output));
-    terminal.sendText("\r");
-    await waitUntil(() => /No always-on Skills|没有始终启用的 Skill/.test(terminal.output));
-    assert.match(terminal.output, /\/skills/);
+    await waitUntil(() => /Native \(0\)|Plugin Skills \(0\)/.test(terminal.output));
+    terminal.sendText("\t\t\t\r"); // Install tab
+    await waitUntil(() => /Install into|安装到/.test(terminal.output));
     assert.equal(presenter.inspections().length, 0);
     assert.equal(runtime.events().length, 0);
-    // Empty always-on list keeps the hub visible; Esc returns to the composer.
+    terminal.sendText("\u001b");
     terminal.sendText("\u001b");
     await delay(25);
     terminal.sendText("/quit\r");
@@ -2606,11 +2611,11 @@ test("/skills exposes always-on catalog, activation management, and installation
   openSkillsHubPanel(ctx);
   const hub = pushed[0];
   const hubText = hub.render(100).join("\n");
-  assert.match(hubText, /始终启用的 Skill/);
-  assert.match(hubText, /1 个 · Workspace \/ 用户 Qi · 无需开关/);
-  assert.match(hubText, /启用 \/ 停用全局 Skill/);
-  assert.match(hubText, /安装技能/);
-  assert.doesNotMatch(hubText, /prompting-guide|global-review|future-skill/);
+  assert.match(hubText, /Native \(1\)/);
+  assert.match(hubText, /Global Agent \(1\)/);
+  assert.match(hubText, /Plugin Skills \(0\)/);
+  assert.match(hubText, /Install/);
+  assert.match(hubText, /prompting-guide/);
 
   hub.handleInput("\r");
   const alwaysOn = pushed[1];
@@ -2624,7 +2629,7 @@ test("/skills exposes always-on catalog, activation management, and installation
 
   openSkillsHubPanel(ctx);
   const hubAgain = pushed.at(-1);
-  hubAgain.handleInput("\u001b[B"); // down to activation
+  hubAgain.handleInput("\t"); // Global Agent tab
   hubAgain.handleInput("\r");
   const activation = pushed.at(-1);
   assert.match(activation.render(100).join("\n"), /Space 启用\/停用/);
@@ -4373,6 +4378,43 @@ test("MultiSelectPanel Space toggles and Enter applies selected capability ids",
   assert.equal(closed, false);
   panel.handleInput("\u001b");
   assert.equal(closed, true);
+});
+
+test("PluginBrowserPanel groups marketplace entries, filters, and separates details from enablement", () => {
+  const opened = [];
+  const toggled = [];
+  let addMarketplace = false;
+  const panel = new PluginBrowserPanel({
+    items: [
+      { id: "alpha:review", pluginName: "review", name: "Review", marketplace: "alpha", description: "Review pull requests", installed: true, enabled: true, version: "1.0.0" },
+      { id: "alpha:design", pluginName: "design", name: "Design", marketplace: "alpha", description: "Design systems", installed: true, enabled: false },
+      { id: "beta:docs", pluginName: "docs", name: "Docs", marketplace: "beta", description: "Write documents", installed: false, enabled: false },
+    ],
+    marketplaces: ["alpha", "beta"],
+    onOpen: (item) => opened.push(item.id),
+    onToggle: (item) => toggled.push(item.id),
+    onAddMarketplace: () => { addMarketplace = true; },
+    onClose: () => {},
+  });
+  const initial = stripVTControlCharacters(panel.render(90).join("\n"));
+  assert.match(initial, /Installed 2 of 3 available plugins/);
+  assert.match(initial, /\[\*\] Review/);
+  assert.match(initial, /Review  Enabled · alpha · v1\.0\.0 · Review pull requests/);
+  panel.handleInput(" ");
+  assert.deepEqual(toggled, ["alpha:design"]);
+  panel.handleInput("d");
+  assert.match(stripVTControlCharacters(panel.render(90).join("\n")), /Design/);
+  panel.handleInput("\u001b"); // clear search
+  panel.handleInput("\t"); // Installed tab
+  assert.match(stripVTControlCharacters(panel.render(90).join("\n")), /Review/);
+  panel.handleInput("\t"); // alpha tab
+  panel.handleInput("\u001b[B"); // Review
+  panel.handleInput("\r");
+  assert.deepEqual(opened, ["alpha:review"]);
+  panel.handleInput("\t"); // beta tab
+  panel.handleInput("\t"); // Add Marketplace
+  panel.handleInput("\r");
+  assert.equal(addMarketplace, true);
 });
 
 test("QuestionPanel answers multiple/text questions and persists Esc as skip", () => {

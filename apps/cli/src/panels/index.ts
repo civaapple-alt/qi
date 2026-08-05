@@ -38,6 +38,18 @@ export {
 export { ListPanel, type ListPanelOptions } from "./list-panel.js";
 export { MultiSelectPanel, type MultiSelectPanelOptions } from "./multi-select-panel.js";
 export {
+  PluginBrowserPanel,
+  type PluginBrowserItem,
+  type PluginBrowserPanelOptions,
+  type PluginBrowserTab,
+} from "./plugin-browser-panel.js";
+export {
+  SkillBrowserPanel,
+  type SkillBrowserItem,
+  type SkillBrowserPanelOptions,
+  type SkillBrowserTab,
+} from "./skill-browser-panel.js";
+export {
   QuestionPanel,
   type QuestionPanelAnswer,
   type QuestionPanelQuestion,

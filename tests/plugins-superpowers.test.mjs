@@ -26,6 +26,9 @@ test("Superpowers-style marketplace installs Skills and supports the plugin Skil
     const installed = await installer.install("superpowers-marketplace", "superpowers");
     const catalog = new PluginCatalog(qiHome, registry, installer);
     await catalog.enable(installed.key);
+    for (const skill of ["brainstorming", "subagent-driven-development", "using-superpowers"]) {
+      await catalog.enableSkill(`superpowers-marketplace:superpowers:${skill}`);
+    }
     const skills = await catalog.listSkills();
     assert.deepEqual(skills.map((entry) => entry.name), ["brainstorming", "subagent-driven-development", "using-superpowers"]);
     const loaded = await catalog.loadSkill(installed.key, "brainstorming");
@@ -36,6 +39,11 @@ test("Superpowers-style marketplace installs Skills and supports the plugin Skil
     assert.equal(marker.declaredMarketplace, "superpowers-dev");
     assert.match(marker.treeDigest, /^[0-9a-f]{64}$/);
     assert.equal(installed.treeDigest, marker.treeDigest);
+    await catalog.setMarketplaceEnabled("superpowers-marketplace", false);
+    assert.deepEqual(await catalog.listEnabled(), []);
+    assert.equal((await catalog.listInstalled()).some((record) => record.key === "superpowers@superpowers-marketplace"), true);
+    await catalog.setMarketplaceEnabled("superpowers-marketplace", true);
+    assert.deepEqual(await catalog.listEnabled(), []);
   } finally {
     await removeFixture(qiHome);
   }

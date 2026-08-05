@@ -14,6 +14,7 @@ import {
 } from "./skill-loader.js";
 import {
   acquireImmutableSkillSource,
+  resolveGithubSkillSource,
   type ImmutableSkillSource,
   type SkillSourceProvenance,
 } from "./source.js";
@@ -350,6 +351,22 @@ export class SkillCatalog {
     } finally {
       await acquired.cleanup();
     }
+  }
+
+  /** Human-operated `npx skills add <github-url> --skill <name>` convenience path. */
+  async installGithubSkill(
+    url: string,
+    name: string,
+    options: { scope?: SkillScope; subdir?: string } = {},
+  ): Promise<InstalledSkill> {
+    if (!skillNamePattern.test(name)) throw new TypeError(`Invalid Skill name: ${name}`);
+    const resolved = await resolveGithubSkillSource(url, name, {
+      ...(options.subdir === undefined ? {} : { subdir: options.subdir }),
+    });
+    return this.installImmutable(resolved.source, {
+      scope: options.scope ?? "user",
+      expectedName: resolved.skill,
+    });
   }
 
   async exportWorkspaceDraft(name: string, destination: string): Promise<ExportedWorkspaceSkillDraft> {

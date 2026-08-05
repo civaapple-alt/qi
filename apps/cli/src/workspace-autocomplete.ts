@@ -29,6 +29,7 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
     readonly skillNames: readonly string[] = [],
     readonly pluginCommandIds: readonly string[] = [],
     readonly agentIds: readonly string[] = [],
+    readonly pluginSkillIds: readonly string[] = [],
   ) {
     this.#inner = new CombinedAutocompleteProvider([...commands], workspaceRoot);
   }
@@ -43,10 +44,15 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
     const skillPrefix = activeSkillPrefix(before);
     if (skillPrefix !== undefined) {
       const needle = skillPrefix.slice("/skill:".length).toLowerCase();
-      const items = this.skillNames
+      const native = this.skillNames
         .filter((name) => name.toLowerCase().startsWith(needle))
         .slice(0, MAX_SUGGESTIONS)
         .map((name) => dynamicSlashItem("/skill:", name, "Active Skill"));
+      const plugin = this.pluginSkillIds
+        .filter((id) => id.toLowerCase().startsWith(needle) || id.toLowerCase().includes(needle))
+        .slice(0, MAX_SUGGESTIONS)
+        .map((id) => dynamicSlashItem("/skill:", id, "Enabled marketplace Skill"));
+      const items = [...native, ...plugin].slice(0, MAX_SUGGESTIONS);
       return items.length === 0 ? null : { prefix: skillPrefix, items };
     }
     const pluginPrefix = activePrefixedSlash(before, "/plugin:");
@@ -162,7 +168,7 @@ function atPrefix(text: string): string | undefined {
 }
 
 function activeSkillPrefix(text: string): string | undefined {
-  const match = /(?:^|\s)(\/skill:[a-z0-9-]*)$/i.exec(text);
+  const match = /(?:^|\s)(\/skill:[a-z0-9:_-]*)$/i.exec(text);
   return match?.[1];
 }
 

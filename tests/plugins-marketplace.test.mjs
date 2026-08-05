@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -65,8 +65,8 @@ test("marketplace registry local add + install + enable + /plugin command resolv
     await plugins.enable(installed.key);
     const commands = await plugins.listCommands("review");
     assert.equal(commands.length, 1);
-    assert.equal(commands[0].id, "code-review");
-    const loaded = await plugins.loadCommandBody("code-review");
+    assert.equal(commands[0].id, "fixture-marketplace:code-review:code-review");
+    const loaded = await plugins.loadCommandBody("fixture-marketplace:code-review:code-review");
     assert.match(loaded.body, /Review the pull request/);
     assert.equal(loaded.digest.length, 64);
   } finally {
@@ -74,7 +74,7 @@ test("marketplace registry local add + install + enable + /plugin command resolv
   }
 });
 
-test("frontend-design skill plugin exposes /plugin entry", async () => {
+test("manifest-declared nested Skills are selected independently and preserve invocation policy", async () => {
   const qiHome = await mkdtemp(join(tmpdir(), "qi-plugins-skill-"));
   try {
     await ensureQiLayout(qiHome);
@@ -85,9 +85,75 @@ test("frontend-design skill plugin exposes /plugin entry", async () => {
     const plugins = new PluginCatalog(qiHome, registry, installer);
     await plugins.enable(installed.key);
     const commands = await plugins.listCommands();
-    assert.equal(commands.length, 1);
-    assert.equal(commands[0].id, "frontend-design");
-    assert.equal(commands[0].kind, "skill");
+    assert.equal(commands.length, 0);
+    const statuses = await plugins.listInstalledSkills();
+    assert.deepEqual(statuses.map((entry) => entry.ref.name), ["frontend-design", "model-review"]);
+    assert.equal(statuses[0].ref.invocationMode, "user-only");
+    assert.equal(statuses[1].ref.invocationMode, "model-only");
+    await plugins.enableSkill("fixture-marketplace:frontend-design:frontend-design");
+    const selected = await plugins.listSkills();
+    assert.deepEqual(selected.map((entry) => entry.id), ["fixture-marketplace:frontend-design:frontend-design"]);
+    await assert.rejects(
+      () => plugins.resolveModelSkill(installed.key, "frontend-design"),
+      /model-invocable/,
+    );
+    await plugins.enableSkill("fixture-marketplace:frontend-design:model-review");
+    const modelSkill = await plugins.resolveModelSkill(installed.key, "model-review");
+    assert.equal(modelSkill.invocationMode, "model-only");
+  } finally {
+    await removeFixture(qiHome);
+  }
+});
+
+test("catalog supports the TUI add → install → enable plugin flow", async () => {
+  const qiHome = await mkdtemp(join(tmpdir(), "qi-plugins-tui-flow-"));
+  try {
+    await ensureQiLayout(qiHome);
+    const registry = new MarketplaceRegistry(qiHome);
+    const installer = new PluginInstaller(qiHome, registry);
+    const plugins = new PluginCatalog(qiHome, registry, installer);
+    const marketplace = await plugins.addMarketplace("fixture-marketplace", { kind: "local", path: fixtureMarketplace });
+    assert.equal(marketplace.name, "fixture-marketplace");
+    const disabled = await plugins.setMarketplaceEnabled(marketplace.name, false);
+    assert.equal(disabled.enabled, false);
+    await assert.rejects(() => plugins.searchMarketplace(marketplace.name, ""), /disabled/);
+    await plugins.setMarketplaceEnabled(marketplace.name, true);
+    const installed = await plugins.installMarketplacePlugin("fixture-marketplace", "frontend-design");
+    assert.equal(installed.record.key, "frontend-design@fixture-marketplace");
+    assert.deepEqual(await plugins.listEnabled(), []);
+    await plugins.enable(installed.record.key);
+    assert.deepEqual(await plugins.listEnabled(), [installed.record.key]);
+    await plugins.setMarketplaceEnabled(marketplace.name, false);
+    assert.deepEqual(await plugins.listEnabled(), []);
+    assert.equal((await plugins.listInstalled()).some((record) => record.key === installed.record.key), true);
+    await plugins.setMarketplaceEnabled(marketplace.name, true);
+    assert.deepEqual(await plugins.listEnabled(), []);
+  } finally {
+    await removeFixture(qiHome);
+  }
+});
+
+test("legacy whole-plugin enablement migrates to selected Skills and pin changes require reconfirmation", async () => {
+  const qiHome = await mkdtemp(join(tmpdir(), "qi-plugins-enable-migration-"));
+  try {
+    await ensureQiLayout(qiHome);
+    const registry = new MarketplaceRegistry(qiHome);
+    await registry.add("fixture-marketplace", { kind: "local", path: fixtureMarketplace });
+    const installer = new PluginInstaller(qiHome, registry);
+    const installed = await installer.install("fixture-marketplace", "frontend-design");
+    const enabledPath = join(qiHome, "plugins", "enabled.json");
+    await writeFile(enabledPath, JSON.stringify({ schemaVersion: 1, plugins: { [installed.key]: true } }), "utf8");
+    const plugins = new PluginCatalog(qiHome, registry, installer);
+    const migrated = await plugins.listInstalledSkills();
+    assert.ok(migrated.every((entry) => entry.selected && entry.enabled));
+
+    await writeFile(enabledPath, JSON.stringify({
+      schemaVersion: 2,
+      plugins: { [installed.key]: { enabled: true, acceptedPin: "changed-pin", skills: ["frontend-design"] } },
+    }), "utf8");
+    const reconfirmation = await plugins.listInstalledSkills();
+    assert.equal(reconfirmation.find((entry) => entry.ref.name === "frontend-design")?.blockedReason, "pin-confirmation");
+    assert.deepEqual(await plugins.listEnabled(), []);
   } finally {
     await removeFixture(qiHome);
   }
@@ -137,8 +203,8 @@ test("enabled agents are searchable for /agent:", async () => {
     await plugins.enable(installed.key);
     const agents = await plugins.listAgents("reviewer");
     assert.equal(agents.length, 1);
-    assert.equal(agents[0].id, "review-agents:code-reviewer");
-    const loaded = await plugins.loadAgentBody("review-agents:code-reviewer");
+    assert.equal(agents[0].id, "fixture-marketplace:review-agents:code-reviewer");
+    const loaded = await plugins.loadAgentBody("fixture-marketplace:review-agents:code-reviewer");
     assert.match(loaded.body, /careful code reviewer/);
   } finally {
     await removeFixture(qiHome);

@@ -10,6 +10,12 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Human-operated Skill installation now accepts `qi skill install <github-url> --skill <name>` and the matching
+  `/skills` GitHub flow. Qi resolves and locks the current commit before installation; source selection precedes
+  user/Workspace destination selection in the TUI.
+- Marketplace Skills now support manifest-declared nested paths, independent per-Skill enablement, fixed
+  user/model invocation policy, and pin-confirmed activation. `/skill:` accepts enabled marketplace Skills;
+  `/plugin:` now invokes commands only.
 - Claude-compatible plugin marketplace (ADR-0037): `qi marketplace` / `qi plugin` / `qi agent`, TUI
   `/plugins` · `/plugin:<id>` · `/agents` · `/agent:<id>`, vendored skills/commands/MCP declarations/agents from
   `claude-plugins-official`-shaped catalogs. MCP still requires human bind; hooks/LSP are unsupported.
@@ -21,7 +27,7 @@ backup plus reset or a new data root rather than an automatic migration.
   compact `mcp_catalog`/`mcp` proxies, sealed static/OAuth credentials, and CLI/TUI management.
 - Separate default-off `publish` and one-use `spend` capabilities with CLI flags and permission controls.
 - Project `.agents/skills` is directly active; global `~/.agents/skills` is lock-listed at startup and can be
-  activated directly from the `/skills` list (`/skills activate <name>` remains available for scripts), with state
+  activated directly from the `/skills` list (`qi skill enable <name>` remains available for scripts), with state
   under `$QI_HOME/resources` before use.
 - `~/.codex/skills` and `~/.claude/skills` are excluded from default `/skills` scanning and require explicit paths
   or configured compatibility roots.
@@ -41,6 +47,15 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- `/plugins` is now a searchable marketplace-first browser with All, Installed, per-marketplace, and Add
+  Marketplace tabs. Add Marketplace accepts local-clone or GitHub input; Enter offers install, enable, Skill
+  selection, and detail actions. The browser distinguishes available, installed, and enabled plugins; Space
+  toggles only installed plugin enablement.
+- Marketplace sources now have their own persisted enabled state. Disabled sources are omitted from plugin
+  browsing and reject sync/install. Disabling a source also disables its installed plugins while retaining their
+  caches; re-enabling a source does not restore plugin enablement.
+- `/skills` now uses the same compact horizontal browser pattern with Native, Global Agent, Plugin Skills, and
+  Install tabs; detailed selection remains an explicit Enter action.
 - `/plugins` and `/agents` now show every installed plugin with its `name@marketplace`, enabled/installed state,
   source kind, and command/agent marketplace. `/skills` adds a separate plugin-Skill view (still distinct from
   native `/skill:` activation); entries stay single-line so long descriptions do not distort panel row height.

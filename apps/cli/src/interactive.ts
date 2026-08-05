@@ -72,6 +72,8 @@ import { padToDisplayWidth, splitKeepRight } from "./layout.js";
 import {
   FormPanel,
   ListPanel,
+  PluginBrowserPanel,
+  type PluginBrowserItem,
   capabilityIdsFromLaunchLabels,
   openHelpPanel,
   openHistoryListPanel,
@@ -1297,6 +1299,245 @@ export class InteractiveTui {
     }));
   }
 
+  #openPluginsBrowser(query = ""): void {
+    this.#startManagementTask(() => this.#showPluginsBrowser(query), "Plugins");
+  }
+
+  async #showPluginsBrowser(query = ""): Promise<void> {
+    const catalog = this.#runtime.plugins();
+    const [marketplaces, installed, enabledKeys] = await Promise.all([
+      catalog.listMarketplaces(),
+      catalog.listInstalled(),
+      catalog.listEnabled(),
+    ]);
+    const entriesByMarketplace = await Promise.all(marketplaces.filter((marketplace) => marketplace.enabled).map(async (marketplace) => ({
+      marketplace: marketplace.name,
+      entries: await catalog.searchMarketplace(marketplace.name, ""),
+    })));
+    const installedById = new Map(installed.map((record) => [`${record.marketplace}:${record.name}`, record]));
+    const enabled = new Set(enabledKeys);
+    const items = new Map<string, PluginBrowserItem>();
+    for (const { marketplace, entries } of entriesByMarketplace) {
+      for (const entry of entries) {
+        const id = `${marketplace}:${entry.name}`;
+        const record = installedById.get(id);
+        items.set(id, {
+          id,
+          pluginName: entry.name,
+          name: entry.displayName?.trim() || entry.name,
+          marketplace,
+          description: entry.description,
+          installed: record !== undefined,
+          enabled: record !== undefined && enabled.has(record.key),
+          ...(record?.version === undefined ? {} : { version: record.version }),
+          ...(record?.sourceKind === undefined ? {} : { sourceKind: record.sourceKind }),
+        });
+      }
+    }
+    // Keep installed plugins visible after their marketplace catalog has changed.
+    for (const record of installed) {
+      const id = `${record.marketplace}:${record.name}`;
+      if (!items.has(id)) {
+        items.set(id, {
+          id,
+          pluginName: record.name,
+          name: record.name,
+          marketplace: record.marketplace,
+          description: "Installed plugin no longer declared by its marketplace catalog.",
+          installed: true,
+          enabled: enabled.has(record.key),
+          ...(record.version === undefined ? {} : { version: record.version }),
+          sourceKind: record.sourceKind,
+        });
+      }
+    }
+    this.#syncAutocomplete();
+    const marketplaceNames = marketplaces.filter((entry) => entry.enabled).map((entry) => entry.name);
+    const initialMarketplace = marketplaceNames.includes(query) ? `marketplace:${query}` as const : undefined;
+    this.#panels.push(new PluginBrowserPanel({
+      items: [...items.values()],
+      marketplaces: marketplaceNames,
+      ...(initialMarketplace === undefined ? {} : { initialTab: initialMarketplace }),
+      ...(query && initialMarketplace === undefined ? { initialQuery: query } : {}),
+      maxVisible: Math.max(5, (this.#terminal.rows ?? 40) - 13),
+      onOpen: (item) => this.#openPluginBrowserDetails(item),
+      onToggle: (item) => this.#togglePluginFromBrowser(item),
+      onAddMarketplace: () => this.#openMarketplaceManagement(),
+      onClose: this.#panels.dismiss,
+    }));
+  }
+
+  #togglePluginFromBrowser(item: PluginBrowserItem): void {
+    if (!item.installed) {
+      this.#presenter.setNotice(`Install ${item.name} first: qi plugin install ${item.pluginName}@${item.marketplace}`);
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const catalog = this.#runtime.plugins();
+      const key = `${item.pluginName}@${item.marketplace}`;
+      if (item.enabled) await catalog.disable(key); else await catalog.enable(key);
+      this.#presenter.setNotice(`${item.enabled ? "Disabled" : "Enabled"} plugin ${key}. Changes apply to the next Run.`);
+      this.#panels.closeAll();
+      await this.#showPluginsBrowser(item.marketplace);
+    }, "Plugin");
+  }
+
+  #openPluginBrowserDetails(item: PluginBrowserItem): void {
+    const actions = item.installed
+      ? [
+        {
+          id: "toggle",
+          label: item.enabled ? "Disable plugin" : "Enable plugin",
+          description: item.enabled ? "Stops commands, agents, and selected Skills for future Runs." : "Enables the plugin; choose individual Skills separately.",
+        },
+        { id: "skills", label: "Choose Skills", description: "Open the per-Skill selection panel." },
+        { id: "details", label: "View details", description: "Declared components, invocation policy, and current Skill state." },
+      ]
+      : [{ id: "install", label: "Install plugin", description: "Copies the pinned marketplace plugin into Qi's user cache; it remains disabled." }];
+    this.#panels.push(new ListPanel({
+      title: `${item.name} · ${item.marketplace}`,
+      hints: "↑↓ select · Enter confirm · Esc back",
+      items: actions,
+      onClose: this.#panels.dismiss,
+      onSelect: (action) => {
+        if (action.id === "install") this.#installPluginFromBrowser(item);
+        if (action.id === "toggle") this.#togglePluginFromBrowser(item);
+        if (action.id === "skills") {
+          this.#panels.closeAll();
+          this.#openSkillsHubPanel();
+        }
+        if (action.id === "details") this.#openPluginBrowserDetailView(item);
+      },
+    }));
+  }
+
+  #installPluginFromBrowser(item: PluginBrowserItem): void {
+    this.#startManagementTask(async () => {
+      const installed = await this.#runtime.plugins().installMarketplacePlugin(item.marketplace, item.pluginName);
+      this.#presenter.setNotice(`Installed plugin ${installed.record.key}. Enable it when you are ready; Skills start unchecked.`);
+      this.#panels.closeAll();
+      await this.#showPluginsBrowser(item.marketplace);
+    }, "Plugin");
+  }
+
+  #openPluginBrowserDetailView(item: PluginBrowserItem): void {
+    if (!item.installed) {
+      this.#openScrollPanel(`${item.name} · ${item.marketplace}`, [
+        "Available from marketplace",
+        "",
+        item.description,
+        "",
+        `Install from the action menu, or run: qi plugin install ${item.pluginName}@${item.marketplace}`,
+        "Then enable the plugin, select the Skills you need under /skills, and start a new Run.",
+      ]);
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const catalog = this.#runtime.plugins();
+      const key = `${item.pluginName}@${item.marketplace}`;
+      const [inspection, statuses] = await Promise.all([
+        catalog.inspectInstalled(key),
+        catalog.listInstalledSkills(),
+      ]);
+      const skills = statuses.filter((status) => status.ref.pluginKey === key);
+      const lines = [
+        `${item.enabled ? "Enabled" : "Installed"} · ${key}${item.version ? ` · v${item.version}` : ""}`,
+        item.description,
+        "",
+        `Support · ${inspection.support}`,
+        `Components · ${inspection.components.map((component) => `${component.kind} (${component.ids.length})`).join(" · ") || "none"}`,
+        "",
+        "Skills",
+        ...(skills.length === 0
+          ? ["  No declared Skills."]
+          : skills.map((status) => `  ${status.enabled ? "[*]" : status.selected ? "[~]" : "[ ]"} ${status.ref.name} · ${status.ref.invocationMode}${status.blockedReason ? ` · ${status.blockedReason}` : ""}`)),
+        "",
+        item.enabled
+          ? "Space in the browser disables this plugin. Use /skills to choose individual Skills."
+          : "Space in the browser enables this plugin; individual Skills remain unchecked until selected.",
+      ];
+      this.#openScrollPanel(`${item.name} · ${item.marketplace}`, lines);
+    }, "Plugin");
+  }
+
+  #openMarketplaceManagement(): void {
+    this.#startManagementTask(async () => {
+      const marketplaces = await this.#runtime.plugins().listMarketplaces();
+      this.#panels.push(new ListPanel({
+        title: "Marketplace sources",
+        hints: "↑↓ select · Enter add or enable/disable · Esc back",
+        items: [
+          { id: "add", label: "Add Marketplace", description: "Register a local clone or GitHub marketplace." },
+          ...marketplaces.map((marketplace) => ({
+            id: `market:${marketplace.name}`,
+            label: `${marketplace.enabled ? "[*]" : "[ ]"} ${marketplace.name}`,
+            description: `${marketplace.enabled ? "Enabled" : "Disabled"} · ${marketplace.source.kind}`,
+          })),
+        ],
+        onClose: this.#panels.dismiss,
+        onSelect: (item) => {
+          if (item.id === "add") { this.#openAddMarketplaceForm(); return; }
+          const name = item.id.slice("market:".length);
+          const current = marketplaces.find((marketplace) => marketplace.name === name);
+          if (current) this.#setMarketplaceEnabled(name, !current.enabled);
+        },
+      }));
+    }, "Marketplace");
+  }
+
+  #openAddMarketplaceForm(): void {
+    this.#panels.push(new FormPanel({
+      title: "Add Marketplace",
+      description: "Register a local clone or a GitHub marketplace in user configuration. Nothing is installed or enabled yet.",
+      fields: [
+        { id: "name", label: "Marketplace name", placeholder: "mattpocock", required: true },
+        {
+          id: "sourceKind",
+          label: "Source",
+          options: [
+            { value: "local", label: "Local clone", description: "Use an existing local marketplace checkout." },
+            { value: "github", label: "GitHub", description: "Clone owner/repository into Qi's private marketplace cache." },
+          ],
+        },
+        { id: "location", label: "Path or repository", placeholder: "D:\\gh-ws\\skill-ws\\mattpocock-skills", required: true },
+      ],
+      submitLabel: "Add marketplace",
+      onClose: this.#panels.dismiss,
+      onSubmit: (values) => {
+        const name = values.name?.trim() ?? "";
+        const location = values.location?.trim() ?? "";
+        const kind = values.sourceKind === "github" ? "github" : "local";
+        this.#panels.closeAll();
+        this.#addMarketplaceFromBrowser(name, kind, location);
+      },
+    }));
+  }
+
+  #addMarketplaceFromBrowser(name: string, kind: "local" | "github", location: string): void {
+    this.#startManagementTask(async () => {
+      if (!name) throw new TypeError("Marketplace name is required.");
+      if (!location) throw new TypeError(kind === "local" ? "Local marketplace path is required." : "GitHub owner/repository is required.");
+      const source = kind === "local"
+        ? { kind, path: resolve(location) } as const
+        : { kind, repo: location.replace(/^github:/i, "") } as const;
+      const marketplace = await this.#runtime.plugins().addMarketplace(name, source);
+      this.#presenter.setNotice(`Added marketplace ${marketplace.name}. Select a plugin and choose Install.`);
+      await this.#showPluginsBrowser(marketplace.name);
+    }, "Marketplace");
+  }
+
+  #setMarketplaceEnabled(name: string, enabled: boolean): void {
+    this.#startManagementTask(async () => {
+      const marketplace = await this.#runtime.plugins().setMarketplaceEnabled(name, enabled);
+      this.#presenter.setNotice(marketplace.enabled
+        ? `Enabled marketplace ${marketplace.name}. Plugins remain disabled until you enable them explicitly.`
+        : `Disabled marketplace ${marketplace.name} and all of its enabled plugins. Installed caches are retained.`);
+      this.#panels.closeAll();
+      await this.#showPluginsBrowser();
+    }, "Marketplace");
+  }
+
   #openInspectPanel(panel: TuiPanel, title?: string): void {
     this.#openScrollPanel(title ?? `/${panel}`, this.#presenter.renderPanel(panel));
   }
@@ -1309,6 +1550,7 @@ export class InteractiveTui {
     );
     const install = (
       fdPath?: string,
+      pluginSkillIds: readonly string[] = [],
       pluginCommandIds: readonly string[] = [],
       agentIds: readonly string[] = [],
     ) => this.#editor.setAutocompleteProvider(
@@ -1320,16 +1562,19 @@ export class InteractiveTui {
         this.#runtime.skillCatalog().map((skill) => skill.name),
         pluginCommandIds,
         agentIds,
+        pluginSkillIds,
       ),
     );
     install();
     void Promise.all([
       findTrustedExecutable("fd", this.#presenter.launch.workspaceRoot),
+      this.#runtime.plugins().listInstalledSkills()
+        .then((entries) => entries.filter((entry) => entry.enabled && entry.ref.userInvocable).map((entry) => entry.ref.id)).catch(() => []),
       this.#runtime.plugins().listCommands().then((entries) => entries.map((entry) => entry.id)).catch(() => []),
       this.#runtime.plugins().listAgents().then((entries) => entries.map((entry) => entry.id)).catch(() => []),
-    ]).then(([fdPath, pluginCommandIds, agentIds]) => {
+    ]).then(([fdPath, pluginSkillIds, pluginCommandIds, agentIds]) => {
       if (generation === this.#autocompleteGeneration && !this.#closing) {
-        install(fdPath, pluginCommandIds, agentIds);
+        install(fdPath, pluginSkillIds, pluginCommandIds, agentIds);
       }
     });
   }
@@ -1479,10 +1724,28 @@ export class InteractiveTui {
     });
   }
 
+  #installGithubSkill(url: string, name: string, scope: "user" | "workspace"): void {
+    if (this.#runtime.active) {
+      this.#presenter.setNotice("Cannot install a Skill while a Run is active.");
+      this.#render();
+      return;
+    }
+    this.#startSkillTask(async () => {
+      const installed = await this.#runtime.installGithubSkill(url, name, scope);
+      this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());
+      this.#syncAutocomplete();
+      this.#presenter.setNotice(
+        `Installed ${installed.name} ${installed.version} in ${installed.scope} scope (GitHub commit pinned).`,
+      );
+      this.#openInspectPanel("skills", "/skills");
+    });
+  }
+
   #installSkillFromArgument(argument: string): void {
     try {
       const request = parseSkillInstallCommand(argument);
-      this.#installSkill(request.source, request.scope);
+      if ("skill" in request) this.#installGithubSkill(request.source, request.skill, request.scope);
+      else this.#installSkill(request.source, request.scope);
     } catch (error) {
       this.#presenter.setNotice(message(error));
       this.#render();
@@ -1501,7 +1764,7 @@ export class InteractiveTui {
   #activateAgentSkill(name: string): void {
     const trimmed = name.trim();
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmed)) {
-      this.#presenter.setNotice("Usage: /skills activate <global .agents Skill name>");
+      this.#presenter.setNotice("Usage: /skill enable <global .agents Skill name>");
       this.#render();
       return;
     }
@@ -1517,7 +1780,7 @@ export class InteractiveTui {
   #deactivateAgentSkill(name: string): void {
     const trimmed = name.trim();
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmed)) {
-      this.#presenter.setNotice("Usage: /skills deactivate <global .agents Skill name>");
+      this.#presenter.setNotice("Usage: /skill disable <global .agents Skill name>");
       this.#render();
       return;
     }
@@ -1552,6 +1815,22 @@ export class InteractiveTui {
       this.#presenter.setNotice("Skill activation updated.");
       openSkillsHubPanel(this.#panelFlow());
     }, "Skill");
+  }
+
+  #savePluginSkillSelection(ids: readonly string[]): void {
+    const desired = new Set(ids);
+    this.#startManagementTask(async () => {
+      const statuses = await this.#runtime.plugins().listInstalledSkills();
+      for (const status of statuses) {
+        const next = desired.has(status.ref.id);
+        if (next === status.selected) continue;
+        if (next) await this.#runtime.plugins().enableSkill(status.ref.id);
+        else await this.#runtime.plugins().disableSkill(status.ref.id);
+      }
+      this.#presenter.setNotice("Plugin Skill selection updated.");
+      this.#syncAutocomplete();
+      openSkillsHubPanel(this.#panelFlow());
+    }, "Plugin Skill");
   }
 
   #stopJobFromArgument(argument: string, reopenJobPicker = false): void {
@@ -1718,6 +1997,7 @@ export class InteractiveTui {
       discoveredSkills: () => this.#presenter.skills(),
       skillCandidates: () => this.#presenter.skillCandidates(),
       pluginSkillStatuses: (query) => this.#runtime.plugins().listInstalledSkills(query),
+      savePluginSkillSelection: (ids) => this.#savePluginSkillSelection(ids),
       saveAgentSkillActivation: (names) => this.#saveAgentSkillActivation(names),
       openHistoryList: (kind) => {
         openHistoryListPanel(this.#panelFlow(), kind);
@@ -1735,6 +2015,7 @@ export class InteractiveTui {
       saveDelegateConfig: (patch) => this.#saveDelegateConfig(patch),
       applyVerificationSetup: (selected) => this.#applyVerificationSetup(selected),
       installSkill: (source, scope) => this.#installSkill(source, scope),
+      installGithubSkill: (url, name, scope) => this.#installGithubSkill(url, name, scope),
       listTasks: () => this.#runtime.tasks(),
       stopTask: (taskId) => this.#stopJobFromArgument(`stop ${taskId}`, true),
       listSessions: () => buildSessionEntries(this.#runtime.listSessionCatalog(), {
@@ -2511,64 +2792,11 @@ export class InteractiveTui {
       return;
     }
     if (name === "skills") {
-      if (/^activate\b/i.test(argument.trim())) {
-        this.#activateAgentSkill(argument.trim().replace(/^activate\s+/i, ""));
-        return;
-      }
-      if (/^deactivate\b/i.test(argument.trim())) {
-        this.#deactivateAgentSkill(argument.trim().replace(/^deactivate\s+/i, ""));
-        return;
-      }
-      if (/^install\b/i.test(argument.trim())) {
-        this.#installSkillFromArgument(argument);
-        return;
-      }
-      if (!argument.trim()) {
-        this.#openSkillsHubPanel();
-        return;
-      }
       this.#openSkillsHubPanel();
       return;
     }
     if (name === "plugins") {
-      this.#startManagementTask(async () => {
-        const query = argument.trim();
-        const catalog = this.#runtime.plugins();
-        const [installed, enabledKeys, commands] = await Promise.all([
-          catalog.listInstalled(query),
-          catalog.listEnabled(),
-          catalog.listCommands(query),
-        ]);
-        this.#syncAutocomplete();
-        if (installed.length === 0 && commands.length === 0) {
-          this.#presenter.setNotice(
-            query
-              ? `No installed plugins or enabled commands match "${query}".`
-              : "No installed plugins. Use: qi marketplace add <name> local:PATH|github:owner/repo, then qi plugin install/enable.",
-          );
-          return;
-        }
-        const enabled = new Set(enabledKeys);
-        const lines = [
-          "Plugins — ● enabled · ○ installed · name@marketplace",
-          ...installed.map((entry) => {
-            const state = enabled.has(entry.key) ? "● enabled" : "○ installed";
-            const version = entry.version === undefined ? "" : ` · v${entry.version}`;
-            const source = entry.sourceKind === "url" ? "url" : "vendored";
-            return `  ${state}  ${entry.key}${version} · ${source}`;
-          }),
-        ];
-        if (commands.length > 0) {
-          lines.push("", "Enabled /plugin commands — invoke with /plugin:<id> <task>");
-          lines.push(...commands.map((entry) =>
-            `  /plugin:${entry.id}  [${entry.marketplace}] ${entry.description.replace(/\s+/g, " ").trim()}`));
-        }
-        lines.push("", "Manage: qi marketplace search <name> <query> · qi plugin list|install|enable|disable");
-        this.#openScrollPanel(
-          "/plugins",
-          lines,
-        );
-      }, "plugins");
+      this.#openPluginsBrowser(argument.trim());
       return;
     }
     if (name === "agents") {
@@ -2618,11 +2846,25 @@ export class InteractiveTui {
       return;
     }
     if (name === "skill") {
-      if (!argument.trim()) {
+      const request = argument.trim();
+      if (!request) {
         openSkillsHubPanel(this.#panelFlow());
         return;
       }
-      this.#installSkillFromArgument(argument.startsWith("install") ? argument : `install ${argument}`);
+      if (/^enable\b/i.test(request)) {
+        this.#activateAgentSkill(request.replace(/^enable\s+/i, ""));
+        return;
+      }
+      if (/^disable\b/i.test(request)) {
+        this.#deactivateAgentSkill(request.replace(/^disable\s+/i, ""));
+        return;
+      }
+      if (/^install\b/i.test(request)) {
+        this.#installSkillFromArgument(request);
+        return;
+      }
+      this.#presenter.setNotice("Usage: /skill enable|disable <name>, /skill install <source>, or /skill:<name> <task>");
+      this.#render();
       return;
     }
     if (name === "tasks") {

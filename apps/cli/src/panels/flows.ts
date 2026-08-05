@@ -64,6 +64,7 @@ import type { PanelHost } from "./host.js";
 import { ListPanel } from "./list-panel.js";
 import { McpBindingPanel, type McpDraftEffect } from "./mcp-binding-panel.js";
 import { MultiSelectPanel } from "./multi-select-panel.js";
+import { SkillBrowserPanel } from "./skill-browser-panel.js";
 import { ScrollPanel } from "./scroll-panel.js";
 import {
   NEW_SESSION_ID,
@@ -163,6 +164,7 @@ export interface PanelFlowContext {
   readonly discoveredSkills: () => readonly PresentedSkill[];
   readonly skillCandidates: () => readonly PresentedSkillCandidate[];
   readonly pluginSkillStatuses?: (query?: string) => Promise<readonly PluginSkillStatus[]>;
+  readonly savePluginSkillSelection?: (ids: readonly string[]) => void;
   readonly saveAgentSkillActivation: (names: readonly string[]) => void;
   readonly openHistoryList: (kind: "runs" | "steps" | "actions" | "agents") => void;
   readonly addMount: (path: string) => void;
@@ -178,6 +180,7 @@ export interface PanelFlowContext {
   readonly saveDelegateConfig: (patch: QiDelegateConfig) => void;
   readonly applyVerificationSetup: (selected: readonly VerificationCandidate[]) => void;
   readonly installSkill: (source: string, scope: "user" | "workspace") => void;
+  readonly installGithubSkill: (url: string, name: string, scope: "user" | "workspace") => void;
   readonly listTasks: () => ProcessTaskView[];
   readonly stopTask: (taskId: string) => void;
   readonly listSessions: () => SessionEntry[];
@@ -1316,54 +1319,44 @@ async function openSkillsHubPanelAsync(ctx: PanelFlowContext): Promise<void> {
 }
 
 function openSkillsHubPanelContents(ctx: PanelFlowContext, pluginSkills: readonly PluginSkillStatus[]): void {
-  const locale = ctx.locale();
   const active = ctx.discoveredSkills();
   const candidates = ctx.skillCandidates();
   const alwaysOn = alwaysOnSkills(active);
   const activeGlobal = active.filter((skill) => skill.scope === "user" && skill.origin === "agent");
   const globalCandidates = candidates.filter((skill) => skill.source === "global-agent");
-  ctx.panels.push(new ListPanel({
-    title: t(locale, "skills.title"),
-    hints: t(locale, "skills.hints"),
+  ctx.panels.push(new SkillBrowserPanel({
+    native: alwaysOn.map((skill) => ({
+      id: skill.name,
+      label: skill.name,
+      description: `${skill.scope} · ${skill.origin ?? "qi"} · ${skill.version}`,
+    })),
+    global: globalCandidates.map((skill) => ({
+      id: skill.name,
+      label: `${activeGlobal.some((activeSkill) => activeSkill.name === skill.name) ? "[*]" : "[ ]"} ${skill.name}`,
+      description: `${skill.version} · ${skill.description}`,
+    })),
+    plugin: pluginSkills.map(({ ref, enabled, selected }) => ({
+      id: ref.id,
+      label: `${enabled ? "[*]" : selected ? "[~]" : "[ ]"} ${ref.name}@${ref.marketplace}`,
+      description: `${ref.invocationMode} · ${ref.description}`,
+    })),
     maxVisible: maxVisible(ctx.terminalRows),
-    items: [
-      {
-        id: "always-on",
-        label: t(locale, "skills.always_on"),
-        description: t(locale, "skills.always_on.desc", { count: String(alwaysOn.length) }),
-      },
-      {
-        id: "activation",
-        label: t(locale, "skills.activation"),
-        description: t(locale, "skills.activation.desc", {
-          enabled: String(activeGlobal.length),
-          available: String(globalCandidates.length),
-        }),
-      },
-      ...(pluginSkills.length === 0 ? [] : [{
-        id: "plugin",
-        label: locale === "zh" ? "插件 Skill" : "Plugin Skills",
-        description: locale === "zh"
-          ? `${pluginSkills.filter((entry) => entry.enabled).length} 个已启用 · ${pluginSkills.length} 个已安装 · 通过 plugin_skill 使用`
-          : `${pluginSkills.filter((entry) => entry.enabled).length} enabled · ${pluginSkills.length} installed · use plugin_skill`,
-      }]),
-      { id: "install", label: t(locale, "skills.install"), description: t(locale, "skills.install.desc") },
-    ],
     onClose: ctx.panels.dismiss,
-    onSelect: (item) => {
-      if (item.id === "always-on") {
+    onSelect: (tab) => {
+      if (tab === "native") {
         openAlwaysOnSkillsPanel(ctx);
         return;
       }
-      if (item.id === "activation") {
+      if (tab === "global") {
         openSkillActivationPanel(ctx);
         return;
       }
-      if (item.id === "plugin") {
+      if (tab === "plugin") {
         void openPluginSkillsPanel(ctx);
-        return;
       }
-      openSkillInstallScopePanel(ctx);
+    },
+    onInstall: () => {
+      openSkillInstallSourcePanel(ctx);
     },
   }));
 }
@@ -1403,27 +1396,21 @@ async function openPluginSkillsPanel(ctx: PanelFlowContext): Promise<void> {
     ctx.render();
     return;
   }
-  ctx.panels.push(new ListPanel({
+  ctx.panels.push(new MultiSelectPanel({
     title: locale === "zh" ? "插件 Skill" : "Plugin Skills",
-    hints: locale === "zh" ? "↑↓ 选择 · Enter 查看调用方式 · Esc 返回" : "↑↓ navigate · Enter show usage · Esc back",
+    hints: locale === "zh" ? "↑↓ 选择 · Space 切换 · Enter 应用 · Esc 返回" : "↑↓ navigate · Space toggle · Enter apply · Esc back",
     maxVisible: maxVisible(ctx.terminalRows),
-    searchable: true,
     items: statuses.map(({ ref, enabled }) => ({
       id: ref.id,
-      label: (enabled ? "● enabled" : "○ installed") + "  " + ref.name + "@" + ref.marketplace,
-      description: (enabled
-        ? (locale === "zh" ? "模型可用" : "model available")
-        : (locale === "zh" ? "未启用" : "disabled")) + " · " + (ref.version ?? "unversioned") + " · plugin_skill",
+      label: (enabled ? "● enabled" : "○ disabled") + "  " + ref.name + "@" + ref.marketplace,
+      description: `${ref.invocationMode} · ${ref.version ?? "unversioned"}`,
     })),
+    selectedIds: statuses.filter(({ selected }) => selected).map(({ ref }) => ref.id),
+    currentIds: statuses.filter(({ enabled }) => enabled).map(({ ref }) => ref.id),
     onClose: ctx.panels.dismiss,
-    onSelect: (item) => {
-      const selected = statuses.find(({ ref }) => ref.id === item.id);
-      if (!selected) return;
+    onApply: (selectedIds) => {
       ctx.panels.dismiss();
-      ctx.presenter.setNotice(selected.enabled
-        ? (locale === "zh" ? "通过 plugin_skill 加载：" : "Load with plugin_skill: ") + selected.ref.id
-        : (locale === "zh" ? "先启用插件：" : "Enable the plugin first: ") + selected.ref.pluginKey);
-      ctx.render();
+      ctx.savePluginSkillSelection?.(selectedIds);
     },
   }));
 }
@@ -1745,7 +1732,38 @@ function openSkillActivationPanel(ctx: PanelFlowContext): void {
   }));
 }
 
-function openSkillInstallScopePanel(ctx: PanelFlowContext): void {
+type SkillInstallAction = (scope: "user" | "workspace") => void;
+
+function openSkillInstallSourcePanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  ctx.panels.push(new ListPanel({
+    title: locale === "zh" ? "安装 Skill" : "Install Skill",
+    hints: locale === "zh" ? "↑↓ 选择来源 · Enter 打开 · Esc 返回" : "↑↓ choose source · Enter open · Esc back",
+    items: [
+      {
+        id: "github",
+        label: "GitHub repository",
+        description: locale === "zh"
+          ? "仓库 URL + Skill 名；先锁定当前 commit，再安装"
+          : "Repository URL + Skill name; pin current commit before install",
+      },
+      {
+        id: "local",
+        label: locale === "zh" ? "本地路径或兼容目录" : "Local path or compatibility directory",
+        description: locale === "zh"
+          ? "已有目录，例如 ~/.codex/skills/.system 下的一个 Skill"
+          : "An existing directory, e.g. one Skill under ~/.codex/skills/.system",
+      },
+    ],
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      if (item.id === "github") openGithubSkillInstallForm(ctx);
+      else openLocalSkillInstallForm(ctx);
+    },
+  }));
+}
+
+function openSkillInstallScopePanel(ctx: PanelFlowContext, install: SkillInstallAction): void {
   const locale = ctx.locale();
   ctx.panels.push(new ListPanel({
     title: t(locale, "skills.install.scope.title"),
@@ -1764,16 +1782,19 @@ function openSkillInstallScopePanel(ctx: PanelFlowContext): void {
     ],
     onClose: ctx.panels.dismiss,
     onSelect: (item) => {
-      openSkillInstallForm(ctx, item.id === "workspace" ? "workspace" : "user");
+      ctx.panels.closeAll();
+      install(item.id === "workspace" ? "workspace" : "user");
     },
   }));
 }
 
-function openSkillInstallForm(ctx: PanelFlowContext, scope: "user" | "workspace"): void {
+function openLocalSkillInstallForm(ctx: PanelFlowContext): void {
   const locale = ctx.locale();
   ctx.panels.push(new FormPanel({
-    title: t(locale, "skills.install.form.title"),
-    description: t(locale, "skills.install.form.desc"),
+    title: locale === "zh" ? "本地 Skill 来源" : "Local Skill source",
+    description: locale === "zh"
+      ? "选择一个包含 SKILL.md 的本地目录或已配置兼容目录。安装位置下一步再选。"
+      : "Choose a local directory containing SKILL.md or a configured compatibility entry. Choose the destination next.",
     fields: [
       {
         id: "source",
@@ -1789,8 +1810,39 @@ function openSkillInstallForm(ctx: PanelFlowContext, scope: "user" | "workspace"
     onSubmit: (values) => {
       const source = (values.source ?? "").trim();
       if (!source) return;
-      ctx.panels.closeAll();
-      ctx.installSkill(source, scope);
+      openSkillInstallScopePanel(ctx, (scope) => ctx.installSkill(source, scope));
+    },
+  }));
+}
+
+function openGithubSkillInstallForm(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  ctx.panels.push(new FormPanel({
+    title: locale === "zh" ? "GitHub Skill 来源" : "GitHub Skill source",
+    description: locale === "zh"
+      ? "等同于 npx skills add <仓库> --skill <名称>。Qi 先解析当前 HEAD 并锁定 commit；请先审阅该 Skill 的 SKILL.md。"
+      : "Equivalent to npx skills add <repository> --skill <name>. Qi resolves and locks current HEAD first; review SKILL.md before installing.",
+    fields: [
+      {
+        id: "url",
+        label: locale === "zh" ? "GitHub 仓库 URL" : "GitHub repository URL",
+        placeholder: "https://github.com/shadcn/ui",
+        required: true,
+      },
+      {
+        id: "name",
+        label: locale === "zh" ? "Skill 名称" : "Skill name",
+        placeholder: "shadcn",
+        required: true,
+      },
+    ],
+    submitLabel: locale === "zh" ? "选择安装位置" : "Choose install location",
+    onClose: ctx.panels.dismiss,
+    onSubmit: (values) => {
+      const url = (values.url ?? "").trim();
+      const name = (values.name ?? "").trim();
+      if (!url || !name) return;
+      openSkillInstallScopePanel(ctx, (scope) => ctx.installGithubSkill(url, name, scope));
     },
   }));
 }

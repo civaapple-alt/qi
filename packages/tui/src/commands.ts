@@ -236,15 +236,21 @@ function advancedCommandHelp(locale: Locale): string[] {
   return lines;
 }
 
-export interface SkillInstallCommand {
+export type SkillInstallCommand = {
   readonly source: string;
   readonly scope: "user" | "workspace";
-}
+} | {
+  readonly source: string;
+  readonly skill: string;
+  readonly scope: "user" | "workspace";
+};
 
 export function parseSkillInstallCommand(argument: string): SkillInstallCommand {
   const match = /^install(?:\s+(--workspace))?\s+([\s\S]+)$/i.exec(argument.trim());
-  if (!match?.[2]) throw new TypeError("Usage: /skills install [--workspace] <name-or-path>");
+  if (!match?.[2]) throw new TypeError("Usage: /skill install [--workspace] <name-or-path> | <github-url> --skill <name>");
   let source = match[2].trim();
+  const skillMatch = /^(\S+)\s+--skill\s+([a-z0-9]+(?:-[a-z0-9]+)*)$/i.exec(source);
+  if (skillMatch) return { source: skillMatch[1]!, skill: skillMatch[2]!, scope: match[1] ? "workspace" : "user" };
   if ((source.startsWith('"') && source.endsWith('"')) || (source.startsWith("'") && source.endsWith("'"))) {
     source = source.slice(1, -1).trim();
   }

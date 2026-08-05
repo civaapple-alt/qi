@@ -100,6 +100,11 @@ before it can enter the Tool Registry.
 Workspace and user Skill locks record immutable source identity and content-tree digest. A Skill may describe an
 MCP dependency or bundle an MCP declaration as a resource, but neither form activates or binds a server.
 
+Human-operated GitHub Skill installation accepts a repository plus declared Skill name (the common
+`skills/<name>` layout), resolves GitHub `HEAD` to an exact commit before copying, and records that commit in the
+same lock. This convenience path is not exposed through the model-facing Skill Tool; a model mention alone never
+fetches remote content.
+
 ## ADR-0005: keep provisional activity outside durable Session truth
 
 - Model text, model reasoning, and Action output may stream through a bounded, redacted, process-local activity
@@ -824,29 +829,35 @@ failed versus indeterminate settlement; explicit rejection of unsupported client
 ## ADR-0037: adapt Claude plugin marketplaces without granting authority
 
 - `@civaapple/qi-node/plugins` owns Claude-compatible marketplace registration, catalog sync, pinned install
-  cache, enablement, and component adaptation. `apps/cli` owns `/plugins`, `/plugin:`, `/agents`, `/agent:`, and
-  `qi marketplace|plugin` management. Portable contracts stay declaration-only.
+  cache, plugin/Skill enablement, and component adaptation. `apps/cli` owns `/plugins`, `/skills`, `/plugin:`,
+  `/skill:`, `/agents`, `/agent:`, and `qi marketplace|plugin|skill` management. Portable contracts stay
+  declaration-only.
 - The official Anthropic marketplace and Superpowers' self marketplace are equal supported sources. Marketplace
   registration remains explicit (`add` → `install` → `enable`); URL sources require credential-free GitHub HTTPS
   plus an exact commit. Local path sources are allowed for tests and operator-pinned clones. Runtime loads only the content-addressed install cache under
   `$QI_HOME/plugins/cache`, never the marketplace clone tree as a live root.
-- Supported components: `skills/**/SKILL.md`, `commands/*.md` (legacy slash prompts), `.mcp.json` (as inert MCP
+- Supported components: manifest-declared `skills/**/SKILL.md`, `commands/*.md` (legacy slash prompts), `.mcp.json` (as inert MCP
   declarations), and root `agents/*.md` (as depth-1 `delegate` profiles). Unsupported: `hooks/`, `.lsp.json`,
   Claude Workflow/`Agent(...)` ACLs, and any executable plugin entrypoint.
-- `/plugin:<id> [task]` injects the selected command or user-invocable skill as a digest-pinned ContextBlock
-  (same untrusted procedural class as `/skill:`). `/agent:<id> [task]` spawns a Coordinator depth-1 Subagent
+- `/plugin:<marketplace>:<plugin>:<command> [task]` injects only a selected command. Enabled user-invocable
+  marketplace Skills use `/skill:<marketplace>:<plugin>:<skill> [task]`; `disable-model-invocation` remains a
+  fixed upstream policy and hides the Skill from ordinary model discovery. `/agent:<marketplace>:<plugin>:<agent>
+  [task]` spawns a Coordinator depth-1 Subagent
   whose child tool allowlist and lease narrowing remain Runtime-owned. Claude `allowed-tools` / agent `tools` /
   `model` fields are advisory only and never widen Capability Leases.
 - Enabling a plugin never grants authority, never auto-binds MCP, and never expands parent Session leases.
+  Disabling a marketplace stops sync/new installation and disables every installed plugin from that source while
+  retaining its immutable cache; re-enabling the marketplace never restores plugin enablement.
   Converted `.mcp.json` entries become secret-free declarations under `$QI_HOME/resources/mcp/<marketplace>/`,
   discovered as `name@marketplace`, and still require human refresh and bind under ADR-0036. Materialized
   `npx`/`uvx` stdio declarations set a longer connect timeout so first package resolve is less likely to fail.
   `${ENV}` placeholders map to `${env:ENV}`; credential-bearing literals remain rejected.
 - Catalog entries must surface `supported | partial | unsupported` so hooks/LSP-only plugins are not presented as
   equivalent to Claude Code. `plugins/` and `external_plugins/` differ only by marketplace `source` path.
-- Plugin Skills are a separate model-facing `plugin_skill` Tool catalog (not native `/skills`), and are snapshotted
-  from enabled pinned installs at Run start. Same-name plugins from different marketplaces may both be installed,
-  but only one may be enabled at a time. Superpowers `6.2.0` is accepted only at commit
+- Plugin Skills remain a separate model-facing `plugin_skill` Tool catalog, but `/skills` is the unified human
+  selection surface. A plugin and each selected Skill are pinned at Run start; a changed pin requires a new
+  plugin confirmation before it becomes effective. Same-name plugins from different marketplaces may both be
+  installed, but only one may be enabled at a time. Superpowers `6.2.0` is accepted only at commit
   `44c9b2d6e889982ac18c27d05a19fefe335194e1`; its bootstrap maps supported workflows to Qi and explicitly degrades
   visual companion, hooks, lifecycle, and dependency-installer behavior.
 - Phased coverage: P0 registry/sync/search; P1 skills+commands; P2 MCP declarations; P3 agents; P4 pinned URL

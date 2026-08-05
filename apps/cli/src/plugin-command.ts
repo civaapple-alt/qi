@@ -30,7 +30,7 @@ export async function runPluginCliCommand(args: readonly string[]): Promise<bool
       const withRef = parsedSource.kind === "github" && ref
         ? { ...parsedSource, ref }
         : parsedSource;
-      return output(await registry.add(name, withRef), parsed.json);
+      return output(await catalog.addMarketplace(name, withRef), parsed.json);
     }
     if (operation === "sync") {
       const name = required(parsed.positionals.shift(), "marketplace name");
@@ -65,9 +65,8 @@ export async function runPluginCliCommand(args: readonly string[]): Promise<bool
     const first = required(parsed.positionals.shift(), "marketplace or plugin@marketplace");
     const second = parsed.positionals.shift();
     const [marketplace, plugin] = second === undefined ? parsePluginSelector(first) : [first, required(second, "plugin")];
-    const record = await installer.install(marketplace, plugin);
-    const mcpFiles = await installer.materializeMcpDeclarations(record.key);
-    return output({ ...record, mcpDeclarations: mcpFiles }, parsed.json);
+    const installed = await catalog.installMarketplacePlugin(marketplace, plugin);
+    return output({ ...installed.record, mcpDeclarations: installed.mcpDeclarations }, parsed.json);
   }
   if (operation === "enable") {
     const key = required(parsed.positionals.shift(), "plugin@marketplace");
