@@ -57,7 +57,6 @@ export async function acquireImmutableSkillSource(source: ImmutableSkillSource):
     await runGit(["-C", checkout, "checkout", "--detach", normalized.commit]);
     const actual = (await runGit(["-C", checkout, "rev-parse", "HEAD"])).trim();
     if (actual.toLowerCase() !== normalized.commit.toLowerCase()) throw new Error("Git checkout did not resolve to the pinned commit");
-    await rm(resolve(checkout, ".git"), { recursive: true, force: true });
     return {
       root: resolve(checkout, normalized.subdir),
       provenance: {
@@ -66,10 +65,10 @@ export async function acquireImmutableSkillSource(source: ImmutableSkillSource):
         commit: normalized.commit.toLowerCase(),
         subdir: normalized.subdir,
       },
-      cleanup: () => rm(staging, { recursive: true, force: true }),
+      cleanup: () => removeStaging(staging),
     };
   } catch (error) {
-    await rm(staging, { recursive: true, force: true });
+    await removeStaging(staging).catch(() => undefined);
     throw error;
   }
 }
@@ -99,6 +98,11 @@ export async function resolveGithubSkillSource(
     skill,
     source: { type: "github", url, commit: commit.toLowerCase(), subdir },
   };
+}
+
+/** Git may briefly retain a pack handle on Windows after checkout. Let the OS release it before retrying. */
+async function removeStaging(path: string): Promise<void> {
+  await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
 }
 
 async function acquireArchive(source: Extract<ImmutableSkillSource, { type: "archive" }>, staging: string): Promise<AcquiredSkillSource> {
@@ -148,7 +152,7 @@ async function acquireArchive(source: Extract<ImmutableSkillSource, { type: "arc
   return {
     root: resolve(unpacked, subdir),
     provenance: { type: "archive", resolved: url.toString(), sha256: digest, subdir },
-    cleanup: () => rm(staging, { recursive: true, force: true }),
+    cleanup: () => removeStaging(staging),
   };
 }
 

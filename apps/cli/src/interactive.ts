@@ -1713,6 +1713,8 @@ export class InteractiveTui {
       this.#render();
       return;
     }
+    this.#presenter.setNotice(`Installing Skill from ${trimmed}…`);
+    this.#render();
     this.#startSkillTask(async () => {
       const installed = await this.#runtime.installSkill(trimmed, scope);
       this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());
@@ -1730,6 +1732,8 @@ export class InteractiveTui {
       this.#render();
       return;
     }
+    this.#presenter.setNotice(`Installing Skill ${name} from ${url}…`);
+    this.#render();
     this.#startSkillTask(async () => {
       const installed = await this.#runtime.installGithubSkill(url, name, scope);
       this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());

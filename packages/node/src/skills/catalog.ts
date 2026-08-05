@@ -349,7 +349,10 @@ export class SkillCatalog {
       );
       return { ...installed, source: acquired.provenance };
     } finally {
-      await acquired.cleanup();
+      // Windows can retain a Git pack handle for a short period after checkout. The source
+      // acquisition retries cleanup; a final EBUSY must not turn an already-published Skill into
+      // a failed install (the staging directory is isolated and can be reclaimed later).
+      await acquired.cleanup().catch(() => undefined);
     }
   }
 
