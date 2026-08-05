@@ -42,6 +42,8 @@ backup plus reset or a new data root rather than an automatic migration.
 - Windows GitHub Skill installs no longer fail while removing a still-open Git pack file (`EBUSY`). Git metadata
   remains isolated until staging cleanup, which now retries transient Windows locks; the TUI immediately shows the
   active Skill installation notice while the source is being resolved.
+- GitHub Skill acquisition preserves credential-free loopback proxy settings (for example `127.0.0.1:7890`) for
+  Git transport, while continuing to scrub general child-process environment variables.
 - Runtime base leases now authorize read-only `plugin_skill` discovery/loading and the Execute lease covers
   explicitly allowed plugin Skill scripts; installed Superpowers Skills no longer fail closed at the capability
   boundary with `plugin_skill ... denied`.

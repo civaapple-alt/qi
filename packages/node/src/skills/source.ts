@@ -191,10 +191,17 @@ function assertArchivePath(path: string): void {
 
 function runGit(args: readonly string[]): Promise<string> {
   return new Promise((resolveRun, reject) => {
+    const environment = minimalHostEnvironment({ GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0", NO_COLOR: "1" });
+    // GitHub access is commonly routed through a local desktop proxy on Windows. Preserve only
+    // credential-free loopback proxy URLs; the general child environment remains scrubbed.
+    for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"] as const) {
+      const value = process.env[name];
+      if (value !== undefined && isSafeLocalProxySetting(name, value)) environment[name] = value;
+    }
     const child = spawn("git", ["-c", `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`, ...args], {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
-      env: minimalHostEnvironment({ GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0", NO_COLOR: "1" }),
+      env: environment,
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -215,4 +222,16 @@ function runGit(args: readonly string[]): Promise<string> {
       ? resolveRun(Buffer.concat(stdout).toString("utf8"))
       : reject(new Error(`git exited ${String(code)}: ${Buffer.concat(stderr).toString("utf8").slice(-4_096)}`))));
   });
+}
+
+function isSafeLocalProxySetting(name: string, value: string): boolean {
+  if (name === "NO_PROXY") return true;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username && !url.password &&
+      ["localhost", "127.0.0.1", "::1"].includes(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
 }
