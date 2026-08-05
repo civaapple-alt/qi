@@ -116,7 +116,7 @@ function oneLine(value: string, maximum: number): string {
 }
 
 function formatTokens(tokens: number): string {
-  return tokens < 1_000 ? String(tokens) : `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
+  return tokens < 1_000 ? String(tokens) : `${(tokens / 1_000).toFixed(2)}k`;
 }
 
 export function renderStatus(view: SessionView | undefined): string {

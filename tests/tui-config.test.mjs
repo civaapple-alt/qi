@@ -148,7 +148,7 @@ model = "k3"
 reasoning_effort = "xhigh"
 `);
     const loaded = await loadUserConfig(path);
-    assert.equal(loaded.config.reasoningEffort, "max");
+    assert.equal(loaded.config.reasoningEffort, "xhigh");
     const persisted = await persistUserProviderDefaults({
       provider: "kimi",
       model: "k3-256k",
@@ -160,10 +160,25 @@ reasoning_effort = "xhigh"
     assert.equal(persisted.config.reasoningEffort, "low");
     assert.equal(persisted.config.contextWindowTokens, 300_000);
 
+    const cleared = await persistUserProviderDefaults({
+      provider: "kimi",
+      model: "k3-256k",
+      clearReasoningEffort: true,
+    }, path);
+    assert.equal(cleared.config.reasoningEffort, undefined);
+    const clearedBody = await readFile(path, "utf8");
+    assert.equal(/reasoning_effort\s*=/.test(clearedBody), false);
+
     const savedBody = await readFile(path, "utf8");
     assert.match(savedBody, /model = "k3-256k"/);
-    assert.match(savedBody, /reasoning_effort = "low"/);
     assert.match(savedBody, /context_window_tokens = 300000/);
+    // Re-seed effort for the remaining assertions in this test.
+    await persistUserProviderDefaults({
+      provider: "kimi",
+      model: "k3-256k",
+      reasoningEffort: "low",
+    }, path);
+    assert.match(await readFile(path, "utf8"), /reasoning_effort = "low"/);
 
     await writeFile(path, `
 version = 1
@@ -824,6 +839,19 @@ test("supportedEffortsForModel advertises Kimi K3 thinking efforts from provider
   assert.ok(kimi);
   assert.deepEqual(supportedEffortsForModel(kimi, "k3"), ["low", "high", "max"]);
   assert.deepEqual(supportedEffortsForModel(kimi, "kimi-for-coding"), []);
+  const deepseek = getProviderProfile("deepseek");
+  assert.ok(deepseek);
+  assert.deepEqual(supportedEffortsForModel(deepseek, "deepseek-v4-flash"), [
+    "none", "low", "medium", "high", "xhigh", "max",
+  ]);
+  assert.deepEqual(supportedEffortsForModel(deepseek, "deepseek-v4-pro"), [
+    "none", "low", "high", "max",
+  ]);
+  const qianwen = getProviderProfile("qianwenai");
+  assert.ok(qianwen);
+  assert.deepEqual(supportedEffortsForModel(qianwen, "qwen3.8-max"), [
+    "none", "low", "medium", "xhigh",
+  ]);
 });
 
 test("model configuration reads image capability from the selected catalog model", () => {

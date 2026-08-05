@@ -17,7 +17,7 @@ import {
 
 const WIRE_APIS = new Set<ProviderWireApi>(["responses", "chat.completions"]);
 const AUTH_SCHEMES = new Set<ProviderAuthScheme>(["api-key", "oauth-device"]);
-const EFFORTS = new Set<ProviderThinkingEffort>(["low", "medium", "high", "max"]);
+const EFFORTS = new Set<ProviderThinkingEffort>(["low", "medium", "high", "xhigh", "max"]);
 const THINKING_MODES = new Set(["toggle", "effort", "always"]);
 const CHAT_THINKING = new Set<ChatThinkingDialect>([
   "none",

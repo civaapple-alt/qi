@@ -58,7 +58,7 @@ import {
 import type { ThemeName } from "../theme/index.js";
 import type { SessionId } from "@civaapple/qi-protocol";
 import type { SessionEntry } from "../session-list.js";
-import { FormPanel, type FormField } from "./form-panel.js";
+import { FormPanel, type FormField, type FormFieldOption } from "./form-panel.js";
 import type { PanelHost } from "./host.js";
 import { ListPanel } from "./list-panel.js";
 import { McpBindingPanel, type McpDraftEffect } from "./mcp-binding-panel.js";
@@ -1155,12 +1155,38 @@ export function openMaxActionsPerStepPanel(ctx: PanelFlowContext): void {
   }));
 }
 
+/** Empty string = operator unset; adapters omit effort on the wire. */
+const UNSET_REASONING_EFFORT = "";
+
 function effortDescription(locale: Locale, effort: string): string {
+  if (effort === UNSET_REASONING_EFFORT) {
+    return locale === "zh" ? "不传 effort，由 API 默认" : "Omit effort; provider API default";
+  }
   if (effort === "low") return locale === "zh" ? "较快" : "Faster";
+  if (effort === "medium") return locale === "zh" ? "中等" : "Balanced";
   if (effort === "high") return locale === "zh" ? "较强思考" : "Stronger reasoning";
+  if (effort === "xhigh") return locale === "zh" ? "更高思考" : "Extra-high reasoning";
   if (effort === "max") return locale === "zh" ? "最强思考" : "Maximum reasoning";
   if (effort === "none") return locale === "zh" ? "关闭思考" : "Disable thinking";
   return effort;
+}
+
+function effortFieldOptions(
+  locale: Locale,
+  efforts: readonly string[],
+): FormFieldOption[] {
+  return [
+    {
+      value: UNSET_REASONING_EFFORT,
+      label: locale === "zh" ? "不设置（API 默认）" : "Unset (API default)",
+      description: effortDescription(locale, UNSET_REASONING_EFFORT),
+    },
+    ...efforts.map((effort) => ({
+      value: effort,
+      label: effort,
+      description: effortDescription(locale, effort),
+    })),
+  ];
 }
 
 export function openShellPanel(ctx: PanelFlowContext): void {
@@ -2071,9 +2097,11 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
       ? [{
           id: "reasoningEffort",
           label: "Thinking effort",
-          initialValue: status.reasoningEffort ?? efforts[0]!,
-          required: true,
-          options: efforts.map((effort) => ({ value: effort, label: effort })),
+          initialValue: status.reasoningEffort && efforts.includes(status.reasoningEffort)
+            ? status.reasoningEffort
+            : UNSET_REASONING_EFFORT,
+          required: false,
+          options: effortFieldOptions(locale, efforts),
         } satisfies FormField]
       : []),
     {
@@ -2143,10 +2171,10 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
     fields,
     onChange: (fieldId, value, values) => {
       if (fieldId === "model" && value) {
-        const next = modelById.get(value)?.profile
-          ?? profile.models?.find((candidate) => candidate.id === value);
         const windowTokens = modelById.get(value)?.contextTokens
           ?? providerModelContextTokens(profile, value);
+        const nextEfforts = supportedEffortsForModel(profile, value);
+        const currentEffort = values.reasoningEffort ?? UNSET_REASONING_EFFORT;
         return {
           contextWindowTokens: String(windowTokens),
           outputReserveTokens: String(resolveOutputReserveTokens(
@@ -2160,9 +2188,14 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
                   : modelCatalogAllowsImage(profile, value) ? "true" : "false",
               }
             : {}),
-          ...(next?.thinking?.defaultEffort === undefined
+          ...(nextEfforts.length === 0
             ? {}
-            : { reasoningEffort: next.thinking.defaultEffort }),
+            : {
+                reasoningEffort: currentEffort !== UNSET_REASONING_EFFORT
+                    && nextEfforts.includes(currentEffort)
+                  ? currentEffort
+                  : UNSET_REASONING_EFFORT,
+              }),
         };
       }
       if (fieldId === "contextWindowTokens" && value) {
@@ -2185,11 +2218,12 @@ export async function openModelConfigurationPanel(ctx: PanelFlowContext): Promis
       const model = (values.model ?? "").trim();
       const contextWindowTokens = parseLoginContextWindow(values.contextWindowTokens);
       const modelEfforts = supportedEffortsForModel(profile, model);
+      const selectedEffort = values.reasoningEffort;
       ctx.configureModel({
         model,
-        ...(modelEfforts.length === 0 || values.reasoningEffort === undefined
+        ...(modelEfforts.length === 0
           ? {}
-          : { reasoningEffort: values.reasoningEffort }),
+          : { reasoningEffort: selectedEffort ?? UNSET_REASONING_EFFORT }),
         contextWindowTokens,
         outputReserveTokens: parseLoginOutputReserve(values.outputReserveTokens, contextWindowTokens),
         ...(imageInputConfigurable
@@ -2491,13 +2525,9 @@ function catalogModelFields(
       ? [{
           id: "reasoningEffort",
           label: locale === "zh" ? "Thinking effort" : "Thinking effort",
-          initialValue: efforts.includes(effort) ? effort : efforts[0]!,
-          required: true,
-          options: efforts.map((value) => ({
-            value,
-            label: value,
-            description: effortDescription(locale, value),
-          })),
+          initialValue: efforts.includes(effort) ? effort : UNSET_REASONING_EFFORT,
+          required: false,
+          options: effortFieldOptions(locale, efforts),
         } satisfies FormField]
       : []),
     {

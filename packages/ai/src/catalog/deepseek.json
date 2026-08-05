@@ -39,9 +39,9 @@
       },
       "thinking": {
         "mode": "effort",
-        "supportedEfforts": ["low", "high", "max"],
+        "supportedEfforts": ["low", "medium", "high", "xhigh", "max"],
         "defaultEffort": "high",
-        "allowDisable": false
+        "allowDisable": true
       }
     },
     {
@@ -58,7 +58,7 @@
         "mode": "effort",
         "supportedEfforts": ["low", "high", "max"],
         "defaultEffort": "high",
-        "allowDisable": false
+        "allowDisable": true
       }
     }
   ]

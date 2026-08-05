@@ -148,8 +148,13 @@ export function resolveModelCapabilities(
         effectiveEffort = "none";
       } else if (requested !== undefined && supported.includes(requested)) {
         effectiveEffort = requested;
+      } else if (requested === "xhigh" && supported.includes("max")) {
+        effectiveEffort = "max";
+      } else if (requested === "max" && supported.includes("xhigh")) {
+        effectiveEffort = "xhigh";
       } else if (requested === undefined) {
-        effectiveEffort = thinking.defaultEffort ?? supported[0];
+        // Unset → omit on wire; UI shows no configured effort (provider API default).
+        effectiveEffort = undefined;
       } else {
         // Portable alias not in catalog → fall back to default (historic behavior).
         effectiveEffort = thinking.defaultEffort ?? supported[0] ?? requested;

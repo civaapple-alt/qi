@@ -120,7 +120,7 @@ export interface QiUserConfig {
   readonly model?: string;
   readonly baseURL?: string;
   readonly accountAlias?: string;
-  readonly reasoningEffort?: "low" | "medium" | "high" | "max" | "none";
+  readonly reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "none";
   /** Saved OpenAI-compatible endpoints; active selection is the top-level fields. */
   readonly compatible?: readonly CompatibleEndpoint[];
   readonly contextWindowTokens?: number;
@@ -212,7 +212,9 @@ export interface UserProviderDefaults {
   readonly model: string;
   readonly baseURL?: string;
   readonly accountAlias?: string;
-  readonly reasoningEffort?: "low" | "medium" | "high" | "max" | "none";
+  readonly reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "none";
+  /** When true, remove `reasoning_effort` from config even if `reasoningEffort` is omitted. */
+  readonly clearReasoningEffort?: boolean;
   readonly contextWindowTokens?: number;
   readonly outputReserveTokens?: number;
   readonly imageInput?: boolean;
@@ -241,7 +243,8 @@ export async function persistUserProviderDefaults(
   const alwaysOnThinking = profile !== undefined
     && getProviderModelProfile(profile, selection.model)?.thinking?.mode === "always";
   // Always-on models (Kimi K2.7 Code) must not keep a stale K3 effort in config.toml.
-  const reasoningEffort = alwaysOnThinking
+  // clearReasoningEffort removes a previously persisted effort (API-default / unset).
+  const reasoningEffort = alwaysOnThinking || selection.clearReasoningEffort === true
     ? undefined
     : selection.reasoningEffort ?? loaded.config.reasoningEffort;
   const contextWindowTokens = selection.contextWindowTokens ?? loaded.config.contextWindowTokens;

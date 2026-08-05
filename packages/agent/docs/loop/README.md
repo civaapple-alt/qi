@@ -39,7 +39,8 @@ Goal-bound Step that proposed a non-`read` Action (text-only / pure-read Steps a
 surfaces Evidence Ledger gaps for observation; human Accept / Re-evaluate write ledger entries via
 `HumanEvaluator`.
 `RuntimeActivity` carries bounded redacted model and process previews to interactive surfaces without entering
-Session truth. `EventWriter` refreshes an externally advanced stream before appending so independently owned
+Session truth. Model text/reasoning activities also carry approximate `estimatedOutputTokens` for live Working
+strip counters. `EventWriter` refreshes an externally advanced stream before appending so independently owned
 runtime lifecycles such as ProcessTasks can interleave facts without stale sequence numbers.
 
 ## Behavioral invariants

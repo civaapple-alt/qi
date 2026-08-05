@@ -567,20 +567,22 @@ export class TurnLoop {
             },
             request.signal,
           ),
-          (text) => this.#onActivity?.({
+          (text, estimatedOutputTokens) => this.#onActivity?.({
             type: "model.text",
             sessionId: request.sessionId,
             runId,
             stepId,
             text,
+            estimatedOutputTokens,
             provisional: true,
           }),
-          (text) => this.#onActivity?.({
+          (text, estimatedOutputTokens) => this.#onActivity?.({
             type: "model.reasoning",
             sessionId: request.sessionId,
             runId,
             stepId,
             text,
+            estimatedOutputTokens,
             provisional: true,
           }),
         );
@@ -1621,25 +1623,41 @@ export class TurnLoop {
 
 async function aggregateModelEvents(
   events: AsyncIterable<ModelEvent>,
-  onText?: (text: string) => void,
-  onReasoning?: (text: string) => void,
+  onText?: (text: string, estimatedOutputTokens: number) => void,
+  onReasoning?: (text: string, estimatedOutputTokens: number) => void,
 ): Promise<AggregatedModelResult> {
   let text = "";
   let reasoning = "";
+  let asciiChars = 0;
+  let nonAsciiChars = 0;
   const actions: AggregatedModelResult["actions"] = [];
   let usage: AggregatedModelResult["usage"];
   let terminal: AggregatedModelResult["terminal"] | undefined;
 
   for await (const event of events) {
     switch (event.type) {
-      case "text.delta":
+      case "text.delta": {
         text += event.delta;
-        onText?.(stripReservedRunFacts(redactSensitiveText(text).value).slice(-16_000));
+        const counts = countApproxTokenChars(event.delta);
+        asciiChars += counts.ascii;
+        nonAsciiChars += counts.nonAscii;
+        onText?.(
+          stripReservedRunFacts(redactSensitiveText(text).value).slice(-16_000),
+          estimatedOutputTokensFromCounts(asciiChars, nonAsciiChars),
+        );
         break;
-      case "reasoning.delta":
+      }
+      case "reasoning.delta": {
         reasoning += event.delta;
-        onReasoning?.(redactSensitiveText(reasoning).value.slice(-16_000));
+        const counts = countApproxTokenChars(event.delta);
+        asciiChars += counts.ascii;
+        nonAsciiChars += counts.nonAscii;
+        onReasoning?.(
+          redactSensitiveText(reasoning).value.slice(-16_000),
+          estimatedOutputTokensFromCounts(asciiChars, nonAsciiChars),
+        );
         break;
+      }
       case "action.requested":
         actions.push({ callId: event.callId, name: event.name, input: event.input });
         break;
@@ -1670,6 +1688,22 @@ async function aggregateModelEvents(
     ...(usage === undefined ? {} : { usage }),
     terminal,
   };
+}
+
+/** Match `approximateTokenEstimator` char classes without rescanning full buffers. */
+function countApproxTokenChars(text: string): { ascii: number; nonAscii: number } {
+  let ascii = 0;
+  let nonAscii = 0;
+  for (const character of text) {
+    if ((character.codePointAt(0) ?? 0) <= 0x7f) ascii += 1;
+    else nonAscii += 1;
+  }
+  return { ascii, nonAscii };
+}
+
+function estimatedOutputTokensFromCounts(ascii: number, nonAscii: number): number {
+  if (ascii + nonAscii === 0) return 0;
+  return Math.max(1, Math.ceil(ascii / 4) + nonAscii * 2);
 }
 
 function extractOutputRef(output: unknown): string | undefined {

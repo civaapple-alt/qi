@@ -37,9 +37,9 @@
       },
       "thinking": {
         "mode": "effort",
-        "supportedEfforts": ["low", "medium", "high", "max"],
-        "defaultEffort": "high",
-        "allowDisable": false
+        "supportedEfforts": ["low", "medium", "xhigh"],
+        "defaultEffort": "xhigh",
+        "allowDisable": true
       }
     },
     {
@@ -53,9 +53,9 @@
       },
       "thinking": {
         "mode": "effort",
-        "supportedEfforts": ["low", "medium", "high", "max"],
-        "defaultEffort": "high",
-        "allowDisable": false
+        "supportedEfforts": ["low", "medium", "xhigh"],
+        "defaultEffort": "xhigh",
+        "allowDisable": true
       }
     },
     {
@@ -69,9 +69,9 @@
       },
       "thinking": {
         "mode": "effort",
-        "supportedEfforts": ["low", "medium", "high", "max"],
+        "supportedEfforts": ["low", "medium", "high", "xhigh", "max"],
         "defaultEffort": "high",
-        "allowDisable": false
+        "allowDisable": true
       }
     },
     {
@@ -85,9 +85,9 @@
       },
       "thinking": {
         "mode": "effort",
-        "supportedEfforts": ["low", "medium", "high", "max"],
+        "supportedEfforts": ["low", "medium", "high", "xhigh", "max"],
         "defaultEffort": "high",
-        "allowDisable": false
+        "allowDisable": true
       }
     },
     {
@@ -103,9 +103,9 @@
       },
       "thinking": {
         "mode": "effort",
-        "supportedEfforts": ["low", "medium", "high", "max"],
+        "supportedEfforts": ["low", "medium", "high", "xhigh", "max"],
         "defaultEffort": "high",
-        "allowDisable": false
+        "allowDisable": true
       }
     },
     {
@@ -121,9 +121,9 @@
       },
       "thinking": {
         "mode": "effort",
-        "supportedEfforts": ["low", "medium", "high", "max"],
+        "supportedEfforts": ["low", "medium", "high", "xhigh", "max"],
         "defaultEffort": "high",
-        "allowDisable": false
+        "allowDisable": true
       }
     }
   ]

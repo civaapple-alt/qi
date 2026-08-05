@@ -7,6 +7,7 @@ export async function persistLoginProviderDefaults(
   configPath = defaultUserConfigPath(),
   extras?: {
     readonly outputReserveTokens?: number;
+    readonly clearReasoningEffort?: boolean;
   },
 ): Promise<string> {
   const saved = await persistUserProviderDefaults(
@@ -18,6 +19,7 @@ export async function persistLoginProviderDefaults(
       ...(status.reasoningEffort === undefined
         ? {}
         : { reasoningEffort: status.reasoningEffort }),
+      ...(extras?.clearReasoningEffort === true ? { clearReasoningEffort: true } : {}),
       ...(status.contextWindowTokensOverride
         ? { contextWindowTokens: status.contextWindowTokens }
         : {}),

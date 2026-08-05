@@ -42,16 +42,46 @@ async function discoverRoot(root: string, scope: "workspace" | "user", workspace
   }
   if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`MCP declaration root must be a real directory: ${root}`);
   const canonical = await realpath(root);
-  const declarations: McpServerDeclaration[] = [];
+  // Flat files first; one-level marketplace subdirs (e.g. mcp/claude-plugins-official/*.json) overwrite same name.
+  const byName = new Map<string, McpServerDeclaration>();
   for (const entry of await readdir(canonical, { withFileTypes: true })) {
-    if (!entry.isFile() || entry.isSymbolicLink() || !new Set([".toml", ".json"]).has(extname(entry.name).toLowerCase())) continue;
-    const path = resolve(canonical, entry.name);
-    const raw = await readFile(path, "utf8");
-    if (Buffer.byteLength(raw) > 256 * 1024) throw new Error(`MCP declaration exceeds 256 KiB: ${path}`);
-    const decoded = entry.name.endsWith(".json") ? JSON.parse(raw) : parse(raw);
-    declarations.push(parseDeclaration(decoded, basename(entry.name, extname(entry.name)), path, scope, workspaceRoot));
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isFile()) {
+      const parsed = await readDeclarationFile(resolve(canonical, entry.name), scope, workspaceRoot);
+      if (parsed) byName.set(parsed.name, parsed);
+      continue;
+    }
+    if (!entry.isDirectory()) continue;
+    const nestedRoot = resolve(canonical, entry.name);
+    let nestedCanonical: string;
+    try {
+      const nestedInfo = await lstat(nestedRoot);
+      if (nestedInfo.isSymbolicLink() || !nestedInfo.isDirectory()) continue;
+      nestedCanonical = await realpath(nestedRoot);
+    } catch {
+      continue;
+    }
+    for (const nested of await readdir(nestedCanonical, { withFileTypes: true })) {
+      if (!nested.isFile() || nested.isSymbolicLink()) continue;
+      const parsed = await readDeclarationFile(resolve(nestedCanonical, nested.name), scope, workspaceRoot);
+      if (parsed) byName.set(parsed.name, parsed);
+    }
   }
-  return declarations;
+  return [...byName.values()];
+}
+
+async function readDeclarationFile(
+  path: string,
+  scope: "workspace" | "user",
+  workspaceRoot: string,
+): Promise<McpServerDeclaration | undefined> {
+  const ext = extname(path).toLowerCase();
+  if (!new Set([".toml", ".json"]).has(ext)) return undefined;
+  const fileName = basename(path, ext);
+  const raw = await readFile(path, "utf8");
+  if (Buffer.byteLength(raw) > 256 * 1024) throw new Error(`MCP declaration exceeds 256 KiB: ${path}`);
+  const decoded = path.endsWith(".json") ? JSON.parse(raw) : parse(raw);
+  return parseDeclaration(decoded, fileName, path, scope, workspaceRoot);
 }
 
 export function parseDeclaration(value: unknown, fileName: string, sourcePath: string, scope: "workspace" | "user", workspaceRoot: string): McpServerDeclaration {

@@ -151,12 +151,46 @@ test("TurnLoop completes a response-only Run with durable context and model boun
     assert.equal(step.model.reasoning, "A short reason");
     assert.deepEqual(step.model.usage, { inputTokens: 24, outputTokens: 4 });
     assert.deepEqual(
-      activities.map((activity) => [activity.type, activity.text]),
+      activities.map((activity) => [activity.type, activity.text, activity.estimatedOutputTokens]),
       [
-        ["model.reasoning", "A short reason"],
-        ["model.text", "A grounded answer"],
+        ["model.reasoning", "A short reason", 4],
+        ["model.text", "A grounded answer", 8],
       ],
     );
+  });
+});
+
+test("TurnLoop estimatedOutputTokens tracks full stream past the 16k activity tail", async () => {
+  await withRuntime(async ({ root, artifactStore }) => {
+    const store = new InMemoryEventStore();
+    const activities = [];
+    const longReasoning = "a".repeat(20_000);
+    const model = new ScriptedModelPort([
+      [
+        { type: "reasoning.delta", delta: longReasoning },
+        { type: "text.delta", delta: "done" },
+        { type: "usage", inputTokens: 100, outputTokens: 5_010 },
+        { type: "completed", finishReason: "stop" },
+      ],
+    ]);
+    const loop = new TurnLoop({
+      eventStore: store,
+      modelPort: model,
+      toolRegistry: new ToolRegistry(new InMemoryCapabilityBroker()),
+      onActivity: (activity) => activities.push(activity),
+    });
+
+    const result = await loop.run(turnRequest(root, artifactStore));
+    assert.equal(result.status, "completed");
+    const reasoningActivity = activities.find((item) => item.type === "model.reasoning");
+    const textActivity = activities.find((item) => item.type === "model.text");
+    assert.ok(reasoningActivity);
+    assert.ok(textActivity);
+    assert.equal(reasoningActivity.text.length, 16_000);
+    assert.equal(reasoningActivity.estimatedOutputTokens, 5_000);
+    // Full buffer (20_000 'a' + "done") ≈ 5001 tokens, not capped by the 16k preview.
+    assert.equal(textActivity.estimatedOutputTokens, 5_001);
+    assert.ok(textActivity.estimatedOutputTokens > Math.ceil(16_000 / 4));
   });
 });
 

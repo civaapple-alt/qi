@@ -53,6 +53,10 @@
     "./extensions": {
       "types": "./dist/extensions/index.d.ts",
       "default": "./dist/extensions/index.js"
+    },
+    "./plugins": {
+      "types": "./dist/plugins/index.d.ts",
+      "default": "./dist/plugins/index.js"
     }
   },
   "files": [

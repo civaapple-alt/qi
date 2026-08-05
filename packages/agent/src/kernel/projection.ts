@@ -31,7 +31,7 @@ export interface SessionModelConfiguration {
   provider: string;
   accountAlias: string;
   model: string;
-  reasoningEffort?: "low" | "medium" | "high" | "max" | "none";
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "none";
   contextWindowTokens: number;
   imageInput: boolean;
   persistence: "account" | "session";

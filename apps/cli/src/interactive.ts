@@ -223,12 +223,14 @@ export class InteractiveTui {
             return { consume: true };
           }
           this.#panels.closeAll();
+          this.#maybeDrainFollowUps();
           return { consume: true };
         }
         if (matchesKey(data, Key.escape)) {
           // Forward Esc to the panel (search clear / dismiss), then consume so it cannot
           // reach the Editor after remount or be mistaken for Run cancellation.
           this.#panels.deliverInput(data);
+          if (!this.#panels.open) this.#maybeDrainFollowUps();
           return { consume: true };
         }
         return undefined;
@@ -417,7 +419,7 @@ export class InteractiveTui {
         return;
       }
       this.#followUps.commitEdit(input, content);
-      this.#followUps.clearSelection();
+      // Keep selection so Enter can send-now / Esc can delete without re-selecting.
       this.#presenter.setNotice(undefined);
       this.#render();
       this.#maybeDrainFollowUps();
@@ -534,13 +536,12 @@ export class InteractiveTui {
         this.#followUps.cancelEdit();
         this.#editor.setText("");
         this.#composerImages.clear();
-        this.#followUps.clearSelection();
         this.#render();
         return true;
       }
+      // Esc only clears selection (never deletes) so a fast Esc cannot wipe a follow-up.
       if (this.#followUps.selectedIndex >= 0) {
-        this.#followUps.removeSelected();
-        this.#presenter.setNotice(t(locale, "followups.cancelled"));
+        this.#followUps.clearSelection();
         this.#render();
         return true;
       }
@@ -550,9 +551,13 @@ export class InteractiveTui {
     if ((matchesKey(data, Key.enter) || matchesKey(data, "return")) && editorEmpty && !this.#followUps.editing) {
       if (this.#followUps.selectedIndex >= 0) {
         this.#followUps.moveSelectedToFront();
-        this.#followUps.clearSelection();
         this.#presenter.setNotice(t(locale, "followups.sendNow"));
         this.#render();
+        this.#maybeDrainFollowUps();
+        return true;
+      }
+      // Nothing selected: still drain FIFO when idle (first queued item auto-starts).
+      if (this.#followUps.length > 0 && !this.#runtime.active) {
         this.#maybeDrainFollowUps();
         return true;
       }
@@ -562,25 +567,46 @@ export class InteractiveTui {
     if (!editorEmpty || this.#followUps.editing) return false;
     if (this.#followUps.length === 0 && !this.#runtime.active) return false;
 
+    if (
+      (matchesKey(data, "d") || matchesKey(data, "shift+d")) &&
+      this.#followUps.selectedIndex >= 0
+    ) {
+      this.#followUps.removeSelected();
+      this.#presenter.setNotice(t(locale, "followups.cancelled"));
+      this.#render();
+      return true;
+    }
+
     if (matchesKey(data, Key.up) || matchesKey(data, "up")) {
       if (this.#followUps.length === 0) return false;
-      if (this.#followUps.selectedIndex < 0) {
-        const text = this.#followUps.beginEdit();
-        this.#restoreComposerImages(this.#followUps.selected);
-        this.#editor.setText(text ?? "");
-      } else {
+      if (this.#followUps.selectedIndex < 0) this.#followUps.selectLast();
+      if (this.#followUps.editing) {
+        // Move to the previous queued item while editing.
+        this.#followUps.cancelEdit();
+        this.#editor.setText("");
+        this.#composerImages.clear();
         this.#followUps.selectPrev();
-        const text = this.#followUps.beginEdit(this.#followUps.selectedIndex);
-        this.#restoreComposerImages(this.#followUps.selected);
-        this.#editor.setText(text ?? "");
       }
+      // Not editing: ↑ edits the currently selected item (including a just-queued one).
+      const text = this.#followUps.beginEdit(this.#followUps.selectedIndex);
+      this.#restoreComposerImages(this.#followUps.selected);
+      this.#editor.setText(text ?? "");
       this.#render();
       return true;
     }
 
     if (matchesKey(data, Key.down) || matchesKey(data, "down")) {
-      if (this.#followUps.length === 0 || this.#followUps.selectedIndex < 0) return false;
-      this.#followUps.selectNext();
+      if (this.#followUps.length === 0) return false;
+      if (this.#followUps.selectedIndex < 0) {
+        this.#followUps.selectLast();
+      } else if (this.#followUps.editing) {
+        this.#followUps.cancelEdit();
+        this.#editor.setText("");
+        this.#composerImages.clear();
+        this.#followUps.selectNext();
+      } else {
+        this.#followUps.selectNext();
+      }
       const text = this.#followUps.beginEdit(this.#followUps.selectedIndex);
       this.#restoreComposerImages(this.#followUps.selected);
       this.#editor.setText(text ?? "");
@@ -665,9 +691,13 @@ export class InteractiveTui {
         this.#terminal.setProgress(false);
         this.#presenter.update(this.#runtime.events(), this.#runtime.view());
         this.#render();
-        this.#maybeOfferPendingGates();
-        this.#maybeOfferPathGrant();
+        // Drain queued follow-ups before auto-opening path-grant panels, which would
+        // otherwise leave the first follow-up stranded until the panel is dismissed.
         this.#maybeDrainFollowUps();
+        if (!this.#runtime.active && this.#active.size === 0) {
+          this.#maybeOfferPendingGates();
+          this.#maybeOfferPathGrant();
+        }
       });
     this.#active.add(task);
     this.#render();
@@ -814,6 +844,7 @@ export class InteractiveTui {
     if (!allow) {
       this.#presenter.setNotice(`Denied sensitive path ${path}`);
       this.#maybeOfferSensitivePathGrant();
+      this.#maybeDrainFollowUps();
       this.#render();
       return;
     }
@@ -825,6 +856,7 @@ export class InteractiveTui {
       this.#presenter.setNotice(message(error));
     }
     this.#maybeOfferSensitivePathGrant();
+    this.#maybeDrainFollowUps();
     this.#render();
   }
 
@@ -890,6 +922,7 @@ export class InteractiveTui {
     if (!allow) {
       this.#presenter.setNotice(`Denied mount for ${path}`);
       this.#maybeOfferPathGrant();
+      this.#maybeDrainFollowUps();
       this.#render();
       return;
     }
@@ -901,6 +934,7 @@ export class InteractiveTui {
       this.#presenter.setNotice(message(error));
     }
     this.#maybeOfferPathGrant();
+    this.#maybeDrainFollowUps();
     this.#render();
   }
 
@@ -1273,18 +1307,30 @@ export class InteractiveTui {
     const preserve = new Set(
       tuiCommands.filter((command) => command.draftPolicy === "preserve").map((command) => command.name),
     );
-    const install = (fdPath?: string) => this.#editor.setAutocompleteProvider(
+    const install = (
+      fdPath?: string,
+      pluginCommandIds: readonly string[] = [],
+      agentIds: readonly string[] = [],
+    ) => this.#editor.setAutocompleteProvider(
       new WorkspaceAutocompleteProvider(
         commands,
         this.#presenter.launch.workspaceRoot,
         fdPath,
         preserve,
         this.#runtime.skillCatalog().map((skill) => skill.name),
+        pluginCommandIds,
+        agentIds,
       ),
     );
     install();
-    void findTrustedExecutable("fd", this.#presenter.launch.workspaceRoot).then((fdPath) => {
-      if (generation === this.#autocompleteGeneration && !this.#closing && fdPath) install(fdPath);
+    void Promise.all([
+      findTrustedExecutable("fd", this.#presenter.launch.workspaceRoot),
+      this.#runtime.plugins().listCommands().then((entries) => entries.map((entry) => entry.id)).catch(() => []),
+      this.#runtime.plugins().listAgents().then((entries) => entries.map((entry) => entry.id)).catch(() => []),
+    ]).then(([fdPath, pluginCommandIds, agentIds]) => {
+      if (generation === this.#autocompleteGeneration && !this.#closing) {
+        install(fdPath, pluginCommandIds, agentIds);
+      }
     });
   }
 
@@ -2287,7 +2333,10 @@ export class InteractiveTui {
 
   async #persistLoginDefaults(
     status: AuthSessionStatus,
-    extras?: { readonly outputReserveTokens?: number },
+    extras?: {
+      readonly outputReserveTokens?: number;
+      readonly clearReasoningEffort?: boolean;
+    },
   ): Promise<string> {
     const configPath = this.#presenter.launch.configPath ?? defaultUserConfigPath();
     return persistLoginProviderDefaults(status, configPath, extras);
@@ -2350,6 +2399,7 @@ export class InteractiveTui {
     const current = auth.status();
     this.#startManagementTask(async () => {
       const { outputReserveTokens, ...authRouting } = routing;
+      const clearReasoningEffort = authRouting.reasoningEffort === "";
       const status = await auth.useAccount(
         current.provider,
         current.accountAlias,
@@ -2384,11 +2434,16 @@ export class InteractiveTui {
       if (persistence === "account") {
         await this.#persistLoginDefaults(status, {
           outputReserveTokens: output.outputReserveTokens,
+          ...(clearReasoningEffort ? { clearReasoningEffort: true } : {}),
         });
       }
       this.#presenter.setNotice(
         `Model → ${status.model}` +
-        (status.reasoningEffort ? ` · effort ${status.reasoningEffort}` : "") +
+        (status.reasoningEffort
+          ? ` · effort ${status.reasoningEffort}`
+          : clearReasoningEffort
+            ? " · effort unset (API default)"
+            : "") +
         ` · output ${output.outputReserveTokens}` +
         ` · ${persistence === "account" ? "saved as user default" : "current Session only"}`,
       );
@@ -2411,6 +2466,26 @@ export class InteractiveTui {
         return;
       }
       this.#startTurn(() => this.#runtime.runWithSkill(skillName, argument));
+      return;
+    }
+    if (name.startsWith("plugin:")) {
+      const pluginId = name.slice("plugin:".length);
+      if (!pluginId || !argument.trim()) {
+        this.#presenter.setNotice(`/${name} requires a task, for example /${name} review this PR`);
+        this.#render();
+        return;
+      }
+      this.#startTurn(() => this.#runtime.runWithPlugin(pluginId, argument));
+      return;
+    }
+    if (name.startsWith("agent:")) {
+      const agentId = name.slice("agent:".length);
+      if (!agentId || !argument.trim()) {
+        this.#presenter.setNotice(`/${name} requires a task, for example /${name} review auth changes`);
+        this.#render();
+        return;
+      }
+      this.#startTurn(() => this.#runtime.runWithAgent(agentId, argument));
       return;
     }
     if (name === "memory") {
@@ -2452,6 +2527,56 @@ export class InteractiveTui {
         return;
       }
       this.#openSkillsHubPanel();
+      return;
+    }
+    if (name === "plugins") {
+      this.#startManagementTask(async () => {
+        const query = argument.trim();
+        const commands = await this.#runtime.plugins().listCommands(query);
+        this.#syncAutocomplete();
+        if (commands.length === 0) {
+          this.#presenter.setNotice(
+            query
+              ? `No enabled plugin commands match "${query}". Use: qi marketplace add … && qi plugin install … && qi plugin enable …`
+              : "No enabled plugin commands. Use: qi marketplace add <name> local:PATH|github:owner/repo, then qi plugin install/enable.",
+          );
+          return;
+        }
+        this.#openScrollPanel(
+          "/plugins",
+          [
+            "Enabled plugin commands — invoke with /plugin:<id> <task>",
+            ...commands.map((entry) => `  /plugin:${entry.id}  ${entry.description}`),
+            "",
+            "Manage: qi marketplace search <name> <query> · qi plugin list|install|enable",
+          ],
+        );
+      }, "plugins");
+      return;
+    }
+    if (name === "agents") {
+      this.#startManagementTask(async () => {
+        const query = argument.trim();
+        const agents = await this.#runtime.plugins().listAgents(query);
+        this.#syncAutocomplete();
+        if (agents.length === 0) {
+          this.#presenter.setNotice(
+            query
+              ? `No enabled plugin agents match "${query}".`
+              : "No enabled plugin agents. Install/enable a plugin that ships agents/, then /agent:<id> <task>.",
+          );
+          return;
+        }
+        this.#openScrollPanel(
+          "/agents",
+          [
+            "Enabled plugin agents — invoke with /agent:<id> <task>",
+            ...agents.map((entry) => `  /agent:${entry.id}  ${entry.description.slice(0, 120)}`),
+            "",
+            "Manage: qi plugin install|enable · qi agent list",
+          ],
+        );
+      }, "agents");
       return;
     }
     if (name === "mcp") {

@@ -36,7 +36,7 @@ export class FollowUpsComponent implements Component {
       const marker = editing
         ? theme.fg("primary", "› ")
         : selected
-          ? theme.fg("primary", "○ ")
+          ? theme.fg("primary", "● ")
           : theme.fg("textDim", "○ ");
       const body = item.text.replaceAll(/\s+/g, " ").trim();
       const prefixWidth = visibleWidth(marker);

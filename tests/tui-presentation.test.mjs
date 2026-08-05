@@ -72,7 +72,6 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.ok(advanced.some((line) => line.includes("/context")));
   assert.ok(!advanced.some((line) => /^\s+\/status\b/.test(line)));
   assert.ok(advanced.some((line) => line.includes("/task stop")));
-  assert.ok(!advanced.some((line) => line.includes("/agents")));
   assert.ok(!advanced.some((line) => line.includes("/steps")));
   assert.ok(!advanced.some((line) => line.includes("/actions")));
   assert.ok(advanced.some((line) => line.includes("/coord")));
@@ -83,6 +82,8 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.ok(primary.some((command) => command.name === "shell"));
   assert.ok(primary.some((command) => command.name === "permissions"));
   assert.ok(primary.some((command) => command.name === "status"));
+  assert.ok(primary.some((command) => command.name === "plugins"));
+  assert.ok(primary.some((command) => command.name === "agents"));
   assert.ok(!primary.some((command) => command.name === "config"));
   assert.ok(!primary.some((command) => command.name === "max-steps"));
   assert.ok(!primary.some((command) => command.name === "run"));
@@ -98,7 +99,8 @@ test("TUI command catalog separates inspection, navigation, and control", () => 
   assert.ok(!autocomplete.some((command) => command.name === "agent"));
   assert.ok(!autocomplete.some((command) => command.name === "steps"));
   assert.ok(!autocomplete.some((command) => command.name === "actions"));
-  assert.ok(!autocomplete.some((command) => command.name === "agents"));
+  assert.ok(autocomplete.some((command) => command.name === "agents"));
+  assert.ok(autocomplete.some((command) => command.name === "plugins"));
   assert.ok(autocomplete.some((command) => command.name === "config"));
   assert.ok(autocomplete.some((command) => command.name === "status"));
   assert.ok(autocomplete.some((command) => command.name === "max-steps"));
@@ -656,7 +658,7 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
 
     presenter.pushInspection("context");
     const context = presenter.render().join("\n");
-    assert.match(context, /history\s+newest completed turns, capped at 16k/);
+    assert.match(context, /history\s+newest completed turns, capped at 16\.00k/);
     assert.match(context, /boundary\s+safe between Steps/);
 
     presenter.pushInspection("actions");
@@ -1620,6 +1622,7 @@ test("active Run folds older Steps but keeps bounded edit diffs in the retained 
     runId,
     stepId: "stp_12",
     text: "earlier model text\nlatest model tail",
+    estimatedOutputTokens: 10,
     provisional: true,
   });
   const modelWorking = presenter.renderWorking(true, 0, 40);
@@ -1633,6 +1636,7 @@ test("active Run folds older Steps but keeps bounded edit diffs in the retained 
     runId,
     stepId: "stp_12",
     text: "reasoning one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen",
+    estimatedOutputTokens: 20,
     provisional: true,
   });
   const reasoningWorking = presenter.renderWorking(true, 0, 40);
@@ -1985,6 +1989,7 @@ test("live reasoning activity does not render as agent narration in the transcri
     runId,
     stepId,
     text: `LIVE_REASONING_MARKER ${"wall ".repeat(4_000)}`,
+    estimatedOutputTokens: 4_000,
     provisional: true,
   });
   const transcript = presenter.render(80).join("\n");
@@ -1992,6 +1997,99 @@ test("live reasoning activity does not render as agent narration in the transcri
   assert.doesNotMatch(transcript, /wall wall wall/);
   const working = presenter.renderWorking(true, 0, 80).join("\n");
   assert.match(working, /thinking ·/);
+});
+
+test("Working strip grows with live estimatedOutputTokens then uses provider usage", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "/tmp/ws",
+    dataRoot: "/tmp/ws/.qi",
+    provider: "fake",
+    model: "live-tokens",
+    capabilities: [],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+  });
+  const occurredAt = new Date(0).toISOString();
+  const stepId = "stp_live_tok";
+  const runId = "run_live_tok";
+  const baseView = {
+    sessionId: "ses_live_tok",
+    createdAt: occurredAt,
+    version: 1,
+    mode: "agent",
+    currentRunId: runId,
+    runOrder: [runId],
+    runs: {
+      [runId]: {
+        runId,
+        trigger: "user",
+        mode: "agent",
+        status: "active",
+        stepOrder: [stepId],
+        steps: {
+          [stepId]: {
+            stepId,
+            status: "running",
+            context: { estimatedTokens: 5_900, budgetTokens: 64_000 },
+          },
+        },
+        actions: {},
+        evaluations: {},
+        steering: [],
+        delegations: {},
+      },
+    },
+    goals: {},
+    goalOrder: [],
+    evidence: {},
+    controlReceipts: {},
+    memories: {},
+    memoryOrder: [],
+    tasks: {},
+    taskOrder: [],
+    plans: {},
+    planOrder: [],
+    presence: { state: "working", reason: "live tokens" },
+  };
+  presenter.update([], baseView);
+  assert.match(presenter.renderWorking(true, 0).join("\n"), /5\.90k tokens/);
+
+  presenter.applyActivity({
+    type: "model.reasoning",
+    sessionId: "ses_live_tok",
+    runId,
+    stepId,
+    text: "thinking…",
+    estimatedOutputTokens: 400,
+    provisional: true,
+  });
+  assert.match(presenter.renderWorking(true, 0).join("\n"), /6\.30k tokens/);
+
+  presenter.update([], {
+    ...baseView,
+    runs: {
+      [runId]: {
+        ...baseView.runs[runId],
+        steps: {
+          [stepId]: {
+            stepId,
+            status: "running",
+            context: { estimatedTokens: 5_900, budgetTokens: 64_000 },
+            model: {
+              text: "ok",
+              usage: { inputTokens: 6_000, outputTokens: 500 },
+            },
+          },
+        },
+      },
+    },
+  });
+  // update() clears model activity once step.model is present.
+  assert.match(presenter.renderWorking(true, 0).join("\n"), /6\.50k tokens/);
 });
 
 test("line-mode panel snapshots append after the transcript without interleaving", () => {
@@ -2085,11 +2183,13 @@ test("follow-ups panel renders queued items and edit hints", () => {
   assert.match(browse, /follow-ups/);
   assert.match(browse, /first follow-up/);
   assert.match(browse, /second follow-up/);
+  assert.match(browse, /● /); // latest enqueue is selected
   assert.match(browse, /enter send now/);
-  queue.selectLast();
+  assert.match(browse, /d delete/);
+  assert.match(browse, /esc clear selection/);
   queue.beginEdit();
   const editing = panel.render(80).join("\n");
-  assert.match(editing, /editing · enter done/);
+  assert.match(editing, /editing · enter save/);
   assert.match(editing, /›/);
 });
 
@@ -2447,12 +2547,12 @@ test("context panel shows ContextBlock kind shares, counts, and omitted tokens",
   });
 
   const lines = presenter.renderPanel("context").join("\n");
-  assert.match(lines, /block mix\s+2 included · 2 omitted · 6\.0k included tokens/);
-  assert.match(lines, /constitution\s+4\.8k ·\s+80% · 1 in \/ 0 out/);
-  assert.match(lines, /memory\s+1\.2k ·\s+20% · 1 in \/ 1 out · 800 omitted/);
-  assert.match(lines, /skill\s+0 ·\s+0% · 0 in \/ 1 out · 2\.0k omitted/);
-  assert.match(lines, /non-block\s+4\.0k · conversation messages \+ advertised Tool schemas/);
-  assert.match(lines, /candidates\s+8\.8k ContextBlock tokens before omission/);
+  assert.match(lines, /block mix\s+2 included · 2 omitted · 6\.00k included tokens/);
+  assert.match(lines, /constitution\s+4\.80k ·\s+80% · 1 in \/ 0 out/);
+  assert.match(lines, /memory\s+1\.20k ·\s+20% · 1 in \/ 1 out · 800 omitted/);
+  assert.match(lines, /skill\s+0 ·\s+0% · 0 in \/ 1 out · 2\.00k omitted/);
+  assert.match(lines, /non-block\s+4\.00k · conversation messages \+ advertised Tool schemas/);
+  assert.match(lines, /candidates\s+8\.80k ContextBlock tokens before omission/);
   const chat = presenter.renderChat().join("\n");
   assert.match(chat, /⟦user⟧Skill · review-code · user/);
   assert.match(chat, /⟦user⟧Skill tool · load · review-code · completed/);
@@ -4696,12 +4796,12 @@ test("Running strip keeps parent tokens; Subagent rows show child tokens", () =>
   });
   const working = presenter.renderWorking(true, 0).join("\n");
   assert.match(working, /waiting on subagent/);
-  assert.match(working, /5\.9k tokens/);
-  assert.doesNotMatch(working, /1\.2k/);
+  assert.match(working, /5\.90k tokens/);
+  assert.doesNotMatch(working, /1\.20k/);
   const overview = presenter.render().join("\n");
   assert.match(overview, /Tasks · 1 running · \/tasks/);
   assert.match(overview, /只读调研日志打印/);
-  assert.match(overview, /Running · 1\.2k tokens/);
+  assert.match(overview, /Running · 1\.20k tokens/);
   assert.doesNotMatch(overview, /summary artifact:\/\//);
 });
 

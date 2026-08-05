@@ -45,7 +45,7 @@ export interface AuthSessionStatus {
   readonly wireApi: string;
   readonly endpointTrust: "official" | "custom";
   readonly model: string;
-  readonly reasoningEffort?: "low" | "medium" | "high" | "max" | "none";
+  readonly reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "none";
   readonly contextWindowTokens: number;
   readonly contextWindowTokensOverride: boolean;
   readonly baseURL?: string;
@@ -119,17 +119,19 @@ export class AuthSession {
       this.#config.profile,
       this.#config.model,
     )?.thinking;
-    const modelDefaultEffort = thinking?.defaultEffort;
     const supportedEfforts = thinking?.supportedEfforts;
     const configuredEffort = this.#config.reasoningEffort;
     // Always-on thinking models (e.g. Kimi K2.7 Code) do not expose an effort control.
+    // Unset operator effort stays unset (wire omits); do not project catalog defaultEffort.
     const effectiveEffort = thinking?.mode === "always"
       ? undefined
       : configuredEffort === "none"
       ? "none"
       : configuredEffort !== undefined && supportedEfforts?.includes(configuredEffort)
         ? configuredEffort
-        : modelDefaultEffort ?? configuredEffort;
+        : configuredEffort !== undefined
+          ? thinking?.defaultEffort ?? configuredEffort
+          : undefined;
     return {
       provider: this.#config.provider,
       accountAlias: this.#config.accountAlias,
@@ -329,14 +331,17 @@ export class AuthSession {
         ?? profile.officialBaseURL,
       `${profile.displayName} base URL`,
     );
+    const clearReasoningEffort = routing?.reasoningEffort === "";
     const reasoningEffort = resolveModelReasoningEffort(
       profile,
       model,
-      loginReasoningEffort(
-        provider,
-        routing?.reasoningEffort ?? optionalNonEmpty(stored.metadata?.reasoningEffort),
-        provider === this.#config.provider ? this.#config.reasoningEffort : undefined,
-      ),
+      clearReasoningEffort
+        ? undefined
+        : loginReasoningEffort(
+          provider,
+          routing?.reasoningEffort ?? optionalNonEmpty(stored.metadata?.reasoningEffort),
+          provider === this.#config.provider ? this.#config.reasoningEffort : undefined,
+        ),
     );
     const contextWindowTokens = loginContextWindowTokens(
       routing?.contextWindowTokens ?? optionalStoredInteger(stored.metadata?.contextWindowTokens),

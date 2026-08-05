@@ -5,8 +5,11 @@ import { FollowUpQueue } from "../apps/cli/dist/follow-ups.js";
 test("FollowUpQueue enqueues multiple items and dequeues FIFO", () => {
   const queue = new FollowUpQueue();
   queue.enqueue("first");
+  assert.equal(queue.selectedIndex, 0);
   queue.enqueue("second");
   assert.equal(queue.length, 2);
+  assert.equal(queue.selectedIndex, 1);
+  assert.equal(queue.selected?.text, "second");
   assert.equal(queue.dequeue()?.text, "first");
   assert.equal(queue.dequeue()?.text, "second");
   assert.equal(queue.dequeue(), undefined);

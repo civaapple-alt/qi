@@ -18,7 +18,7 @@ export interface ProviderTransportCapabilities {
   readonly requestMetadata: boolean;
 }
 
-export type ProviderThinkingEffort = "low" | "medium" | "high" | "max";
+export type ProviderThinkingEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ChatThinkingDialect =
   | "none"

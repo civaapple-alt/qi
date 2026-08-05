@@ -33,11 +33,13 @@ import {
 } from "./runtime.js";
 import { runPackageCliCommand } from "./package-command.js";
 import { runExtensionCliCommand } from "./extension-command.js";
+import { runPluginCliCommand } from "./plugin-command.js";
 
 const execFileAsync = promisify(execFile);
 
 async function main(): Promise<void> {
   if (await runExtensionCliCommand(process.argv.slice(2))) return;
+  if (await runPluginCliCommand(process.argv.slice(2))) return;
   if (await runPackageCliCommand(process.argv.slice(2))) return;
   const parsed = await parseTuiCliArguments(process.argv.slice(2));
   if (parsed.kind === "help" || parsed.kind === "version") {
@@ -398,6 +400,34 @@ async function main(): Promise<void> {
       const task = runtime.runWithSkill(skillName, command.argument)
         .then(() => undefined)
         .catch((error: unknown) => { process.stderr.write(`skill error: ${message(error)}\n`); })
+        .finally(() => { active.delete(task); if (!closing) readline.prompt(); });
+      active.add(task);
+      return;
+    }
+    if (command?.name.startsWith("plugin:")) {
+      const pluginId = command.name.slice("plugin:".length);
+      if (!pluginId || !command.argument.trim()) {
+        process.stderr.write(`/${command.name} requires a task.\n`);
+        if (!closing) readline.prompt();
+        return;
+      }
+      const task = runtime.runWithPlugin(pluginId, command.argument)
+        .then(() => undefined)
+        .catch((error: unknown) => { process.stderr.write(`plugin error: ${message(error)}\n`); })
+        .finally(() => { active.delete(task); if (!closing) readline.prompt(); });
+      active.add(task);
+      return;
+    }
+    if (command?.name.startsWith("agent:")) {
+      const agentId = command.name.slice("agent:".length);
+      if (!agentId || !command.argument.trim()) {
+        process.stderr.write(`/${command.name} requires a task.\n`);
+        if (!closing) readline.prompt();
+        return;
+      }
+      const task = runtime.runWithAgent(agentId, command.argument)
+        .then(() => undefined)
+        .catch((error: unknown) => { process.stderr.write(`agent error: ${message(error)}\n`); })
         .finally(() => { active.delete(task); if (!closing) readline.prompt(); });
       active.add(task);
       return;

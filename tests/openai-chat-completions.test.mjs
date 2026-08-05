@@ -335,8 +335,9 @@ test("Kimi thinking uses top-level reasoning_effort, disable for none, and keep:
   assert.equal(bodies[0].reasoning_effort, undefined);
   assert.deepEqual(bodies[1].thinking, { type: "enabled", keep: "all" });
   assert.equal(bodies[1].reasoning_effort, undefined);
+  // Unset effort → omit reasoning_effort (provider API default).
   assert.equal(bodies[2].thinking, undefined);
-  assert.equal(bodies[2].reasoning_effort, "high");
+  assert.equal(bodies[2].reasoning_effort, undefined);
   assert.equal(bodies[3].thinking, undefined);
   assert.equal(bodies[3].reasoning_effort, "low");
   // Catalog K3 omits medium; unsupported levels fall back to defaultEffort.
@@ -344,9 +345,10 @@ test("Kimi thinking uses top-level reasoning_effort, disable for none, and keep:
   assert.equal(bodies[4].reasoning_effort, "high");
   assert.equal(normalizeKimiReasoningEffort(undefined), undefined);
   assert.equal(normalizeKimiReasoningEffort(null), undefined);
-  for (const value of ["ultra", "max", "xhigh"]) {
+  for (const value of ["ultra", "max"]) {
     assert.equal(normalizeKimiReasoningEffort(value), "max");
   }
+  assert.equal(normalizeKimiReasoningEffort("xhigh"), "xhigh");
   assert.equal(normalizeKimiReasoningEffort("high"), "high");
   assert.equal(normalizeKimiReasoningEffort("medium"), "medium");
   for (const value of ["low", "minimum", "light", "minimal"]) {

@@ -10,6 +10,9 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- Claude-compatible plugin marketplace (ADR-0037): `qi marketplace` / `qi plugin` / `qi agent`, TUI
+  `/plugins` · `/plugin:<id>` · `/agents` · `/agent:<id>`, vendored skills/commands/MCP declarations/agents from
+  `claude-plugins-official`-shaped catalogs. MCP still requires human bind; hooks/LSP are unsupported.
 - Production Skill subsystem: Agent Skills frontmatter, complete bounded resource trees, binary Artifacts,
   immutable Git/GitHub/archive sources and locks, readiness diagnostics, explicit `/skill:<name>` activation,
   and Execute-authorized bounded scripts without dependency installation.
@@ -27,6 +30,24 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- Follow-ups: newly queued items are selected (`●`) so Enter send-now / `d` delete work immediately;
+  Esc clears selection or cancels edit (does not delete). After a Run settles, queued follow-ups drain
+  before auto-opening path-grant panels so the first follow-up is not stranded.
+- TUI Working strip token count grows during Thinking via approximate reasoning+text output
+  (`context.estimatedTokens + estimatedOutputTokens`), then switches to provider `input+output` after
+  `model.completed`. Abbreviations use two fractional digits in the `k` band (for example `10.42k`).
+- Plugin-materialized MCP declarations write to `$QI_HOME/resources/mcp/<marketplace>/<name>.json` (for example
+  `claude-plugins-official/context7.json`) instead of a flat `resources/mcp/<name>.json`. Discovery accepts that
+  one-level marketplace layout; re-enable/install removes a leftover flat file for the same server name.
+- When `reasoning_effort` is unset, adapters omit `reasoning.effort` / `reasoning_effort` on the wire so the
+  provider API applies its own default. Explicit unsupported levels still fall back to catalog `defaultEffort`.
+  The `/model` Thinking effort list includes **不设置（API 默认） / Unset (API default)** to clear a saved
+  effort from config.
+- DeepSeek and Qianwen catalogs advertise vendor-aligned efforts including `none` (disable thinking): DeepSeek
+  Flash Responses `low|medium|high|xhigh|max` (+ `none`); Qwen3.8-Max `low|medium|xhigh` (+ `none`).
+- Qianwen `qwen3.8-max` / `qwen3.8-max-preview` thinking efforts are now `low`/`medium`/`xhigh` (default
+  `xhigh`), matching the Token Plan / DashScope Responses enum. Portable `xhigh` is first-class; on providers
+  that only expose `max`, wire still coerces `xhigh` → `max`.
 - TUI `/skills` adds **始终启用的 Skill / Always-on Skills**: lists Workspace and user Qi Skills (plus workspace
   `.agents` Skills) that need no activation toggle, with a `/skill:<name> <task>` invoke hint.
 - Web Recent Sessions omit depth-1 Subagent child Sessions (`Delegated: …` catalog titles). Open those children

@@ -89,3 +89,50 @@ test("/skill completion lists active Skill names and preserves the task suffix",
     { lines: ["/skill:qianwen-text review this"], cursorLine: 0, cursorCol: "/skill:qianwen-text".length },
   );
 });
+
+test("/plugin and /agent completion do not double the leading slash", async () => {
+  const provider = new WorkspaceAutocompleteProvider(
+    [{ name: "plugins", description: "plugins" }],
+    process.cwd(),
+    undefined,
+    new Set(),
+    [],
+    ["frontend-design", "code-review"],
+    ["pr-review-toolkit:code-reviewer"],
+  );
+  const pluginSuggestions = await provider.getSuggestions(["/plugin:front"], 0, "/plugin:front".length, {
+    signal: new AbortController().signal,
+  });
+  assert.deepEqual(pluginSuggestions?.items.map((item) => item.value), ["/plugin:frontend-design"]);
+  assert.deepEqual(
+    provider.applyCompletion(
+      ["/plugin:front sketch a page"],
+      0,
+      "/plugin:front".length,
+      pluginSuggestions.items[0],
+      "/plugin:front",
+    ),
+    { lines: ["/plugin:frontend-design sketch a page"], cursorLine: 0, cursorCol: "/plugin:frontend-design".length },
+  );
+
+  const agentSuggestions = await provider.getSuggestions(["/agent:pr"], 0, "/agent:pr".length, {
+    signal: new AbortController().signal,
+  });
+  assert.deepEqual(agentSuggestions?.items.map((item) => item.value), [
+    "/agent:pr-review-toolkit:code-reviewer",
+  ]);
+  assert.deepEqual(
+    provider.applyCompletion(
+      ["/agent:pr review auth"],
+      0,
+      "/agent:pr".length,
+      agentSuggestions.items[0],
+      "/agent:pr",
+    ),
+    {
+      lines: ["/agent:pr-review-toolkit:code-reviewer review auth"],
+      cursorLine: 0,
+      cursorCol: "/agent:pr-review-toolkit:code-reviewer".length,
+    },
+  );
+});

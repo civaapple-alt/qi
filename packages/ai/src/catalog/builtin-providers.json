@@ -45,6 +45,10 @@
     ],
     "defaultModel": "grok-4.5",
     "contextTokens": 256000,
+    "inputModalities": [
+      "text",
+      "image"
+    ],
     "modelDiscovery": "openai_compatible",
     "wire": {
       "responsesThinking": "reasoning_effort"
@@ -217,11 +221,13 @@
           "mode": "effort",
           "supportedEfforts": [
             "low",
+            "medium",
             "high",
+            "xhigh",
             "max"
           ],
           "defaultEffort": "high",
-          "allowDisable": false
+          "allowDisable": true
         }
       },
       {
@@ -244,7 +250,7 @@
             "max"
           ],
           "defaultEffort": "high",
-          "allowDisable": false
+          "allowDisable": true
         }
       }
     ]
@@ -447,11 +453,10 @@
           "supportedEfforts": [
             "low",
             "medium",
-            "high",
-            "max"
+            "xhigh"
           ],
-          "defaultEffort": "high",
-          "allowDisable": false
+          "defaultEffort": "xhigh",
+          "allowDisable": true
         }
       },
       {
@@ -471,11 +476,10 @@
           "supportedEfforts": [
             "low",
             "medium",
-            "high",
-            "max"
+            "xhigh"
           ],
-          "defaultEffort": "high",
-          "allowDisable": false
+          "defaultEffort": "xhigh",
+          "allowDisable": true
         }
       },
       {
@@ -495,10 +499,11 @@
             "low",
             "medium",
             "high",
+            "xhigh",
             "max"
           ],
           "defaultEffort": "high",
-          "allowDisable": false
+          "allowDisable": true
         }
       },
       {
@@ -519,10 +524,11 @@
             "low",
             "medium",
             "high",
+            "xhigh",
             "max"
           ],
           "defaultEffort": "high",
-          "allowDisable": false
+          "allowDisable": true
         }
       },
       {
@@ -544,10 +550,11 @@
             "low",
             "medium",
             "high",
+            "xhigh",
             "max"
           ],
           "defaultEffort": "high",
-          "allowDisable": false
+          "allowDisable": true
         }
       },
       {
@@ -569,10 +576,11 @@
             "low",
             "medium",
             "high",
+            "xhigh",
             "max"
           ],
           "defaultEffort": "high",
-          "allowDisable": false
+          "allowDisable": true
         }
       }
     ]

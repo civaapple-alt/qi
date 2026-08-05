@@ -81,6 +81,8 @@ categories and counts but never the matched value.
 ## Provisional activity
 
 Provider text deltas and bounded process snapshots may be published through `RuntimeActivity` after redaction.
+Model channels also carry `estimatedOutputTokens` (approximate reasoning+text so far) so the TUI Working strip can
+grow continuously before `model.completed` replaces the number with provider usage.
 They are UI responsiveness hints only: consumers may coalesce or drop them, and they never become model feedback,
 Action settlement, Session events, or completion evidence. The next durable model or Action event supersedes the
 preview. See [ADR 0005](../../../design/decisions.md#adr-0005-keep-provisional-activity-outside-durable-session-truth).

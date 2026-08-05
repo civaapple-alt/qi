@@ -1,0 +1,38 @@
+{
+  "name": "fixture-marketplace",
+  "description": "Minimal Claude marketplace fixture for Qi tests",
+  "owner": { "name": "Qi" },
+  "plugins": [
+    {
+      "name": "frontend-design",
+      "description": "Frontend design skill",
+      "source": "./plugins/frontend-design",
+      "category": "development"
+    },
+    {
+      "name": "code-review",
+      "description": "PR code review command",
+      "source": "./plugins/code-review",
+      "category": "productivity"
+    },
+    {
+      "name": "context7",
+      "description": "Context7 MCP",
+      "source": "./external_plugins/context7",
+      "category": "development",
+      "tags": ["community-managed"]
+    },
+    {
+      "name": "hooks-only",
+      "description": "Unsupported hooks plugin",
+      "source": "./plugins/hooks-only",
+      "category": "productivity"
+    },
+    {
+      "name": "review-agents",
+      "description": "Agents-only review toolkit",
+      "source": "./plugins/review-agents",
+      "category": "productivity"
+    }
+  ]
+}

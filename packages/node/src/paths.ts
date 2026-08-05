@@ -227,6 +227,8 @@ export async function ensureQiLayout(
     "packages/cache/git",
     "packages/cache/catalog",
     "packages/staging",
+    "plugins/marketplaces",
+    "plugins/cache",
     "projects",
   ];
   await Promise.all(directories.map((entry) => mkdir(resolve(root, entry), { recursive: true })));
@@ -237,6 +239,14 @@ export async function ensureQiLayout(
     ensureTextFile(
       resolve(root, "packages", "lock.json"),
       `${JSON.stringify({ schemaVersion: 1, packages: {} }, null, 2)}\n`,
+    ),
+    ensureTextFile(
+      resolve(root, "plugins", "known_marketplaces.json"),
+      `${JSON.stringify({ schemaVersion: 1, marketplaces: {} }, null, 2)}\n`,
+    ),
+    ensureTextFile(
+      resolve(root, "plugins", "enabled.json"),
+      `${JSON.stringify({ schemaVersion: 1, plugins: {} }, null, 2)}\n`,
     ),
   ]);
 }

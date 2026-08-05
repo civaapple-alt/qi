@@ -25,6 +25,7 @@ Controlled entrypoints:
 | `./media` | image URL/clipboard ingestion, MIME/magic validation, preprocessing, Artifact storage, and `read_image` |
 | `./skills` | progressive Agent Skills, immutable source locks, full resource trees, and bounded script execution |
 | `./mcp` | inert declarations, official transports, quarantined fingerprint review, sealed OAuth, and proxy Tools |
+| `./plugins` | Claude-compatible marketplace sync, pinned plugin cache, `/plugin:` and `/agent:` catalogs (ADR-0037) |
 | `./codeact` | container-isolated short programs with ordinary nested Tool authority |
 | `./scheduler` | bounded durable timer/event watchers |
 | `./stream` | committed catch-up/live delivery and SSE |

@@ -83,6 +83,10 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
 | `/skills` | Skills hub with only two actions: activation management (Space toggles global Skills, Enter applies) and Install → scope → name/path form |
 | `/skill:<name> <task>` | Start an ordinary Run with one explicitly activated, digest-pinned Skill |
+| `/plugins [query]` | List enabled marketplace plugin commands; invoke with `/plugin:<id> <task>` |
+| `/plugin:<id> <task>` | Start a Run with one enabled marketplace command/skill body |
+| `/agents [query]` | List enabled marketplace agents; invoke with `/agent:<id> <task>` |
+| `/agent:<id> <task>` | Start a Run with one enabled marketplace agent profile |
 | `/mcp` | Single MCP management panel: server status, refresh, OAuth, capability inspection, bind, and unbind; use `qi mcp …` for non-interactive management |
 | `/tasks` | List depth-1 Subagent research Tasks for the selected Run; Enter opens tracking |
 | `/jobs [stop …]` | Interactive background Job list; select a running Job and press Enter to stop it |
@@ -102,9 +106,10 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 
 While a Run is active, type normally to **queue follow-ups**. An empty composer shows Cursor-style bordered
 placeholder text (`→ Add a follow-up` · `ctrl+c to stop`) with a **static** reverse-video caret on the `A` (no
-blinking hardware bar). Idle empty state uses `→ Add a message`. Use ↑ to select/edit a queued item, Enter to
-send-now (promote to front), Esc to cancel; after the Run ends, Qi starts the next follow-up automatically.
-Slash commands and `/steer` are unchanged.
+blinking hardware bar). Idle empty state uses `→ Add a message`. Newly queued items are selected (`●`). Use ↑ to
+edit the selection, Enter to send-now (promote to front), `d` to delete, Esc to clear selection or cancel edit
+(Esc never deletes). After the Run ends, queued follow-ups drain before path-grant panels so the next item is
+not stranded. Slash commands and `/steer` are unchanged.
 
 Hidden aliases (still work; listed by `/help advanced`): `/config`, `/context`, `/max-steps`,
 `/max-actions-per-step`, `/subagent`, `/delegate`, `/providers`, `/add-dir`, `/unmount`, `/skill`, `/task`,
@@ -141,7 +146,9 @@ SQLite; credential-like material is rejected before any Memory/source event is w
 Use `/help` in the application for the localized categorized list. The default surface is a compact chat
 transcript: a Qi welcome (or short header), full-width user message bars (with vertical padding), plain
 Agent replies (narration before tools when the model requested Actions), and a live
-`Running · phase · tool · tokens` strip above the composer while a Run is active. Startup probes trusted PATH
+`Running · phase · tool · tokens` strip above the composer while a Run is active. During Thinking the token
+count grows from approximate reasoning/text output on top of the compiled context estimate, then switches to
+provider `input+output` after `model.completed`. Startup probes trusted PATH
 `rg` / `fd`; when missing, a dim Tip / 提示 recommends installing them (Node fallback remains active). After
 `开始实现`, Plan Todo
 (`✔` / `◐` / `○`) appears in the chat transcript (not sticky above the composer). Primary slash inspect commands
@@ -337,8 +344,14 @@ advertised Tool schemas. Older Steps without aggregate facts remain readable but
 unavailable. Increasing the window does not turn off compaction or remove its Artifact trail.
 Without an explicit override, Kimi model windows resolve from the selected model: `k3` uses 1,048,576 and
 `k3-256k`, `kimi-for-coding`, and `kimi-for-coding-highspeed` use 262,144. Kimi defaults to `k3`.
-Set `reasoning_effort = "low" | "medium" | "high" | "max" | "none"` (aliases documented by `@civaapple/qi-ai` are also
-accepted), pass `--effort`, or set `KIMI_MODEL_THINKING_EFFORT` / `QI_REASONING_EFFORT`; K3 defaults to `high`.
+Set `reasoning_effort = "low" | "medium" | "high" | "xhigh" | "max" | "none"` (aliases documented by
+`@civaapple/qi-ai` are also accepted), pass `--effort`, or set `KIMI_MODEL_THINKING_EFFORT` /
+`QI_REASONING_EFFORT`. Omit `reasoning_effort` (and those overrides) to leave effort unset: Qi does not send
+effort on the wire and the provider API uses its own default. In `/model`, choose
+**不设置（API 默认） / Unset (API default)** to clear a saved effort, or **none** to disable thinking
+where the catalog allows it (DeepSeek / Qianwen). When set, unsupported levels fall back to the catalog
+`defaultEffort`. Qwen3.8-Max accepts `none`/`low`/`medium`/`xhigh`; DeepSeek Flash Responses accepts
+`none`/`low`/`medium`/`high`/`xhigh`/`max` (server maps some aliases).
 K2.7 Code keeps thinking always on (no effort control). Disabling thinking may route K3/K2.7 requests to an
 older model according to the Kimi Code service contract. Authenticated `/model` and Kimi login may refresh the
 dropdown via `GET /models` and merge remote ids with the static catalog; thinking/effort authority stays on the
@@ -428,6 +441,10 @@ discovered capabilities remain quarantined until separately bound.
 
 Credential-free JSON management is available as `qi skills list|activate|deactivate|install ... --json` and
 `qi mcp status|refresh|bind|unbind|logout ... --json`. Secrets are never accepted as command-line options.
+
+Claude-compatible marketplaces (ADR-0037) use `qi marketplace add|sync|search`, `qi plugin install|enable|list|commands`,
+and `qi agent list`. Plugin MCP declarations are written inert under `$QI_HOME/resources/mcp` and still require
+`/mcp` refresh + bind. Hooks and LSP plugins are unsupported. See `packages/node/docs/plugins/README.md`.
 
 See [the interaction contract](docs/interaction-model.md) for projection and rendering boundaries.
 The cross-package timeline and attention decision is

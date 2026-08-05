@@ -109,6 +109,7 @@ test("merge overlays replace models and install custom providers", () => {
 test("resolveChatThinkingWire uses dialects without profile.id branches", () => {
   const kimi = requireProviderProfile("kimi");
   assert.deepEqual(resolveChatThinkingWire(kimi, "k3", "high"), { reasoningEffort: "high" });
+  assert.equal(resolveChatThinkingWire(kimi, "k3", undefined), undefined);
   assert.deepEqual(resolveChatThinkingWire(kimi, "k3", "none"), {
     thinking: { type: "disabled" },
   });
@@ -121,11 +122,15 @@ test("resolveChatThinkingWire uses dialects without profile.id branches", () => 
     thinking: { type: "enabled" },
     reasoningEffort: "low",
   });
+  assert.deepEqual(resolveChatThinkingWire(deepseek, "deepseek-v4-pro", undefined), {
+    thinking: { type: "enabled" },
+  });
 
   const qianwen = requireProviderProfile("qianwenai");
   assert.deepEqual(resolveChatThinkingWire(qianwen, "glm-5-2", "none"), {
     enableThinking: false,
   });
+  assert.equal(resolveChatThinkingWire(qianwen, "glm-5-2", undefined), undefined);
 });
 
 test("resolveResponsesThinkingWire encodes Volcengine dialect", () => {
@@ -134,18 +139,46 @@ test("resolveResponsesThinkingWire encodes Volcengine dialect", () => {
     thinking: { type: "enabled" },
     reasoning: { effort: "medium" },
   });
+  assert.deepEqual(resolveResponsesThinkingWire(volc, "glm-latest", undefined), {
+    thinking: { type: "enabled" },
+  });
   assert.deepEqual(resolveResponsesThinkingWire(volc, "glm-latest", "none"), {
     thinking: { type: "disabled" },
   });
   assert.equal(resolveResponsesThinkingWire(volc, "minimax-m2.7", "high"), undefined);
+
+  const qianwen = requireProviderProfile("qianwenai");
+  assert.equal(resolveResponsesThinkingWire(qianwen, "qwen3.8-max", undefined), undefined);
+  assert.deepEqual(resolveResponsesThinkingWire(qianwen, "qwen3.8-max", "medium"), {
+    reasoning: { effort: "medium" },
+  });
+  assert.deepEqual(resolveResponsesThinkingWire(qianwen, "qwen3.8-max", "none"), {
+    reasoning: { effort: "none" },
+  });
+
+  const deepseek = requireProviderProfile("deepseek");
+  assert.deepEqual(resolveResponsesThinkingWire(deepseek, "deepseek-v4-flash", "none"), {
+    reasoning: { effort: "none" },
+  });
+  assert.deepEqual(resolveResponsesThinkingWire(deepseek, "deepseek-v4-flash", "xhigh"), {
+    reasoning: { effort: "xhigh" },
+  });
+  assert.deepEqual(resolveChatThinkingWire(deepseek, "deepseek-v4-pro", "none"), {
+    thinking: { type: "disabled" },
+  });
 });
 
 test("resolveModelCapabilities applies window percent, image defaults, and UI efforts", () => {
   const kimi = requireProviderProfile("kimi");
   const resolved = resolveModelCapabilities(kimi, "k3");
   assert.deepEqual(resolved.effortsForUi, ["low", "high", "max"]);
-  assert.equal(resolved.effectiveEffort, "high");
+  // Unset operator effort → no effectiveEffort (wire omits; provider API default).
+  assert.equal(resolved.effectiveEffort, undefined);
   assert.equal(resolved.imageInput, true);
+  assert.equal(
+    resolveModelCapabilities(kimi, "k3", { reasoningEffort: "high" }).effectiveEffort,
+    "high",
+  );
 
   const compatible = requireProviderProfile("compatible");
   const compat = resolveModelCapabilities(compatible, "gpt-4o-mini");

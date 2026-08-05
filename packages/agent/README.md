@@ -37,8 +37,9 @@ as naked `system` instructions; Memory cannot override the current request, Work
 policy. SQLite projection and machine paths remain Node responsibilities.
 
 Redacted model text and reasoning may also pass through the bounded process-local `RuntimeActivity` channel for
-live presentation. Terminal text and reasoning are committed once in `model.completed`; reasoning is
-explanatory model output, not completion evidence.
+live presentation. Model channels include approximate `estimatedOutputTokens` (reasoning+text so far) for UI
+counters; that estimate never enters Session truth. Terminal text and reasoning are committed once in
+`model.completed`; reasoning is explanatory model output, not completion evidence.
 
 Restored cross-Run conversation keeps assistant narrative separate from Runtime truth. Automatic model context
 receives restored final narratives (completed, budget handoff, interrupted wrappers), a local turn ordinal with

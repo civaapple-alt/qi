@@ -27,6 +27,8 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
     readonly fdPath?: string,
     readonly preserveDraftCommands: ReadonlySet<string> = new Set(),
     readonly skillNames: readonly string[] = [],
+    readonly pluginCommandIds: readonly string[] = [],
+    readonly agentIds: readonly string[] = [],
   ) {
     this.#inner = new CombinedAutocompleteProvider([...commands], workspaceRoot);
   }
@@ -50,6 +52,32 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
           description: "Active Skill",
         }));
       return items.length === 0 ? null : { prefix: skillPrefix, items };
+    }
+    const pluginPrefix = activePrefixedSlash(before, "/plugin:");
+    if (pluginPrefix !== undefined) {
+      const needle = pluginPrefix.slice("/plugin:".length).toLowerCase();
+      const items = this.pluginCommandIds
+        .filter((id) => id.toLowerCase().startsWith(needle) || id.toLowerCase().includes(needle))
+        .slice(0, MAX_SUGGESTIONS)
+        .map((id) => ({
+          value: `/plugin:${id}`,
+          label: `/plugin:${id}`,
+          description: "Enabled plugin command",
+        }));
+      return items.length === 0 ? null : { prefix: pluginPrefix, items };
+    }
+    const agentPrefix = activePrefixedSlash(before, "/agent:");
+    if (agentPrefix !== undefined) {
+      const needle = agentPrefix.slice("/agent:".length).toLowerCase();
+      const items = this.agentIds
+        .filter((id) => id.toLowerCase().startsWith(needle) || id.toLowerCase().includes(needle))
+        .slice(0, MAX_SUGGESTIONS)
+        .map((id) => ({
+          value: `/agent:${id}`,
+          label: `/agent:${id}`,
+          description: "Enabled plugin agent",
+        }));
+      return items.length === 0 ? null : { prefix: agentPrefix, items };
     }
     const prefix = atPrefix(before);
     if (prefix !== undefined) {
@@ -89,7 +117,9 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
         cursorCol: item.value.length + 1,
       };
     }
-    if (prefix.startsWith("/skill:")) {
+    // Prefixed dynamic slash values already include the leading `/` (unlike registry
+    // slash commands, where CombinedAutocompleteProvider prepends `/` itself).
+    if (prefix.startsWith("/skill:") || prefix.startsWith("/plugin:") || prefix.startsWith("/agent:")) {
       const next = [...lines];
       next[cursorLine] = `${beforePrefix}${item.value}${after}`;
       return { lines: next, cursorLine, cursorCol: beforePrefix.length + item.value.length };
@@ -145,6 +175,12 @@ function atPrefix(text: string): string | undefined {
 
 function activeSkillPrefix(text: string): string | undefined {
   const match = /(?:^|\s)(\/skill:[a-z0-9-]*)$/i.exec(text);
+  return match?.[1];
+}
+
+function activePrefixedSlash(text: string, prefix: "/plugin:" | "/agent:"): string | undefined {
+  const escaped = prefix.replace(":", "\\:");
+  const match = new RegExp(`(?:^|\\s)(${escaped}[a-z0-9:_-]*)$`, "i").exec(text);
   return match?.[1];
 }
 

@@ -504,11 +504,11 @@ test("DeepSeek Responses sends reasoning effort, omits metadata, and echoes reas
 });
 
 test("Volcengine Agent Plan Responses sends thinking.type, reasoning.effort, and max_output_tokens", async () => {
-  let captured;
+  const bodies = [];
   const client = {
     responses: {
       create(body) {
-        captured = body;
+        bodies.push(body);
         return asyncEvents([
           { type: "response.reasoning_summary_text.delta", delta: "Plan", sequence_number: 1 },
           { type: "response.completed", sequence_number: 2, response: completedResponse() },
@@ -517,12 +517,13 @@ test("Volcengine Agent Plan Responses sends thinking.type, reasoning.effort, and
     },
   };
   const { getProviderProfile } = await import("@civaapple/qi-ai");
+  const profile = getProviderProfile("volcengine-agent-plan");
   const port = new OpenAIResponsesModelPort(client, {
     providerNames: ["volcengine-agent-plan"],
     requestMetadata: false,
     imageInput: true,
     reasoningEffort: "medium",
-    profile: getProviderProfile("volcengine-agent-plan"),
+    profile,
     contextTokens: 1_048_576,
   });
 
@@ -534,10 +535,27 @@ test("Volcengine Agent Plan Responses sends thinking.type, reasoning.effort, and
     // Drain.
   }
 
-  assert.equal("metadata" in captured, false);
-  assert.deepEqual(captured.thinking, { type: "enabled" });
-  assert.deepEqual(captured.reasoning, { effort: "medium" });
-  assert.equal(captured.max_output_tokens, 1024);
+  assert.equal("metadata" in bodies[0], false);
+  assert.deepEqual(bodies[0].thinking, { type: "enabled" });
+  assert.deepEqual(bodies[0].reasoning, { effort: "medium" });
+  assert.equal(bodies[0].max_output_tokens, 1024);
+
+  const unsetEffort = new OpenAIResponsesModelPort(client, {
+    providerNames: ["volcengine-agent-plan"],
+    requestMetadata: false,
+    imageInput: true,
+    profile,
+    contextTokens: 1_048_576,
+  });
+  for await (const _event of unsetEffort.stream(request({
+    model: { provider: "volcengine-agent-plan", model: "glm-latest" },
+    tools: [],
+  }))) {
+    // Drain.
+  }
+  // Unset effort → keep thinking.enabled, omit reasoning (provider API default).
+  assert.deepEqual(bodies[1].thinking, { type: "enabled" });
+  assert.equal("reasoning" in bodies[1], false);
 });
 
 test("Qianwen AI Token Plan sends reasoning.effort without thinking.type", async () => {
@@ -620,6 +638,56 @@ test("Qianwen AI Token Plan sends reasoning.effort without thinking.type", async
   });
   assert.equal("content" in bodies[1].input[1], false);
 
+  const coerceLegacyHigh = new OpenAIResponsesModelPort(client, {
+    providerNames: ["qianwenai"],
+    requestMetadata: false,
+    imageInput: true,
+    reasoningEffort: "high",
+    profile,
+    contextTokens: 1_048_576,
+  });
+  for await (const _event of coerceLegacyHigh.stream(request({
+    model: { provider: "qianwenai", model: "qwen3.8-max" },
+    tools: [],
+  }))) {
+    // Drain.
+  }
+  // Catalog no longer lists high/max; unsupported levels fall back to defaultEffort.
+  assert.deepEqual(bodies[2].reasoning, { effort: "xhigh" });
+
+  const topTier = new OpenAIResponsesModelPort(client, {
+    providerNames: ["qianwenai"],
+    requestMetadata: false,
+    imageInput: true,
+    reasoningEffort: "xhigh",
+    profile,
+    contextTokens: 1_048_576,
+  });
+  for await (const _event of topTier.stream(request({
+    model: { provider: "qianwenai", model: "qwen3.8-max" },
+    tools: [],
+  }))) {
+    // Drain.
+  }
+  assert.deepEqual(bodies[3].reasoning, { effort: "xhigh" });
+
+  const unsetEffort = new OpenAIResponsesModelPort(client, {
+    providerNames: ["qianwenai"],
+    requestMetadata: false,
+    imageInput: true,
+    profile,
+    contextTokens: 1_048_576,
+  });
+  for await (const _event of unsetEffort.stream(request({
+    model: { provider: "qianwenai", model: "qwen3.8-max" },
+    tools: [],
+  }))) {
+    // Drain.
+  }
+  // Unset effort → omit reasoning entirely (provider API default).
+  assert.equal("thinking" in bodies[4], false);
+  assert.equal("reasoning" in bodies[4], false);
+
   const disabled = new OpenAIResponsesModelPort(client, {
     providerNames: ["qianwenai"],
     requestMetadata: false,
@@ -632,8 +700,8 @@ test("Qianwen AI Token Plan sends reasoning.effort without thinking.type", async
   }))) {
     // Drain.
   }
-  assert.equal("thinking" in bodies[2], false);
-  assert.deepEqual(bodies[2].reasoning, { effort: "none" });
+  assert.equal("thinking" in bodies[5], false);
+  assert.deepEqual(bodies[5].reasoning, { effort: "none" });
 });
 
 test("Volcengine Agent Plan disables thinking without reasoning.effort and omits thinking for non-thinking models", async () => {

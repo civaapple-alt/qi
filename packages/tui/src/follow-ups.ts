@@ -49,6 +49,8 @@ export class FollowUpQueue {
       ...(content === undefined ? {} : { content: structuredClone([...content]) }),
     };
     this.#items = [...this.#items, item];
+    // Select the new item so Enter (send now) / Esc (delete) work without an extra ↑.
+    this.#selectedIndex = this.#items.length - 1;
     return item;
   }
 

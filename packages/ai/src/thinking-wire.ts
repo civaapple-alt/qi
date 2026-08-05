@@ -27,8 +27,9 @@ export function normalizeReasoningEffort(
   switch (value.trim().toLowerCase()) {
     case "ultra":
     case "max":
-    case "xhigh":
       return "max";
+    case "xhigh":
+      return "xhigh";
     case "high":
       return "high";
     case "medium":
@@ -54,18 +55,39 @@ export function normalizeKimiReasoningEffort(
   return normalizeReasoningEffort(value);
 }
 
+/**
+ * Map portable efforts across provider dialects when the exact level is absent.
+ * Qwen3.8-Max uses `xhigh`; Kimi/others often expose `max` for the top tier.
+ */
+function coerceEffortAlias(
+  requested: ProviderThinkingEffort,
+  supported: readonly ProviderThinkingEffort[],
+): ProviderThinkingEffort | undefined {
+  if (supported.includes(requested)) return requested;
+  if (requested === "xhigh" && supported.includes("max")) return "max";
+  if (requested === "max" && supported.includes("xhigh")) return "xhigh";
+  return undefined;
+}
+
+/**
+ * Resolve an explicit operator effort against the catalog.
+ * Unset (`undefined` / `none`) returns `undefined` so callers omit wire effort fields;
+ * unsupported explicit levels fall back to catalog `defaultEffort`.
+ */
 function selectEffort(
   requested: ProviderThinkingEffort | "none" | undefined,
   supported: readonly ProviderThinkingEffort[] | undefined,
   defaultEffort: ProviderThinkingEffort | undefined,
 ): ProviderThinkingEffort | undefined {
-  if (requested !== undefined && requested !== "none" && supported?.includes(requested)) {
-    return requested;
+  if (requested === undefined || requested === "none") {
+    return undefined;
   }
-  if (requested !== undefined && requested !== "none" && !supported) {
-    return requested;
+  if (supported) {
+    const coerced = coerceEffortAlias(requested, supported);
+    if (coerced !== undefined) return coerced;
+    return defaultEffort ?? supported[0];
   }
-  return defaultEffort ?? supported?.[0];
+  return requested;
 }
 
 function resolveChatDialect(
@@ -125,13 +147,13 @@ export function resolveChatThinkingWire(
     if (thinking.mode === "toggle") {
       return { thinking: { type: "enabled", keep: "all" } };
     }
-    const selected = selectEffort(effort, thinking.supportedEfforts, thinking.defaultEffort) ?? "high";
-    return { reasoningEffort: selected };
+    const selected = selectEffort(effort, thinking.supportedEfforts, thinking.defaultEffort);
+    return selected === undefined ? undefined : { reasoningEffort: selected };
   }
 
   if (dialect === "enable_thinking_and_effort") {
-    if (!thinking && requestedEffort === undefined) return undefined;
     if (effort === "none") return { enableThinking: false };
+    if (effort === undefined) return undefined;
     const selected = selectEffort(effort, thinking?.supportedEfforts, thinking?.defaultEffort) ?? effort;
     return {
       enableThinking: true,
@@ -140,8 +162,11 @@ export function resolveChatThinkingWire(
   }
 
   if (dialect === "thinking_type_and_effort") {
-    if (!thinking && requestedEffort === undefined) return undefined;
     if (effort === "none") return { thinking: { type: "disabled" } };
+    if (effort === undefined) {
+      if (!thinking) return undefined;
+      return { thinking: { type: "enabled" } };
+    }
     const selected = selectEffort(effort, thinking?.supportedEfforts, thinking?.defaultEffort) ?? effort;
     if (selected === undefined) return { thinking: { type: "enabled" } };
     return { thinking: { type: "enabled" }, reasoningEffort: selected };
@@ -161,8 +186,8 @@ export function resolveChatThinkingWire(
   if (thinking.mode === "always" || thinking.mode === "toggle") {
     return { reasoningEffort: thinking.defaultEffort ?? "high" };
   }
-  const selected = selectEffort(effort, thinking.supportedEfforts, thinking.defaultEffort) ?? "high";
-  return { reasoningEffort: selected };
+  const selected = selectEffort(effort, thinking.supportedEfforts, thinking.defaultEffort);
+  return selected === undefined ? undefined : { reasoningEffort: selected };
 }
 
 /**
@@ -198,7 +223,8 @@ export function resolveResponsesThinkingWire(
         reasoning: { effort: thinking.defaultEffort ?? "high" },
       };
     }
-    const selected = selectEffort(effort, thinking.supportedEfforts, thinking.defaultEffort) ?? "high";
+    const selected = selectEffort(effort, thinking.supportedEfforts, thinking.defaultEffort);
+    if (selected === undefined) return { thinking: { type: "enabled" } };
     return { thinking: { type: "enabled" }, reasoning: { effort: selected } };
   }
 
@@ -211,8 +237,8 @@ export function resolveResponsesThinkingWire(
   if (thinking.mode === "toggle" || thinking.mode === "always") {
     return { reasoning: { effort: thinking.defaultEffort ?? "high" } };
   }
-  const selected = selectEffort(effort, thinking.supportedEfforts, thinking.defaultEffort) ?? "high";
-  return { reasoning: { effort: selected } };
+  const selected = selectEffort(effort, thinking.supportedEfforts, thinking.defaultEffort);
+  return selected === undefined ? undefined : { reasoning: { effort: selected } };
 }
 
 export function resolveChatOutputTokenField(

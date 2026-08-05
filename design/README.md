@@ -83,8 +83,11 @@ then `packages/node/README.md` (`./media`) and the provider adapter tests.
 2. [ADR-0008](decisions.md#adr-0008-limit-subagent-delegation-to-one-isolated-layer) and
    [ADR-0035](decisions.md#adr-0035-plan-parallel-depth-1-research-and-jobstasks-operator-surfaces) for Plan fan-out /
    Jobs vs Tasks
-3. `packages/agent/docs/` for portable contracts or `packages/node/docs/` for Node adapters
-4. the package's focused tests
+3. [ADR-0037](decisions.md#adr-0037-adapt-claude-plugin-marketplaces-without-granting-authority) for Claude marketplace
+   adaptation (`/plugin:`, `/agent:`, MCP declarations without auto-bind)
+4. `packages/agent/docs/` for portable contracts or `packages/node/docs/` for Node adapters
+   (`packages/node/docs/plugins/` for marketplace progress and unsupported matrix)
+5. the package's focused tests
 
 ## Sources of truth
 

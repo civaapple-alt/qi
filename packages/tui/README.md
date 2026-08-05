@@ -12,7 +12,9 @@ Reusable Qi-specific terminal presentation and control components built on
 - Wrap wide Markdown table cells (or stack fields on narrow terminals) so later columns are not clipped, and
   keep the latest three display-wrapped provisional model text/reasoning/tool lines visible in the Working strip.
 - Keep provisional reasoning in the live Working strip only (never as agent narration); render settled reasoning
-  as a one-line, expandable Thinking item. Length-boundary assistant `text` stays as an 8-line truncated tail;
+  as a one-line, expandable Thinking item. During Thinking the Working strip token count grows as
+  `context.estimatedTokens + estimatedOutputTokens`, then switches to provider `input+output` after
+  `model.completed`. Length-boundary assistant `text` stays as an 8-line truncated tail;
   ordinary long replies preview from the head (200 rendered lines on a terminal Step, matching Formal Plan
   scale; 48 mid-Run) with Ctrl+O for the rest. Ctrl+O prefers that truncated model output over Thinking when
   both advertise the same shortcut, and an expanded Step renders the full assistant text from the start.

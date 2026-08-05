@@ -72,9 +72,9 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.equal(deepseek.capabilities.reasoning, true);
   assert.deepEqual(getProviderModelProfile(deepseek, "deepseek-v4-flash")?.thinking, {
     mode: "effort",
-    supportedEfforts: ["low", "high", "max"],
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
     defaultEffort: "high",
-    allowDisable: false,
+    allowDisable: true,
   });
   assert.equal(
     createModelPortForProfile(deepseek, { apiKey: "sk-test", model: "deepseek-v4-flash" }).constructor.name,
@@ -126,17 +126,17 @@ test("provider profiles declare an explicit wire API and capability matrix", () 
   assert.equal(providerModelOutputReserveTokens(qianwenai, "qwen3.8-max"), 65_536);
   assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.8-max")?.thinking, {
     mode: "effort",
-    supportedEfforts: ["low", "medium", "high", "max"],
-    defaultEffort: "high",
-    allowDisable: false,
+    supportedEfforts: ["low", "medium", "xhigh"],
+    defaultEffort: "xhigh",
+    allowDisable: true,
   });
   assert.equal(providerModelContextTokens(qianwenai, "qwen3.8-max-preview"), 1_048_576);
   assert.equal(providerModelOutputReserveTokens(qianwenai, "qwen3.8-max-preview"), 65_536);
   assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.8-max-preview")?.thinking, {
     mode: "effort",
-    supportedEfforts: ["low", "medium", "high", "max"],
-    defaultEffort: "high",
-    allowDisable: false,
+    supportedEfforts: ["low", "medium", "xhigh"],
+    defaultEffort: "xhigh",
+    allowDisable: true,
   });
   assert.deepEqual(getProviderModelProfile(qianwenai, "qwen3.8-max-preview")?.inputModalities, [
     "text",
@@ -241,7 +241,7 @@ test("resolveProviderConfig selects Qianwen AI Token Plan Responses and effort",
       allowMissingCredential: true,
       environment: {},
     }).reasoningEffort,
-    "max",
+    "xhigh",
   );
 });
 
@@ -252,7 +252,7 @@ test("resolveProviderConfig normalizes K3 effort aliases and rejects unsupported
     allowMissingCredential: true,
     environment: {},
   };
-  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "xhigh" }).reasoningEffort, "max");
+  assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "xhigh" }).reasoningEffort, "xhigh");
   assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "medium" }).reasoningEffort, "medium");
   assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "minimum" }).reasoningEffort, "low");
   assert.equal(resolveProviderConfig({ ...base, reasoningEffort: "none" }).reasoningEffort, "none");
@@ -771,6 +771,38 @@ test("catalog provider image input can be narrowed and text-only models remain d
     });
     assert.equal(textOnly.imageInput, false);
     assert.equal((await store.get("qianwenai:default"))?.metadata?.imageInput, "false");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("useAccount clears reasoning effort with empty string and status stays unset", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-clear-effort-"));
+  try {
+    const store = new EncryptedFileCredentialStore(root);
+    const auth = await AuthSession.create({
+      config: resolveProviderConfig({
+        provider: "qianwenai",
+        model: "qwen3.8-max",
+        reasoningEffort: "medium",
+        allowMissingCredential: true,
+        environment: {},
+      }),
+      store,
+    });
+    await auth.loginApiKey("qianwenai", "sealed-secret", {
+      model: "qwen3.8-max",
+      reasoningEffort: "medium",
+    });
+    assert.equal(auth.status().reasoningEffort, "medium");
+
+    const cleared = await auth.useAccount("qianwenai", "default", {
+      model: "qwen3.8-max",
+      reasoningEffort: "",
+    });
+    assert.equal(cleared.reasoningEffort, undefined);
+    assert.equal(auth.config.reasoningEffort, undefined);
+    assert.equal((await store.get("qianwenai:default"))?.metadata?.reasoningEffort, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

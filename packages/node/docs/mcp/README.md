@@ -4,8 +4,10 @@ A quarantine and binding boundary between MCP discovery and Qi's authorized Tool
 
 ## Purpose
 
-`McpDeclarationCatalog` reads inert declarations from `.qi/mcp/*.toml` and
-`$QI_HOME/resources/mcp/*.toml`; Workspace names shadow user names. `McpConnectionManager` wraps the pinned
+`McpDeclarationCatalog` reads inert declarations from `.qi/mcp/*.{toml,json}` and
+`$QI_HOME/resources/mcp/` (top-level files plus one marketplace subdirectory level, e.g.
+`$QI_HOME/resources/mcp/claude-plugins-official/context7.json`). Workspace names shadow user names.
+`McpConnectionManager` wraps the pinned
 official client for stdio, Streamable HTTP, and explicitly selected legacy SSE. Discovery snapshots Tools,
 Resources, Resource Templates, Prompts, and server instructions without making any executable.
 

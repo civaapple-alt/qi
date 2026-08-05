@@ -90,11 +90,26 @@ test("MCP declarations shadow by scope, allow npx and uvx, and reject other laun
     await mkdir(join(workspace, ".qi", "mcp"), { recursive: true });
     await mkdir(user, { recursive: true });
     await writeFile(join(user, "demo.toml"), 'transport = "http"\nurl = "https://user.example/mcp"\n');
+    await mkdir(join(user, "claude-plugins-official"), { recursive: true });
+    await writeFile(
+      join(user, "claude-plugins-official", "context7.json"),
+      `${JSON.stringify({
+        name: "context7",
+        transport: "stdio",
+        command: "npx",
+        args: ["-y", "@upstash/context7-mcp"],
+        enabled: true,
+      }, null, 2)}\n`,
+    );
     await writeFile(join(workspace, ".qi", "mcp", "demo.toml"), 'transport = "http"\nurl = "https://workspace.example/mcp"\n');
     const discovered = await new McpDeclarationCatalog({ workspaceRoot: workspace, userDeclarationsRoot: user }).discover();
-    assert.equal(discovered.length, 1);
-    assert.equal(discovered[0].scope, "workspace");
-    assert.equal(discovered[0].url, "https://workspace.example/mcp");
+    assert.equal(discovered.length, 2);
+    const byName = Object.fromEntries(discovered.map((entry) => [entry.name, entry]));
+    assert.equal(byName.demo.scope, "workspace");
+    assert.equal(byName.demo.url, "https://workspace.example/mcp");
+    assert.equal(byName.context7.scope, "user");
+    assert.equal(byName.context7.command, "npx");
+    assert.match(byName.context7.sourcePath.replaceAll("\\", "/"), /claude-plugins-official\/context7\.json$/);
     const npx = parseDeclaration({ transport: "stdio", command: "npx", args: ["-y", "@playwright/mcp@latest"] }, "playwright", "playwright.toml", "workspace", workspace);
     assert.equal(npx.command, "npx");
     assert.deepEqual(npx.args, ["-y", "@playwright/mcp@latest"]);

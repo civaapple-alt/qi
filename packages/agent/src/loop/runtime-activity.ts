@@ -7,6 +7,8 @@ export type RuntimeActivity =
       readonly runId: RunId;
       readonly stepId: StepId;
       readonly text: string;
+      /** Approximate generated tokens (reasoning + text) so far; UI-only. */
+      readonly estimatedOutputTokens: number;
       readonly provisional: true;
     }
   | {
@@ -15,6 +17,8 @@ export type RuntimeActivity =
       readonly runId: RunId;
       readonly stepId: StepId;
       readonly text: string;
+      /** Approximate generated tokens (reasoning + text) so far; UI-only. */
+      readonly estimatedOutputTokens: number;
       readonly provisional: true;
     }
   | {

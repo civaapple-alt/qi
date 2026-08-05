@@ -137,9 +137,12 @@ test("500-Run timeline cold render and provisional soak stay bounded", () => {
   for (let tick = 0; tick < 100_000; tick += 1) {
     presenter.applyActivity({
       type: "model.reasoning",
+      sessionId: "ses_stress",
       runId: "run_stress_500",
       stepId: "stp_stress_500_4",
       text: `bounded provisional ${tick}`,
+      estimatedOutputTokens: tick,
+      provisional: true,
     });
   }
   const soakMs = performance.now() - chromeStart;

@@ -751,8 +751,19 @@ export class TuiPresenter {
     const action = this.activeAction(run);
     const stepId = run?.stepOrder.at(-1);
     const step = stepId && run ? run.steps[stepId] : undefined;
-    // Main strip = parent agent context only; Subagent tokens live on the Subagents block.
-    const tokens = step?.context?.estimatedTokens;
+    const actionActivity = action ? this.#actionActivity.get(action.actionId) : undefined;
+    const modelActivity = stepId ? this.#modelActivity.get(stepId) : undefined;
+    // Main strip = parent Step spend: live context+approx out, else provider usage, else context.
+    // Subagent tokens live on the Subagents block.
+    const contextTokens = step?.context?.estimatedTokens;
+    const liveOut = modelActivity?.estimatedOutputTokens;
+    const usage = step?.model?.usage;
+    const tokens =
+      liveOut !== undefined && contextTokens !== undefined
+        ? contextTokens + liveOut
+        : usage
+          ? usage.inputTokens + usage.outputTokens
+          : contextTokens;
     const tokenPart = tokens === undefined ? undefined : `${formatTokens(tokens)} tokens`;
     const parts = [waiting ? "◇" : frame, waiting ? "Waiting" : "Running"];
     if (!waiting) parts.push(phase);
@@ -780,8 +791,6 @@ export class TuiPresenter {
       if (elapsedMs >= 2_000) parts.push(formatDuration(elapsedMs));
       if (elapsedMs >= 30_000) parts.push("still running");
     }
-    const actionActivity = action ? this.#actionActivity.get(action.actionId) : undefined;
-    const modelActivity = stepId ? this.#modelActivity.get(stepId) : undefined;
     const activityText = actionActivity?.text || modelActivity?.text;
     const stream = actionActivity?.stream;
     const prefix = stream === "stderr"
@@ -2636,7 +2645,8 @@ function formatDuration(milliseconds: number): string {
 }
 
 function formatTokens(tokens: number): string {
-  return tokens < 1_000 ? String(tokens) : `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
+  // Keep two fractional digits in the k band so live Thinking counters move (e.g. 10.42k).
+  return tokens < 1_000 ? String(tokens) : `${(tokens / 1_000).toFixed(2)}k`;
 }
 
 function progressBar(ratio: number, width: number): string {

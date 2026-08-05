@@ -161,13 +161,17 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 - Responses and Chat Completions adapters remain thin implementations of one portable model protocol.
 - Provider-specific thinking fields are derived deterministically from the selected model profile and explicit
   operator configuration; unknown effort values fail before network execution. Portable effort levels are
-  `low` / `medium` / `high` / `max` / `none`; catalogs advertise only the levels they support (`allowDisable`
-  controls whether UI lists `none`), and unsupported selections fall back to the model `defaultEffort` on the
-  wire. Volcengine Agent Plan Responses enables deep thinking with `thinking: { type: "enabled" }` plus
+  `low` / `medium` / `high` / `xhigh` / `max` / `none`; catalogs advertise only the levels they support
+  (`allowDisable` controls whether UI lists `none`). When the operator leaves effort unset, adapters omit
+  `reasoning.effort` / `reasoning_effort` so the provider API applies its own default. Explicit unsupported
+  selections fall back to the model `defaultEffort` on the wire; catalog `defaultEffort` is not injected for
+  unset. Volcengine Agent Plan Responses enables deep thinking with `thinking: { type: "enabled" }` and optional
   `reasoning: { effort }` (see vendor Responses docs). Qianwen AI Token Plan (`qianwenai`) uses Responses at the
   Token Plan OpenAI-compatible host with `QIANWENAI_*` credentials and thinking via `reasoning.effort` only (no
-  DashScope pay-as-you-go host/key mix). Optional `modelDiscovery = "openai_compatible"` may refresh remote ids
-  via `GET /models`; thinking/effort authority remains on the catalog.
+  DashScope pay-as-you-go host/key mix). DeepSeek Responses and Qianwen catalogs advertise `none` via
+  `allowDisable` so operators can disable thinking; unset still omits effort for the vendor default (thinking
+  on). Optional `modelDiscovery = "openai_compatible"` may refresh remote ids via `GET /models`; thinking/effort
+  authority remains on the catalog.
 - Qi-managed provider credentials are sealed and resolved through a broker only at the provider boundary.
 - Provider tokens, provider authorization headers, OAuth codes, PKCE material, and other Qi-managed authentication
   secrets never enter TOML, Session events, Artifacts, or model context.
@@ -813,6 +817,35 @@ and injecting server instructions into the system prefix.
 Required evidence: all three transports; secret-free declaration parsing; binding and fingerprint drift;
 transport/business capability conjunction; prompt/resource/output bounds; OAuth token sealing; dispatch-aware
 failed versus indeterminate settlement; explicit rejection of unsupported client capabilities.
+
+## ADR-0037: adapt Claude plugin marketplaces without granting authority
+
+- `@civaapple/qi-node/plugins` owns Claude-compatible marketplace registration, catalog sync, pinned install
+  cache, enablement, and component adaptation. `apps/cli` owns `/plugins`, `/plugin:`, `/agents`, `/agent:`, and
+  `qi marketplace|plugin` management. Portable contracts stay declaration-only.
+- Default marketplace source is GitHub `anthropics/claude-plugins-official`. Local path sources are allowed for
+  tests and operator-pinned clones. Runtime loads only the content-addressed install cache under
+  `$QI_HOME/plugins/cache`, never the marketplace clone tree as a live root.
+- Supported components: `skills/**/SKILL.md`, `commands/*.md` (legacy slash prompts), `.mcp.json` (as inert MCP
+  declarations), and root `agents/*.md` (as depth-1 `delegate` profiles). Unsupported: `hooks/`, `.lsp.json`,
+  Claude Workflow/`Agent(...)` ACLs, and any executable plugin entrypoint.
+- `/plugin:<id> [task]` injects the selected command or user-invocable skill as a digest-pinned ContextBlock
+  (same untrusted procedural class as `/skill:`). `/agent:<id> [task]` spawns a Coordinator depth-1 Subagent
+  whose child tool allowlist and lease narrowing remain Runtime-owned. Claude `allowed-tools` / agent `tools` /
+  `model` fields are advisory only and never widen Capability Leases.
+- Enabling a plugin never grants authority, never auto-binds MCP, and never expands parent Session leases.
+  Converted `.mcp.json` entries become secret-free declarations that still require human refresh and bind under
+  ADR-0036. `${ENV}` placeholders map to `${env:ENV}`; credential-bearing literals remain rejected.
+- Catalog entries must surface `supported | partial | unsupported` so hooks/LSP-only plugins are not presented as
+  equivalent to Claude Code. `plugins/` and `external_plugins/` differ only by marketplace `source` path.
+- Phased coverage of the official marketplace: P0 registry/sync/search; P1 skills+commands; P2 MCP declarations;
+  P3 agents; P4 remote `git-subdir`/`url`/`github` and skill-bundles. Hooks/LSP remain permanently out of scope.
+
+Rejected: treating marketplace install as trust, auto-binding plugin MCP tools, merging Claude plugin cache with
+`qi-plugin.json` declarative packages into one authority surface, and reproducing Claude hooks or LSP hosts.
+
+Required evidence: marketplace.json parse and search; vendored install+enable; `/plugin:` requires a task;
+MCP conversion does not bind; `/agent:` cannot widen child lease; unsupported hooks/LSP plugins are labeled.
 
 ## Changing a decision
 
