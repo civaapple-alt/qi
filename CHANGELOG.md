@@ -30,6 +30,11 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- Host `runHostProcess` timeout/cancel now awaits process-tree termination, escalates to a forced kill, and
+  force-settles when exit/`close` cannot be confirmed so finite `shell` Actions cannot hang cancellation forever.
+- Browser-style resident CLIs such as `agent-browser open` are guided onto background `task`/Jobs; finite `shell`
+  remains for short attaching commands (`snapshot`, `click`, `screenshot`, `session`, `close`), with multi-turn
+  reuse and close+reopen after related Workspace mutations.
 - Follow-ups: newly queued items are selected (`●`) so Enter send-now / `d` delete work immediately;
   Esc clears selection or cancels edit (does not delete). After a Run settles, queued follow-ups drain
   before auto-opening path-grant panels so the first follow-up is not stranded.

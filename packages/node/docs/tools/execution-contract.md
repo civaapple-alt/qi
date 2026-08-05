@@ -159,8 +159,14 @@ bounded final tracked diff is included only when those state hashes differ; an u
 not re-emit a pre-existing Workspace diff as causal output. This is audit evidence, not a claim that every byte
 change is attributable to the process.
 Timeout and non-zero exit produce `action.failed`; stdout, stderr, exit state, and the Git observation remain in
-the structured failure details. Host output that clearly identifies as UTF-16LE is normalized to UTF-8 before
-bounded capture so Windows diagnostics remain readable without changing settlement semantics.
+the structured failure details. On timeout or cancel, Qi terminates the process tree, waits a bounded interval,
+escalates to a forced kill when needed, and still settles the Action if exit/`close` cannot be confirmed (timeout
+→ `timedOut` / `SHELL_TIMEOUT`; abort → cancelled). Host output that clearly identifies as UTF-16LE is normalized
+to UTF-8 before bounded capture so Windows diagnostics remain readable without changing settlement semantics.
+
+Resident session entrypoints that intentionally stay alive (for example `agent-browser open`) must use the
+background `task`/Jobs tool, not finite `shell`. Short attaching commands (`snapshot`, `click`, `screenshot`,
+`session`, `close`) remain finite `shell` Actions.
 
 While shell, script, or verification is running, an optional activity sink receives the latest bounded stdout/stderr
 snapshot after the Registry's redaction boundary. It may drive a fixed-height UI tail, but cannot affect the

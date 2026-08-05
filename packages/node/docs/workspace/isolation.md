@@ -28,4 +28,6 @@ Document root, mounts, network, process identity, credentials, cleanup, time/res
 and crash behavior. Test the escape path and unavailable-runtime path, not only successful execution.
 
 Host process helpers scrub credential-like environment names by default and terminate process trees on timeout or
-cancel so Agent-executed commands do not inherit Provider secrets or leave orphaned children.
+cancel so Agent-executed commands do not inherit Provider secrets or leave orphaned children. After graceful
+termination, helpers escalate to a forced kill and still settle the host-process Promise if exit/`close` cannot
+be confirmed, so finite Tools cannot hang forever waiting on a non-exiting child.

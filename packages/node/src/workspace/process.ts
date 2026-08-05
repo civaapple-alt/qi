@@ -50,6 +50,8 @@ const credentialNamePattern = /(?:API[_-]?KEY|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN
 const ambientPackageManagerVariables = new Set([
   "npm_config_allow_scripts",
 ]);
+const gracefulExitWaitMs = 3_000;
+const forceExitWaitMs = 2_000;
 
 function detectProcessOutputEncoding(chunk: Buffer): BufferEncoding {
   if (chunk.length >= 2 && chunk[0] === 0xff && chunk[1] === 0xfe) return "utf16le";
@@ -137,6 +139,48 @@ export async function terminateProcessTree(child: ChildProcess): Promise<void> {
   }
 }
 
+/** Wait until the child emits exit/signal, or until timeoutMs elapses. */
+export function waitForChildExit(child: ChildProcess, timeoutMs = gracefulExitWaitMs): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolveExit) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolveExit(true);
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolveExit(false);
+    }, timeoutMs);
+    timer.unref();
+    child.once("exit", onExit);
+  });
+}
+
+/** Escalate after a graceful terminate: SIGKILL on Unix, taskkill /F on Windows. */
+export async function forceTerminateProcessTree(child: ChildProcess): Promise<void> {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32") {
+    await terminateProcessTree(child);
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The process may have exited between the bounded graceful wait and escalation.
+    }
+  }
+}
+
+async function terminateWithEscalation(child: ChildProcess): Promise<void> {
+  await terminateProcessTree(child);
+  if (await waitForChildExit(child, gracefulExitWaitMs)) return;
+  await forceTerminateProcessTree(child);
+  await waitForChildExit(child, forceExitWaitMs);
+}
+
 export function runHostProcess(
   command: string,
   args: readonly string[],
@@ -197,11 +241,54 @@ export function runHostProcess(
       });
     };
 
+    const buildResult = (exitCode: number | null): HostProcessResult => ({
+      exitCode,
+      stdout,
+      stderr,
+      timedOut,
+      truncated: stdoutTruncated || stderrTruncated,
+      ...(stdoutTruncated && captureLimitBytes > outputLimitBytes ? { stdoutFull: stdout + stdoutOverflow } : {}),
+      ...(stderrTruncated && captureLimitBytes > outputLimitBytes ? { stderrFull: stderr + stderrOverflow } : {}),
+    });
+
+    const settleFromClose = (exitCode: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
+      if (options.signal?.aborted) {
+        reject(options.signal.reason ?? new DOMException("Process aborted", "AbortError"));
+        return;
+      }
+      resolve(buildResult(exitCode));
+    };
+
+    /** When kill escalation cannot confirm exit/close, still end the Promise so Actions cannot hang forever. */
+    const forceSettleUnresolved = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
+      if (options.signal?.aborted) {
+        reject(options.signal.reason ?? new DOMException("Process aborted", "AbortError"));
+        return;
+      }
+      resolve(buildResult(null));
+    };
+
+    const terminateAndSettle = () => {
+      void terminateWithEscalation(child).then(() => {
+        if (!settled) forceSettleUnresolved();
+      });
+    };
+
     child.stdout?.on("data", (chunk: Buffer) => append("stdout", chunk));
     child.stderr?.on("data", (chunk: Buffer) => append("stderr", chunk));
     child.once("error", (error) => {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
       reject(error);
     });
 
@@ -213,34 +300,18 @@ export function runHostProcess(
     if (timeoutMs !== undefined) {
       timer = setTimeout(() => {
         timedOut = true;
-        void terminateProcessTree(child);
+        terminateAndSettle();
       }, timeoutMs);
       timer.unref();
     }
 
     const abort = () => {
-      void terminateProcessTree(child);
+      terminateAndSettle();
     };
     options.signal?.addEventListener("abort", abort, { once: true });
 
     child.once("close", (exitCode) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      options.signal?.removeEventListener("abort", abort);
-      if (options.signal?.aborted) {
-        reject(options.signal.reason ?? new DOMException("Process aborted", "AbortError"));
-        return;
-      }
-      resolve({
-        exitCode,
-        stdout,
-        stderr,
-        timedOut,
-        truncated: stdoutTruncated || stderrTruncated,
-        ...(stdoutTruncated && captureLimitBytes > outputLimitBytes ? { stdoutFull: stdout + stdoutOverflow } : {}),
-        ...(stderrTruncated && captureLimitBytes > outputLimitBytes ? { stderrFull: stderr + stderrOverflow } : {}),
-      });
+      settleFromClose(exitCode);
     });
   });
 }

@@ -29,6 +29,9 @@ stable intent and idempotency keys.
 - Completed effects replay their settlement; indeterminate effects block automatic re-entry.
 - Host process helpers scrub credential-like environment names by default, remove an inherited `FORCE_COLOR`
   when a caller explicitly supplies `NO_COLOR`, and can terminate process trees on timeout or cancel.
+- After timeout or abort, `runHostProcess` awaits graceful tree termination, escalates with
+  `forceTerminateProcessTree`, and force-settles the Promise if the child still does not exit so callers cannot
+  hang forever waiting for `close`.
 - `runHostProcess` truncates inline `stdout`/`stderr` at `outputLimitBytes` by default. A caller that also sets a
   larger `captureLimitBytes` additionally receives `stdoutFull`/`stderrFull` (bounded by that ceiling) for the
   specific stream(s) that were truncated, so a truncated run's full output can still be preserved by the caller
@@ -55,10 +58,10 @@ const observation = await workspace.observe("README.md");
 ## Public API
 
 `LocalWorkspace`, `ContainerWorkspaceAdapter`, `GitWorktreeAdapter`, host-process helpers
-(`scrubCredentialEnvironment`, `runHostProcess`, `terminateProcessTree`), `EffectJournal`, and
-`SqliteEffectJournal`. `scrubCredentialEnvironment` removes credential-shaped variables and npm's ambient
-lifecycle-exported `npm_config_allow_scripts`, preventing `npm run qi` from changing the policy layer seen by
-nested project-scoped npm commands.
+(`scrubCredentialEnvironment`, `runHostProcess`, `terminateProcessTree`, `forceTerminateProcessTree`,
+`waitForChildExit`), `EffectJournal`, and `SqliteEffectJournal`. `scrubCredentialEnvironment` removes
+credential-shaped variables and npm's ambient lifecycle-exported `npm_config_allow_scripts`, preventing
+`npm run qi` from changing the policy layer seen by nested project-scoped npm commands.
 
 ## Change guide
 

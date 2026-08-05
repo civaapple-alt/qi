@@ -12,7 +12,12 @@ import {
   windowsCommandInvocation,
   type ToolDefinition,
 } from "@civaapple/qi-node/tools";
-import { scrubCredentialEnvironment, terminateProcessTree } from "@civaapple/qi-node/workspace";
+import {
+  forceTerminateProcessTree,
+  scrubCredentialEnvironment,
+  terminateProcessTree,
+  waitForChildExit,
+} from "@civaapple/qi-node/workspace";
 import { Type, type TSchema } from "@sinclair/typebox";
 
 const defaultLifetimeMs = 2 * 60 * 60 * 1_000;
@@ -60,7 +65,12 @@ export class ProcessTaskManager {
 
   tool(): ToolDefinition<TSchema, TSchema> {
     return defineTool({
-      description: "Start a bounded long-lived process as a visible Qi ProcessTask. Use this only for servers, watchers, and other commands expected to remain alive; use shell for finite commands. Tasks expire automatically and the user can select and stop a running task with /tasks or use /tasks stop.",
+      description:
+        "Start a bounded long-lived process as a visible Qi ProcessTask (Jobs). Use this for servers, watchers, and resident session entrypoints that must stay alive — including agent-browser open — not for finite one-shot commands. " +
+        "After open settles as a running Job, use shell for short attaching commands such as agent-browser snapshot, click, screenshot, session, or close. " +
+        "Do not rush close across multi-turn browser debugging; if related Workspace files changed since the last open, run agent-browser close (and stop the Job if still owned) then start a fresh task open. " +
+        "Requires the background capability; if it is disabled, ask the user to enable Jobs/background rather than putting open in shell. " +
+        "Tasks expire automatically; the user can list and stop running Jobs with /jobs or /jobs stop.",
       input: Type.Object({
         command: Type.String({ minLength: 1 }),
         args: Type.Array(Type.String(), { maxItems: 200 }),
@@ -236,43 +246,4 @@ function waitForSpawn(child: ChildProcess): Promise<void> {
     child.once("spawn", resolveSpawn);
     child.once("error", reject);
   });
-}
-
-function waitForChildExit(child: ChildProcess, timeoutMs = 3_000): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
-  return new Promise((resolveExit) => {
-    const onExit = () => {
-      clearTimeout(timer);
-      resolveExit(true);
-    };
-    const timer = setTimeout(() => {
-      child.off("exit", onExit);
-      resolveExit(false);
-    }, timeoutMs);
-    child.once("exit", onExit);
-  });
-}
-
-async function forceTerminateProcessTree(child: ChildProcess): Promise<void> {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
-  if (process.platform === "win32") {
-    const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    await new Promise<void>((resolveExit) => {
-      killer.once("exit", () => resolveExit());
-      killer.once("error", () => resolveExit());
-    });
-    return;
-  }
-  try {
-    process.kill(-child.pid, "SIGKILL");
-  } catch {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      // The process may have exited between the bounded graceful wait and escalation.
-    }
-  }
 }

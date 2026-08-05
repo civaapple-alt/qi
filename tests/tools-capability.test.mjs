@@ -98,6 +98,9 @@ test("shell catalog guidance is platform-aware and prefers direct package-manage
   assert.match(shellTool.description, /NUL instead of \/dev\/null/);
   assert.match(shellTool.description, /Multiple shell Actions may share a workdir/);
   assert.match(shellTool.description, /one authorized script Action/);
+  assert.match(shellTool.description, /agent-browser open/);
+  assert.match(shellTool.description, /background task\/Jobs/);
+  assert.match(shellTool.description, /finite attaching commands/);
 });
 
 test("script catalog guidance prefers script for multi-statement logic without host BATCH_WRITE_CONFLICT", () => {

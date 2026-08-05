@@ -124,6 +124,7 @@ export function buildTuiContextBlocks(input: TuiContextInput): TuiContextBlock[]
         "Workspace or Session images arrive via path ingestion or attachments; use read_image only on Session originalArtifactRef values. Do not search MCP to view local images when the catalog has no refreshed matching capability.",
         "After changing code, run the narrowest relevant advertised verification after the final mutation.",
         "Never claim a write, verification, effect, diff, exit code, or completion unless matching Tool evidence confirms it.",
+        "Resident host sessions (for example agent-browser open) must use the background task/Jobs tool when available; finite shell is only for short attaching commands. Keep such sessions across multi-turn debugging unless related Workspace files changed since the last open, in which case close and reopen; if background is disabled, ask the user to enable it rather than simulating residency in shell.",
       ].join(" "),
       priority: 100,
       required: true,
@@ -163,7 +164,9 @@ export function buildTuiContextBlocks(input: TuiContextInput): TuiContextBlock[]
         `${input.codeactRuntime
           ? `CodeAct is available in a network-off ${input.codeactRuntime} container; nested Tool calls still require ordinary authorization. `
           : ""}` +
-        `${platformGuidance} Treat an unavailable profile or missing executable as a Run fact and change approach instead of repeating it.${mountFacts}`,
+        `${platformGuidance} Treat an unavailable profile or missing executable as a Run fact and change approach instead of repeating it. ` +
+        "Long-lived processes and resident CLIs such as agent-browser open belong on task/Jobs (background); shell waits for process exit and must not host them. " +
+        `Finite agent-browser commands (snapshot, click, screenshot, session, close) remain shell. Across turns, reuse an open browser Job; after related Workspace writes or edits, close then task-open again.${mountFacts}`,
       priority: 98,
       required: true,
       retentionReason: "Probed host facts needed to choose executable Tools",

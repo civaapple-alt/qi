@@ -89,6 +89,33 @@ test("runHostProcess normalizes identifiable UTF-16LE diagnostics to UTF-8", asy
   assert.doesNotMatch(result.stderr, /\u0000/);
 });
 
+test("runHostProcess timeout settles when the child ignores SIGTERM", async () => {
+  // Ignore SIGTERM (Unix) / keep sleeping; escalation or Windows taskkill must still settle.
+  const script = `
+    try { process.on("SIGTERM", () => {}); } catch {}
+    setInterval(() => {}, 1000);
+  `;
+  const started = Date.now();
+  const result = await runHostProcess(process.execPath, ["-e", script], { timeoutMs: 200 });
+  const elapsed = Date.now() - started;
+  assert.equal(result.timedOut, true);
+  assert.ok(elapsed < 8_000, `timeout must settle within bounded kill escalation, elapsed=${elapsed}`);
+});
+
+test("runHostProcess abort settles a long-lived child", async () => {
+  const script = `
+    try { process.on("SIGTERM", () => {}); } catch {}
+    setInterval(() => {}, 1000);
+  `;
+  const controller = new AbortController();
+  const started = Date.now();
+  const pending = runHostProcess(process.execPath, ["-e", script], { signal: controller.signal });
+  setTimeout(() => controller.abort(), 100);
+  await assert.rejects(pending, (error) => error?.name === "AbortError" || /abort/i.test(String(error)));
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 8_000, `abort must settle within bounded kill escalation, elapsed=${elapsed}`);
+});
+
 test("Effect Journal serializes reservations, replays completion and blocks indeterminate retry", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-effects-"));
   const path = join(root, "effects.sqlite");

@@ -1,6 +1,5 @@
 {
   "ask": {
-    "sha256": "352fa467646757f68ccdd6d8f7f99d7eb6b6e0807ad926c94530200c44eb8dd7",
     "names": [
       "artifact",
       "artifact_get",
@@ -14,10 +13,10 @@
       "search",
       "skill",
       "tree"
-    ]
+    ],
+    "sha256": "352fa467646757f68ccdd6d8f7f99d7eb6b6e0807ad926c94530200c44eb8dd7"
   },
   "plan": {
-    "sha256": "98f1990f91e17895c6a00d7a04d70f0229422b78bf2dab521f45b2dc34334469",
     "names": [
       "artifact",
       "artifact_get",
@@ -33,10 +32,10 @@
       "skill",
       "tree",
       "update_plan"
-    ]
+    ],
+    "sha256": "98f1990f91e17895c6a00d7a04d70f0229422b78bf2dab521f45b2dc34334469"
   },
   "agent": {
-    "sha256": "c75955bcdb296877a6ef39d1b3f7903f524fbd79d8e4aab74e7a21df329bf821",
     "names": [
       "artifact",
       "artifact_get",
@@ -53,6 +52,7 @@
       "skill",
       "tree",
       "update_plan"
-    ]
+    ],
+    "sha256": "c75955bcdb296877a6ef39d1b3f7903f524fbd79d8e4aab74e7a21df329bf821"
   }
 }

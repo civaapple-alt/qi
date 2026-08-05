@@ -300,13 +300,17 @@ written. Applying the selection writes `.qi/qi.verify.json` through the same val
 inference and, when Verify authority is already granted, immediately refreshes the live `verify` tool.
 
 Long-lived commands do not use an implicit detached shell mode. With a separate `background` capability, the
-model receives a `task` tool for bounded servers and watchers (operator surface: **Jobs**). Each ProcessTask links
-to its originating Session/Run/Step/Action, has a hard expiry, stores a redacted private log under
-`dataRoot/tasks`, survives Run completion as visible state, and can be stopped by selecting it in `/jobs` and
-pressing Enter or through `/jobs stop <N|ID>`. `/tasks` tracks Subagent research, not background processes.
-Stop waits for confirmed process-tree exit and escalates after a bounded graceful wait;
-terminal tasks remain visible but cannot be selected again. Restarted runtimes mark unowned live-task
-records `lost`; normal TUI shutdown stops tasks it owns.
+model receives a `task` tool for bounded servers, watchers, and resident session entrypoints such as
+`agent-browser open` (operator surface: **Jobs**). Finite `shell` waits for process exit, so it must not host
+those entrypoints; after `open` is owned as a Job, short attaching commands (`snapshot`, `click`, `screenshot`,
+`session`, `close`) stay on `shell`. Multi-turn browser debugging keeps the Job open by default; after related
+Workspace mutations, close the browser session and start a fresh `task open`. Each ProcessTask links to its
+originating Session/Run/Step/Action, has a hard expiry, stores a redacted private log under `dataRoot/tasks`,
+survives Run completion as visible state, and can be stopped by selecting it in `/jobs` and pressing Enter or
+through `/jobs stop <N|ID>`. `/tasks` tracks Subagent research, not background processes. Stop waits for
+confirmed process-tree exit and escalates after a bounded graceful wait; finite `shell` timeout/cancel uses the
+same escalation and force-settles if exit/`close` never arrives. Terminal tasks remain visible but cannot be
+selected again. Restarted runtimes mark unowned live-task records `lost`; normal TUI shutdown stops tasks it owns.
 
 With a separate `delegate` capability (`--allow-delegate` or `capabilities.delegate`), the model may call
 `delegate` for a depth-1 isolated Subagent (Plan may fan out `tasks[]` 1–4). The child Session receives a

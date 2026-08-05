@@ -253,14 +253,19 @@ vertical bar while typing. A fixed two-line
 statusline under the editor reports model, thinking effort (when the active model advertises one), context %,
 changed files, active Job count, mode, and workspace.
 
-Finite `shell` Actions wait for exit. Long-lived servers and watchers require the separate `background`
-capability and `task` tool (operator surface: **Jobs**). `task.started`, `task.stop.requested`, `task.exited`, and
-`task.lost` make ownership and recovery durable while output remains a bounded live/log channel. `/jobs` opens an
-interactive list: Enter stops the selected running Job, while terminal Jobs remain visible and disabled.
-`/jobs stop <N|ID>` is the non-interactive equivalent. `/tasks` tracks depth-1 Subagent research for the selected
-Run (not ProcessTasks). Stop waits for process-tree exit and escalates after a bounded graceful wait; it reports
-`lost` rather than claiming success if exit still cannot be confirmed. Jobs have a hard expiry and runtime-owned
-Jobs stop on TUI exit. See
+Finite `shell` Actions wait for exit. Long-lived servers, watchers, and resident session entrypoints (for example
+`agent-browser open`) require the separate `background` capability and `task` tool (operator surface: **Jobs**).
+After `open` is owned as a running Job, finite `shell` Actions attach with short commands such as
+`agent-browser snapshot`, `click`, `screenshot`, `session`, or `close`. Multi-turn browser debugging keeps the Job
+open by default; after related Workspace mutations, close the browser session and start a fresh `task open`. If
+`background` is disabled, ask the operator to enable it rather than hosting residency in `shell`.
+`task.started`, `task.stop.requested`, `task.exited`, and `task.lost` make ownership and recovery durable while
+output remains a bounded live/log channel. `/jobs` opens an interactive list: Enter stops the selected running
+Job, while terminal Jobs remain visible and disabled. `/jobs stop <N|ID>` is the non-interactive equivalent.
+`/tasks` tracks depth-1 Subagent research for the selected Run (not ProcessTasks). Stop waits for process-tree
+exit and escalates after a bounded graceful wait; it reports `lost` rather than claiming success if exit still
+cannot be confirmed. Finite `shell` timeout/cancel uses the same escalation and force-settles if `close` never
+arrives. Jobs have a hard expiry and runtime-owned Jobs stop on TUI exit. See
 [ADR 0006](../../../design/decisions.md#adr-0006-represent-long-lived-processes-as-bounded-processtasks) and
 [ADR-0035](../../../design/decisions.md#adr-0035-plan-parallel-depth-1-research-and-jobstasks-operator-surfaces).
 

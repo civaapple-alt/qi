@@ -154,8 +154,8 @@ const expectedRuntimeExports = {
   "@civaapple/qi-node/workspace": [
     "ContainerWorkspaceAdapter", "GitWorktreeAdapter", "LocalWorkspace",
     "SqliteEffectJournal", "effectIdempotencyKey", "effectIntentHash", "hostProcessRunner",
-    "minimalHostEnvironment", "runHostProcess", "scrubCredentialEnvironment",
-    "terminateProcessTree",
+    "forceTerminateProcessTree", "minimalHostEnvironment", "runHostProcess", "scrubCredentialEnvironment",
+    "terminateProcessTree", "waitForChildExit",
   ],
 };
 
