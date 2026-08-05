@@ -1717,6 +1717,7 @@ export class InteractiveTui {
       },
       discoveredSkills: () => this.#presenter.skills(),
       skillCandidates: () => this.#presenter.skillCandidates(),
+      pluginSkillStatuses: (query) => this.#runtime.plugins().listInstalledSkills(query),
       saveAgentSkillActivation: (names) => this.#saveAgentSkillActivation(names),
       openHistoryList: (kind) => {
         openHistoryListPanel(this.#panelFlow(), kind);
@@ -2532,24 +2533,40 @@ export class InteractiveTui {
     if (name === "plugins") {
       this.#startManagementTask(async () => {
         const query = argument.trim();
-        const commands = await this.#runtime.plugins().listCommands(query);
+        const catalog = this.#runtime.plugins();
+        const [installed, enabledKeys, commands] = await Promise.all([
+          catalog.listInstalled(query),
+          catalog.listEnabled(),
+          catalog.listCommands(query),
+        ]);
         this.#syncAutocomplete();
-        if (commands.length === 0) {
+        if (installed.length === 0 && commands.length === 0) {
           this.#presenter.setNotice(
             query
-              ? `No enabled plugin commands match "${query}". Use: qi marketplace add … && qi plugin install … && qi plugin enable …`
-              : "No enabled plugin commands. Use: qi marketplace add <name> local:PATH|github:owner/repo, then qi plugin install/enable.",
+              ? `No installed plugins or enabled commands match "${query}".`
+              : "No installed plugins. Use: qi marketplace add <name> local:PATH|github:owner/repo, then qi plugin install/enable.",
           );
           return;
         }
+        const enabled = new Set(enabledKeys);
+        const lines = [
+          "Plugins — ● enabled · ○ installed · name@marketplace",
+          ...installed.map((entry) => {
+            const state = enabled.has(entry.key) ? "● enabled" : "○ installed";
+            const version = entry.version === undefined ? "" : ` · v${entry.version}`;
+            const source = entry.sourceKind === "url" ? "url" : "vendored";
+            return `  ${state}  ${entry.key}${version} · ${source}`;
+          }),
+        ];
+        if (commands.length > 0) {
+          lines.push("", "Enabled /plugin commands — invoke with /plugin:<id> <task>");
+          lines.push(...commands.map((entry) =>
+            `  /plugin:${entry.id}  [${entry.marketplace}] ${entry.description.replace(/\s+/g, " ").trim()}`));
+        }
+        lines.push("", "Manage: qi marketplace search <name> <query> · qi plugin list|install|enable|disable");
         this.#openScrollPanel(
           "/plugins",
-          [
-            "Enabled plugin commands — invoke with /plugin:<id> <task>",
-            ...commands.map((entry) => `  /plugin:${entry.id}  ${entry.description}`),
-            "",
-            "Manage: qi marketplace search <name> <query> · qi plugin list|install|enable",
-          ],
+          lines,
         );
       }, "plugins");
       return;
@@ -2557,25 +2574,37 @@ export class InteractiveTui {
     if (name === "agents") {
       this.#startManagementTask(async () => {
         const query = argument.trim();
-        const agents = await this.#runtime.plugins().listAgents(query);
+        const catalog = this.#runtime.plugins();
+        const [installed, enabledKeys, agents] = await Promise.all([
+          catalog.listInstalled(query),
+          catalog.listEnabled(),
+          catalog.listAgents(query),
+        ]);
         this.#syncAutocomplete();
-        if (agents.length === 0) {
+        if (installed.length === 0 && agents.length === 0) {
           this.#presenter.setNotice(
             query
-              ? `No enabled plugin agents match "${query}".`
-              : "No enabled plugin agents. Install/enable a plugin that ships agents/, then /agent:<id> <task>.",
+              ? `No installed plugins or enabled agents match "${query}".`
+              : "No installed plugins. Install/enable a plugin that ships agents/, then /agent:<id> <task>.",
           );
           return;
         }
+        const enabled = new Set(enabledKeys);
+        const lines = [
+          "Plugins — ● enabled · ○ installed · name@marketplace",
+          ...installed.map((entry) =>
+            `  ${enabled.has(entry.key) ? "● enabled" : "○ installed"}  ${entry.key}${entry.version === undefined ? "" : ` · v${entry.version}`}`),
+        ];
+        if (agents.length > 0) {
+          lines.push("", "Enabled /agent definitions — invoke with /agent:<id> <task>");
+          lines.push(...agents.map((entry) =>
+            `  /agent:${entry.id}  [${entry.marketplace}] ${entry.description.replace(/\s+/g, " ").trim()}`));
+        }
+        lines.push("", "Manage: qi plugin list|install|enable|disable · qi agent list");
         this.#openScrollPanel(
-          "/agents",
-          [
-            "Enabled plugin agents — invoke with /agent:<id> <task>",
-            ...agents.map((entry) => `  /agent:${entry.id}  ${entry.description.slice(0, 120)}`),
-            "",
-            "Manage: qi plugin install|enable · qi agent list",
-          ],
-        );
+         "/agents",
+          lines,
+       );
       }, "agents");
       return;
     }

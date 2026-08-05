@@ -19,11 +19,16 @@ order:
 | `memory:context` | `user` | no | Reuse relevant accepted claims as reference data |
 | `skills:index` | `user` | no | Preserve progressive discovery while budget remains |
 | `skills:<scope>:<name>` | `user` | no | Decide whether one Skill is relevant enough to load |
+| `plugin:superpowers:bootstrap:<digest>` | `user` | yes when canonical Superpowers is enabled | Apply the pinned Superpowers workflow through Qi mappings |
 
 The current user input follows compiled blocks. Workspace, Memory, Skill, fetched, and Tool-result content cannot
 override Runtime policy or grant capabilities. XML-like envelopes escape authored delimiters; Memory exposes only
 coarse scope kind, layer, activation, and statement. Root `AGENTS.md` includes a digest so operators can correlate
 the exact bounded document without disclosing a host path.
+
+The Superpowers bootstrap is loaded only from the pinned `obra/superpowers` repository/version. It maps supported
+workflow concepts to Qi Tools and explicitly states unavailable visual-companion, hook, lifecycle, and installer
+capabilities; it is procedural context, never an authority grant.
 
 ## Workspace and host disclosure
 

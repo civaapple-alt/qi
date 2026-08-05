@@ -43,6 +43,45 @@ test("TUI applyCapabilities enables write tools mid-session and persists project
   }
 });
 
+test("TUI base read lease authorizes plugin Skill discovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-tui-plugin-skill-read-"));
+  let runtime;
+  const model = new ScriptedModelPort([
+    (request) => {
+      assert.equal(request.tools.some((tool) => tool.name === "plugin_skill"), true);
+      return [
+        {
+          type: "action.requested",
+          callId: "call_plugin_skill_list",
+          name: "plugin_skill",
+          input: { operation: "list" },
+        },
+        { type: "completed", finishReason: "actions" },
+      ];
+    },
+    [
+      { type: "text.delta", delta: "Plugin Skills listed." },
+      { type: "completed", finishReason: "stop" },
+    ],
+  ]);
+  try {
+    runtime = await TuiRuntime.create({
+      workspaceRoot: root,
+      dataRoot: join(root, ".qi", "data"),
+      modelPort: model,
+      model: { provider: "fake", model: "plugin-skill-read" },
+    });
+    const result = await runtime.run("List installed plugin Skills.");
+    assert.equal(result.status, "completed");
+    assert.equal(runtime.events().some((event) => event.type === "authority.denied"), false);
+    assert.equal(runtime.events().some((event) => event.type === "action.proposed" && event.data.toolName === "plugin_skill"), true);
+    assert.equal(runtime.events().some((event) => event.type === "action.completed"), true);
+  } finally {
+    await runtime?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("TUI applyCapabilities can disable network mid-session", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-tui-caps-network-"));
   const projectConfigPath = join(root, "project-config.toml");

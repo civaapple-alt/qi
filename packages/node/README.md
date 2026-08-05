@@ -25,7 +25,7 @@ Controlled entrypoints:
 | `./media` | image URL/clipboard ingestion, MIME/magic validation, preprocessing, Artifact storage, and `read_image` |
 | `./skills` | progressive Agent Skills, immutable source locks, full resource trees, and bounded script execution |
 | `./mcp` | inert declarations, official transports, quarantined fingerprint review, sealed OAuth, and proxy Tools |
-| `./plugins` | Claude-compatible marketplace sync, pinned plugin cache, `/plugin:` and `/agent:` catalogs (ADR-0037) |
+| `./plugins` | Claude-compatible marketplace sync, pinned plugin cache, plugin Skill Tool, `/plugin:` and `/agent:` catalogs (ADR-0037) |
 | `./codeact` | container-isolated short programs with ordinary nested Tool authority |
 | `./scheduler` | bounded durable timer/event watchers |
 | `./stream` | committed catch-up/live delivery and SSE |
@@ -105,6 +105,9 @@ titles so cold start does not full-replay every Session; cold replay remains the
 `DeclarativePackageStore` accepts exact npm versions with registry integrity, Git URLs pinned to a 40-character
 commit, or local directories hashed by content. It downloads/checks out into staging, never runs npm lifecycle
 scripts, validates the tree and manifest, then publishes immutable content to `packages/store/sha256-*`.
-Resource registration does not grant authority. Executable third-party plugins are outside the 0.6 contract.
+Resource registration does not grant authority. Plugin Skills remain untrusted context; hooks, lifecycle entrypoints,
+visual companion servers, and dependency installers are outside the Qi contract. Superpowers can be installed from
+either its self marketplace or `claude-plugins-official` at the pinned source revision, with only one same-name
+marketplace enabled at a time.
 
 Detailed adapter contracts live under [`docs/`](docs/).

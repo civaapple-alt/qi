@@ -136,3 +136,23 @@ test("/plugin and /agent completion do not double the leading slash", async () =
     },
   );
 });
+
+test("long dynamic slash names keep an exact value and readable full-name description", async () => {
+  const provider = new WorkspaceAutocompleteProvider(
+    [],
+    process.cwd(),
+    undefined,
+    new Set(),
+    [],
+    ["superpowers:receiving-code-review"],
+    ["superpowers:receiving-code-review"],
+  );
+  const prefix = "/plugin:superpowers:receiving-";
+  const suggestions = await provider.getSuggestions([prefix], 0, prefix.length, {
+    signal: new AbortController().signal,
+  });
+  assert.equal(suggestions?.items[0]?.value, "/plugin:superpowers:receiving-code-review");
+  assert.equal(suggestions?.items[0]?.label, "/plugin:receiving-code-review");
+  assert.match(suggestions?.items[0]?.description ?? "", /superpowers:receiving-code-review/);
+  assert.equal(suggestions?.items[0]?.label.includes("…"), false);
+});

@@ -1,0 +1,12 @@
+{
+  "name": "superpowers-dev",
+  "description": "Fixture Superpowers marketplace",
+  "plugins": [
+    {
+      "name": "superpowers",
+      "description": "Fixture Superpowers skills",
+      "version": "6.2.0",
+      "source": "./"
+    }
+  ]
+}

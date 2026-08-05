@@ -6,6 +6,7 @@ import type {
   InspectedPlugin,
   PluginAgentRef,
   PluginCommandRef,
+  PluginSkillRef,
   PluginComponentSummary,
   PluginSupportLevel,
 } from "./types.js";
@@ -82,7 +83,7 @@ export async function listPluginCommands(
     const hasArgumentHint = typeof metadata["argument-hint"] === "string";
     const disableModel = metadata["disable-model-invocation"] === true;
     // Skills that look user-invocable are also exposed under /plugin: (Claude legacy command parity).
-    if (!userInvocable && !hasArgumentHint && !disableModel) continue;
+    if (plugin !== "superpowers" && !userInvocable && !hasArgumentHint && !disableModel) continue;
     const description = typeof metadata.description === "string" ? metadata.description.trim() : skillName;
     refs.push(Object.freeze({
       id: commandId(plugin, skillName),
@@ -112,6 +113,31 @@ export async function listPluginCommands(
         kind: "skill",
       }));
     }
+  }
+  return Object.freeze(refs);
+}
+
+export async function listPluginSkills(
+  pluginRoot: string,
+  plugin: string,
+  marketplace: string,
+  pluginKey = `${plugin}@${marketplace}`,
+): Promise<readonly PluginSkillRef[]> {
+  const skillsRoot = resolve(pluginRoot, "skills");
+  const refs: PluginSkillRef[] = [];
+  for (const skillName of await listSkillIds(pluginRoot)) {
+    const path = resolve(skillsRoot, skillName, "SKILL.md");
+    const { metadata } = await readMarkdown(path);
+    refs.push(Object.freeze({
+      id: `${plugin}:${skillName}@${marketplace}`,
+      pluginKey,
+      plugin,
+      marketplace,
+      name: skillName,
+      description: typeof metadata.description === "string" ? metadata.description.trim() : skillName,
+      path,
+      ...(typeof metadata.version === "string" && metadata.version.trim() ? { version: metadata.version.trim() } : {}),
+    }));
   }
   return Object.freeze(refs);
 }

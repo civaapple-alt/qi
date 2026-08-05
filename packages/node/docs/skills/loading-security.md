@@ -78,6 +78,12 @@ Scripts require the separate `skill.run-script` execute path. Only `scripts/**`,
 bounded timeout, and startup-frozen interpreter profiles are accepted. Host execution remains a full local-code
 trust boundary and settles through the ordinary Action/Effect Journal path; Ask and Plan modes deny it.
 
+Claude-compatible plugin Skills use a separate `plugin_skill` catalog backed by the immutable plugin cache. They
+are never merged into native `/skills` names, and a Run snapshots enabled plugin keys before model execution.
+`plugin_skill` can list/load/read resources in every read-capable mode; `run-script` remains Execute-authorized.
+Extensionless plugin scripts are accepted only with the exact `#!/usr/bin/env bash` shebang. Plugin hooks,
+lifecycle commands, visual companion servers, and dependency installers are rejected or explicitly unavailable.
+
 ## Declarative Agents
 
 Agent definitions describe identity, commitments, boundaries, and selected resources. The loader never imports or

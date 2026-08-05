@@ -8,6 +8,8 @@ export interface KnownMarketplace {
   readonly name: string;
   readonly source: MarketplaceSource;
   readonly installLocation: string;
+  readonly declaredName?: string;
+  readonly resolvedRevision?: string;
   readonly lastUpdated?: string;
 }
 
@@ -68,6 +70,33 @@ export interface InstalledPluginRecord {
   readonly cachePath: string;
   readonly installedAt: string;
   readonly sourceKind: PluginSource["kind"];
+  readonly sourceUrl?: string;
+  readonly marketplaceRevision?: string;
+  readonly commit?: string;
+  readonly version?: string;
+  readonly treeDigest?: string;
+  readonly declaredMarketplace?: string;
+}
+
+export interface PluginSkillRef {
+  readonly id: string;
+  readonly pluginKey: string;
+  readonly plugin: string;
+  readonly marketplace: string;
+  readonly name: string;
+  readonly description: string;
+  readonly path: string;
+  readonly version?: string;
+}
+
+export interface PluginSkillSnapshot {
+  readonly plugins: readonly InstalledPluginRecord[];
+  readonly skills: readonly PluginSkillRef[];
+}
+
+export interface PluginSkillStatus {
+  readonly ref: PluginSkillRef;
+  readonly enabled: boolean;
 }
 
 export interface PluginCommandRef {

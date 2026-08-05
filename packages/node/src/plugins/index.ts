@@ -4,3 +4,4 @@ export * from "./claude-adapter.js";
 export * from "./registry.js";
 export * from "./installer.js";
 export * from "./catalog.js";
+export * from "./superpowers.js";

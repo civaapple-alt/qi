@@ -27,14 +27,26 @@ backup plus reset or a new data root rather than an automatic migration.
   or configured compatibility roots.
 - TUI `/skill:` autocomplete now offers active Skill names with prefix filtering; selecting a name still requires a
   user task before execution.
+- Superpowers plugin integration: install from either the `superpowers` self marketplace or
+  `claude-plugins-official`, enforce the pinned `6.2.0` commit, inject the required bootstrap, and expose its
+  bounded Skills/resources/scripts through the model-facing `plugin_skill` Tool.
 
 ### Fixed
 
+- Runtime base leases now authorize read-only `plugin_skill` discovery/loading and the Execute lease covers
+  explicitly allowed plugin Skill scripts; installed Superpowers Skills no longer fail closed at the capability
+  boundary with `plugin_skill ... denied`.
 - TUI `/mcp` capability review collapses multiline remote tool descriptions to a single terminal row, matching
   `ListPanel`, so Context7-style descriptions no longer ghost duplicate pointers when scrolling.
 
 ### Changed
 
+- `/plugins` and `/agents` now show every installed plugin with its `name@marketplace`, enabled/installed state,
+  source kind, and command/agent marketplace. `/skills` adds a separate plugin-Skill view (still distinct from
+  native `/skill:` activation); entries stay single-line so long descriptions do not distort panel row height.
+- Long dynamic `/plugin:`, `/agent:`, and `/skill:` autocomplete entries keep their exact completion value while
+  using a compact primary label and the full qualified name in the description when the terminal selector's
+  32-column label limit would otherwise truncate them.
 - Plugin-market MCP declarations under `$QI_HOME/resources/mcp/<marketplace>/` are discovered as a distinct
   server id `name@marketplace` (for example `context7@claude-plugins-official`). They no longer share a slot
   with workspace `.qi/mcp/<name>.toml` or a flat user declaration of the same short name; `/mcp` and

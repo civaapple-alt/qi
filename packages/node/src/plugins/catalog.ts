@@ -1,11 +1,14 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
   inspectClaudePlugin,
   listPluginAgents,
   listPluginCommands,
+  listPluginSkills,
   loadPluginPrompt,
 } from "./claude-adapter.js";
+import { SkillLoader } from "../skills/skill-loader.js";
 import type { PluginInstaller } from "./installer.js";
 import type { MarketplaceRegistry } from "./registry.js";
 import { searchMarketplacePlugins } from "./marketplace.js";
@@ -15,6 +18,9 @@ import type {
   MarketplacePluginEntry,
   PluginAgentRef,
   PluginCommandRef,
+  PluginSkillRef,
+  PluginSkillSnapshot,
+  PluginSkillStatus,
 } from "./types.js";
 
 export interface EnabledPluginState {
@@ -27,6 +33,7 @@ export class PluginCatalog {
   readonly #enabledFile: string;
   readonly #registry: MarketplaceRegistry;
   readonly #installer: PluginInstaller;
+  #runSkillSnapshot: PluginSkillSnapshot | undefined;
 
   constructor(qiHome: string, registry: MarketplaceRegistry, installer: PluginInstaller) {
     this.#qiHome = resolve(qiHome);
@@ -35,9 +42,23 @@ export class PluginCatalog {
     this.#installer = installer;
   }
 
+  /** Freeze the plugin Skill view used by the active Run. */
+  setRunSkillSnapshot(snapshot: PluginSkillSnapshot | undefined): void {
+    this.#runSkillSnapshot = snapshot;
+  }
+
   async enable(key: string): Promise<EnabledPluginState> {
-    await this.#installer.getInstalled(key);
+    const record = await this.#installer.getInstalled(key);
     const enabled = await this.#readEnabled();
+    const conflicting = Object.entries(enabled.plugins)
+      .filter(([other, value]) => value && other !== key)
+      .map(([other]) => other);
+    for (const other of conflicting) {
+      const installed = await this.#installer.getInstalled(other);
+      if (installed.name === record.name) {
+        throw new Error(`Plugin ${record.name} is already enabled as ${other}; disable it before enabling ${key}`);
+      }
+    }
     enabled.plugins[key] = true;
     await this.#writeEnabled(enabled);
     return { key, enabled: true };
@@ -87,9 +108,77 @@ export class PluginCatalog {
     return filterByQuery(refs, query);
   }
 
+  async getInstalled(key: string): Promise<InstalledPluginRecord> {
+    return this.#installer.getInstalled(key);
+  }
+
+  async listInstalled(query = ""): Promise<readonly InstalledPluginRecord[]> {
+    const needle = query.trim().toLowerCase();
+    const records = await this.#installer.listInstalled();
+    return Object.freeze(records.filter((record) => !needle
+      || `${record.key}\n${record.name}\n${record.marketplace}\n${record.version ?? ""}`.toLowerCase().includes(needle)));
+  }
+
+  async listSkills(query = ""): Promise<readonly PluginSkillRef[]> {
+    if (this.#runSkillSnapshot) return filterByQuery(this.#runSkillSnapshot.skills, query);
+    const refs: PluginSkillRef[] = [];
+    for (const key of await this.listEnabled()) {
+      const record = await this.#installer.getInstalled(key);
+      refs.push(...await listPluginSkills(record.cachePath, record.name, record.marketplace, record.key));
+    }
+    return filterByQuery(refs, query);
+  }
+
+  async listInstalledSkills(query = ""): Promise<readonly PluginSkillStatus[]> {
+    const enabled = new Set(await this.listEnabled());
+    const statuses: PluginSkillStatus[] = [];
+    for (const record of await this.#installer.listInstalled()) {
+      const refs = await listPluginSkills(record.cachePath, record.name, record.marketplace, record.key);
+      for (const ref of refs) statuses.push(Object.freeze({ ref, enabled: enabled.has(record.key) }));
+    }
+    const needle = query.trim().toLowerCase();
+    return Object.freeze(statuses
+      .filter(({ ref }) => !needle
+        || `${ref.id}\n${ref.name}\n${ref.marketplace}\n${ref.description}`.toLowerCase().includes(needle))
+      .sort((left, right) => left.ref.id.localeCompare(right.ref.id)));
+  }
+
+  async snapshotEnabledSkills(): Promise<PluginSkillSnapshot> {
+    const plugins: InstalledPluginRecord[] = [];
+    const skills: PluginSkillRef[] = [];
+    for (const key of await this.listEnabled()) {
+      const record = await this.#installer.getInstalled(key);
+      plugins.push(record);
+      skills.push(...await listPluginSkills(record.cachePath, record.name, record.marketplace, record.key));
+    }
+    return Object.freeze({ plugins: Object.freeze(plugins), skills: Object.freeze(skills) });
+  }
+
+  async resolveSkill(pluginKey: string, name: string): Promise<PluginSkillRef> {
+    const skills = await this.listSkills();
+    const found = skills.find((entry) => entry.pluginKey === pluginKey && (entry.name === name || entry.id === name));
+    if (!found) throw new Error(`Unknown plugin Skill: ${name} (${pluginKey})`);
+    return found;
+  }
+
+  async loadSkill(pluginKey: string, name: string): Promise<{ readonly ref: PluginSkillRef; readonly body: string; readonly digest: string }> {
+    const ref = await this.resolveSkill(pluginKey, name);
+    const loaded = await loadPluginPrompt(ref.path);
+    return { ref, body: loaded.body, digest: createHash("sha256").update(loaded.body).digest("hex") };
+  }
+
+  async readSkillResource(pluginKey: string, name: string, resourcePath: string): Promise<Uint8Array> {
+    const ref = await this.resolveSkill(pluginKey, name);
+    const loader = new SkillLoader();
+    const loaded = await loader.load(dirname(ref.path));
+    return loader.readResource(loaded, resourcePath);
+  }
+
   async resolveCommand(id: string): Promise<PluginCommandRef> {
     const commands = await this.listCommands();
-    const found = commands.find((entry) => entry.id === id || entry.name === id || entry.plugin === id);
+    const exact = commands.filter((entry) => entry.id === id || entry.name === id || entry.plugin === id);
+    if (exact.length > 1) throw new Error(`Ambiguous plugin command: ${id}; choose one of ${exact.map((entry) => entry.id).join(", ")}`);
+    const found = exact[0];
     if (!found) throw new Error(`Unknown plugin command: ${id}`);
     return found;
   }

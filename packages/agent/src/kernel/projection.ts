@@ -536,6 +536,7 @@ export const KERNEL_ASK_MODE_TOOLS = [
   "fetch",
   "web_map",
   "skill",
+  "plugin_skill",
   "artifact",
   "artifact_get",
   "qi_introspect",

@@ -450,9 +450,21 @@ discovered capabilities remain quarantined until separately bound.
 Credential-free JSON management is available as `qi skills list|activate|deactivate|install ... --json` and
 `qi mcp status|refresh|bind|unbind|logout ... --json`. Secrets are never accepted as command-line options.
 
-Claude-compatible marketplaces (ADR-0037) use `qi marketplace add|sync|search`, `qi plugin install|enable|list|commands`,
-and `qi agent list`. Plugin MCP declarations are written inert under `$QI_HOME/resources/mcp` and still require
-`/mcp` refresh + bind. Hooks and LSP plugins are unsupported. See `packages/node/docs/plugins/README.md`.
+The `/plugins` and `/agents` panels show each installed plugin as `name@marketplace` with enablement state;
+`/skills` keeps native Skills separate and exposes installed plugin Skills through a distinct `plugin_skill` view.
+
+Claude-compatible marketplaces (ADR-0037) use an explicit `qi marketplace add` → `qi plugin install` →
+`qi plugin enable` flow, plus `qi marketplace sync|search`, `qi plugin list|commands`, and `qi agent list`.
+Both `superpowers`' self marketplace and `claude-plugins-official` are supported; install selectors use
+`plugin@marketplace`, while the legacy two-argument install form remains accepted. Plugin Skills are model-facing
+through `plugin_skill`, not native `/skills`; plugin MCP declarations remain inert under `$QI_HOME/resources/mcp`
+and still require `/mcp` refresh + bind. Hooks, LSP, and Superpowers' visual companion are unsupported. See
+`packages/node/docs/plugins/README.md`.
+
+Installing a plugin does not enable it. After `qi plugin enable <plugin>@<marketplace>`, restart the CLI before
+running a new task. For example, `/plugin:superpowers:using-superpowers <task>` explicitly activates the pinned
+Superpowers bootstrap; ordinary tasks also receive that bootstrap automatically when the canonical Superpowers
+plugin is enabled.
 
 See [the interaction contract](docs/interaction-model.md) for projection and rendering boundaries.
 The cross-package timeline and attention decision is

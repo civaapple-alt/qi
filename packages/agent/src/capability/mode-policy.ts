@@ -11,6 +11,7 @@ const askTools = new Set([
   "fetch",
   "web_map",
   "skill",
+  "plugin_skill",
   "mcp_catalog",
   "artifact",
   "artifact_get",

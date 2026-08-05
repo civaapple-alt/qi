@@ -8,13 +8,14 @@
       "list",
       "mcp_catalog",
       "memory",
+      "plugin_skill",
       "qi_introspect",
       "read",
       "search",
       "skill",
       "tree"
     ],
-    "sha256": "352fa467646757f68ccdd6d8f7f99d7eb6b6e0807ad926c94530200c44eb8dd7"
+    "sha256": "c22533bce9b9bfb3e06ee4764cf12c4bc205b29b5dd5c61f8ad9442a24fb6431"
   },
   "plan": {
     "names": [
@@ -26,6 +27,7 @@
       "mcp_catalog",
       "memory",
       "plan_document",
+      "plugin_skill",
       "qi_introspect",
       "read",
       "search",
@@ -33,7 +35,7 @@
       "tree",
       "update_plan"
     ],
-    "sha256": "98f1990f91e17895c6a00d7a04d70f0229422b78bf2dab521f45b2dc34334469"
+    "sha256": "ecfabe8a97ab6d03f867ddc18c3b714f8c9fd3aa9bb418096b83951f3dcb3251"
   },
   "agent": {
     "names": [
@@ -45,6 +47,7 @@
       "mcp",
       "mcp_catalog",
       "memory",
+      "plugin_skill",
       "qi_introspect",
       "read",
       "read_image",
@@ -53,6 +56,6 @@
       "tree",
       "update_plan"
     ],
-    "sha256": "c75955bcdb296877a6ef39d1b3f7903f524fbd79d8e4aab74e7a21df329bf821"
+    "sha256": "a73ef0bfe3d24d4aef5efb15230826215c7b35bd30678b3673930b040b0930c0"
   }
 }

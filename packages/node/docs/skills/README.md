@@ -86,6 +86,11 @@ frontmatter is retained as informational extension data. `runSkillScript()` acce
 files, bounded argv/cwd/timeout, and frozen interpreter profiles; it never installs dependencies or supplies
 provider/MCP credentials.
 
+Claude-compatible plugin Skills are intentionally a separate catalog. They are available to the model through
+the `plugin_skill` Tool after a plugin is installed and enabled; they do not appear in the native `/skills`
+catalog or acquire authority from plugin metadata. Plugin Skill resources are read from the pinned immutable
+cache, and extensionless scripts must declare the exact `#!/usr/bin/env bash` interpreter line.
+
 `exportWorkspaceDraft()` and `updateWorkspace()` are the create-draft/update pair for existing Workspace Skills.
 They do not weaken the generic `.qi` file boundary; callers must still provide effect and path authority.
 

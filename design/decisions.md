@@ -826,8 +826,9 @@ failed versus indeterminate settlement; explicit rejection of unsupported client
 - `@civaapple/qi-node/plugins` owns Claude-compatible marketplace registration, catalog sync, pinned install
   cache, enablement, and component adaptation. `apps/cli` owns `/plugins`, `/plugin:`, `/agents`, `/agent:`, and
   `qi marketplace|plugin` management. Portable contracts stay declaration-only.
-- Default marketplace source is GitHub `anthropics/claude-plugins-official`. Local path sources are allowed for
-  tests and operator-pinned clones. Runtime loads only the content-addressed install cache under
+- The official Anthropic marketplace and Superpowers' self marketplace are equal supported sources. Marketplace
+  registration remains explicit (`add` → `install` → `enable`); URL sources require credential-free GitHub HTTPS
+  plus an exact commit. Local path sources are allowed for tests and operator-pinned clones. Runtime loads only the content-addressed install cache under
   `$QI_HOME/plugins/cache`, never the marketplace clone tree as a live root.
 - Supported components: `skills/**/SKILL.md`, `commands/*.md` (legacy slash prompts), `.mcp.json` (as inert MCP
   declarations), and root `agents/*.md` (as depth-1 `delegate` profiles). Unsupported: `hooks/`, `.lsp.json`,
@@ -843,8 +844,13 @@ failed versus indeterminate settlement; explicit rejection of unsupported client
   `${ENV}` placeholders map to `${env:ENV}`; credential-bearing literals remain rejected.
 - Catalog entries must surface `supported | partial | unsupported` so hooks/LSP-only plugins are not presented as
   equivalent to Claude Code. `plugins/` and `external_plugins/` differ only by marketplace `source` path.
-- Phased coverage of the official marketplace: P0 registry/sync/search; P1 skills+commands; P2 MCP declarations;
-  P3 agents; P4 remote `git-subdir`/`url`/`github` and skill-bundles. Hooks/LSP remain permanently out of scope.
+- Plugin Skills are a separate model-facing `plugin_skill` Tool catalog (not native `/skills`), and are snapshotted
+  from enabled pinned installs at Run start. Same-name plugins from different marketplaces may both be installed,
+  but only one may be enabled at a time. Superpowers `6.2.0` is accepted only at commit
+  `44c9b2d6e889982ac18c27d05a19fefe335194e1`; its bootstrap maps supported workflows to Qi and explicitly degrades
+  visual companion, hooks, lifecycle, and dependency-installer behavior.
+- Phased coverage: P0 registry/sync/search; P1 skills+commands; P2 MCP declarations; P3 agents; P4 pinned URL
+  sources, dual Superpowers marketplaces, plugin Skill Tool, and Run snapshots. Hooks/LSP remain permanently out of scope.
 
 Rejected: treating marketplace install as trust, auto-binding plugin MCP tools, merging Claude plugin cache with
 `qi-plugin.json` declarative packages into one authority surface, and reproducing Claude hooks or LSP hosts.

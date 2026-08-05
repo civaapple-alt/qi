@@ -97,6 +97,7 @@ import {
   MarketplaceRegistry,
   PluginCatalog,
   PluginInstaller,
+  loadSuperpowersBootstrap,
 } from "@civaapple/qi-node/plugins";
 import {
   FileArtifactStore,
@@ -157,6 +158,7 @@ import {
 import { createPlanDocumentTool } from "./plan-tool.js";
 import { createUpdatePlanTool } from "./update-plan-tool.js";
 import { createTuiSkillTool } from "./skill-tool.js";
+import { createTuiPluginSkillTool } from "./plugin-skill-tool.js";
 import { createMemoryTool } from "./memory-tool.js";
 import { ProcessTaskManager } from "./process-tasks.js";
 import {
@@ -399,6 +401,7 @@ export class TuiRuntime {
     humanControl: HumanControlService,
     runQuestions: RunQuestionCoordinator,
     skills: SkillCatalog,
+    pluginCatalog: PluginCatalog,
     skillSnapshot: readonly CatalogSkill[],
     skillCandidateSnapshot: readonly (CompatibilitySkill | AgentSkillCandidate)[],
     mcp: McpConnectionManager,
@@ -466,6 +469,7 @@ export class TuiRuntime {
     this.#humanControl = humanControl;
     this.#runQuestions = runQuestions;
     this.#skills = skills;
+    this.#pluginCatalog = pluginCatalog;
     this.#skillSnapshot = Object.freeze([...skillSnapshot]);
     this.#skillCandidateSnapshot = Object.freeze([...skillCandidateSnapshot]);
     this.#mcp = mcp;
@@ -696,6 +700,10 @@ export class TuiRuntime {
     registry.register("artifact", builtinTools.artifact);
     registry.register("artifact_get", builtinTools.artifact_get);
     registry.register("skill", createTuiSkillTool(skills, options.workspaceRoot));
+    const pluginRegistry = new MarketplaceRegistry(qiHome);
+    const pluginInstaller = new PluginInstaller(qiHome, pluginRegistry);
+    const pluginCatalog = new PluginCatalog(qiHome, pluginRegistry, pluginInstaller);
+    registry.register("plugin_skill", createTuiPluginSkillTool(pluginCatalog, options.workspaceRoot));
     registry.register("mcp_catalog", createMcpCatalogTool({ manager: mcp, reviews: mcpReviews }));
     const mcpLiveRegistration = registry.register("mcp", createMcpLiveTool({ manager: mcp, declarations: mcpDeclarationSnapshot, bindings: mcpBindingSnapshot }));
     registry.register("qi_introspect", createQiIntrospectionTool());
@@ -763,6 +771,7 @@ export class TuiRuntime {
       humanControl,
       runQuestions,
       skills,
+      pluginCatalog,
       skillSnapshot,
       skillCandidateSnapshot,
       mcp,
@@ -1652,6 +1661,18 @@ export class TuiRuntime {
     return this.#pluginCatalog;
   }
 
+  async #superpowersBootstrap() {
+    const catalog = this.plugins();
+    for (const key of await catalog.listEnabled()) {
+      const record = await catalog.getInstalled(key);
+      if (record.name !== "superpowers") continue;
+      const bootstrap = await loadSuperpowersBootstrap(record);
+      if (!bootstrap) throw new Error(`Enabled Superpowers ${key} is not the supported pinned Qi source`);
+      return bootstrap;
+    }
+    return undefined;
+  }
+
   /** Explicit Claude-plugin command/skill activation (`/plugin:<id> <task>`). */
   async runWithPlugin(id: string, task: string): Promise<TurnResult> {
     if (!task.trim()) throw new TypeError(`/plugin:${id} requires a task`);
@@ -2005,11 +2026,28 @@ export class TuiRuntime {
         mounts: this.#mounts,
         ...(workspaceInstructions === undefined ? {} : { workspaceInstructions }),
       });
+      const superpowers = await this.#superpowersBootstrap();
+      if (superpowers) {
+        contextBlocks.push({
+          id: `plugin:superpowers:bootstrap:${superpowers.digest.slice(0, 16)}`,
+          kind: "skill",
+          source: `qi:plugin:${superpowers.pluginKey}:${superpowers.commit}`,
+          role: "user",
+          content: `<active-superpowers plugin="${xmlAttribute(superpowers.pluginKey)}" commit="${superpowers.commit}" instructions-sha256="${superpowers.digest}">\n${xmlText(superpowers.instructions)}\n</active-superpowers>`,
+          priority: 94,
+          required: true,
+          retentionReason: "Enabled canonical Superpowers bootstrap",
+        });
+      }
       contextBlocks.push(...(options.extraContextBlocks ?? []));
       if (this.#memoryEnabled) {
         const memoryBlock = buildMemoryContextBlock(this.#memoryClaims(options.input));
         if (memoryBlock) contextBlocks.push(memoryBlock);
       }
+      // Plugin Skills are resolved from the enabled, pinned set captured at Run start.
+      // This prevents marketplace/enable changes during a Run from changing tool semantics.
+      const pluginCatalog = this.plugins();
+      pluginCatalog.setRunSkillSnapshot(await pluginCatalog.snapshotEnabledSkills());
       const result = await this.#supervisor.exclusive(this.sessionId, () => this.#loop.run({
         sessionId: this.sessionId,
         title: "Qi TUI",
@@ -2050,6 +2088,7 @@ export class TuiRuntime {
       this.#humanControl.askNextRunQuestion(this.sessionId, result.runId);
       return result;
     } finally {
+      this.#pluginCatalog?.setRunSkillSnapshot(undefined);
       this.#activeController = undefined;
     }
   }
@@ -2550,6 +2589,7 @@ function grantBaseRuntimeLeases(
     "tree",
     "git",
     "skill",
+    "plugin_skill",
     "mcp_catalog",
     "qi_introspect",
     ...(options.enableQiSessionInspect === true ? ["qi_session_inspect"] as const : []),
@@ -2569,6 +2609,8 @@ function grantBaseRuntimeLeases(
         "vcs:.",
         "skill-catalog:local",
         "skill:**",
+        "plugin-skill-catalog:local",
+        "plugin-skill:**",
         "mcp-catalog:local",
         "qi:self-model:**",
         "qi:session-catalog",
@@ -2648,9 +2690,9 @@ function grantOptionalRuntimeLeases(
     leases.push({
       leaseId: "lea_tui_execute_skill",
       subject,
-      tools: ["skill"],
+      tools: ["skill", "plugin_skill"],
       effects: ["execute"],
-      resources: ["skill-script:**", "host-workspace:**"],
+      resources: ["skill-script:**", "plugin-skill-script:**", "host-workspace:**"],
       expiresAt,
     });
   }

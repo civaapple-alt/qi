@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { minimalHostEnvironment } from "../workspace/process.js";
 import { parseMarketplaceCatalog } from "./marketplace.js";
 import type { KnownMarketplace, MarketplaceCatalog, MarketplaceSource } from "./types.js";
 
@@ -33,17 +34,22 @@ export class MarketplaceRegistry {
     }
     await mkdir(this.#marketplacesRoot, { recursive: true });
     let installLocation: string;
+    let resolvedRevision: string | undefined;
     if (source.kind === "local") {
       installLocation = resolve(source.path);
       await assertMarketplaceRoot(installLocation);
+      resolvedRevision = await readRevision(installLocation);
     } else {
       installLocation = resolve(this.#marketplacesRoot, name);
-      await syncGithubMarketplace(source.repo, installLocation, source.ref);
+      resolvedRevision = await syncGithubMarketplace(source.repo, installLocation, source.ref);
     }
+    const declaredName = await readMarketplaceName(installLocation);
     const entry: KnownMarketplace = Object.freeze({
       name,
       source: source.kind === "local" ? Object.freeze({ kind: "local", path: installLocation }) : source,
       installLocation,
+      ...(declaredName === undefined ? {} : { declaredName }),
+      ...(resolvedRevision === undefined ? {} : { resolvedRevision }),
       lastUpdated: new Date().toISOString(),
     });
     const known = await this.#readKnown();
@@ -57,10 +63,21 @@ export class MarketplaceRegistry {
     if (current.source.kind === "local") {
       await assertMarketplaceRoot(current.installLocation);
     } else {
-      await syncGithubMarketplace(current.source.repo, current.installLocation, current.source.ref);
+      const resolvedRevision = await syncGithubMarketplace(current.source.repo, current.installLocation, current.source.ref);
+      const updated: KnownMarketplace = Object.freeze({
+        ...current,
+        ...(resolvedRevision === undefined ? {} : { resolvedRevision }),
+        lastUpdated: new Date().toISOString(),
+      });
+      const known = await this.#readKnown();
+      known.marketplaces[name] = updated;
+      await this.#writeKnown(known);
+      return updated;
     }
+    const declaredName = await readMarketplaceName(current.installLocation);
     const updated: KnownMarketplace = Object.freeze({
       ...current,
+      ...(declaredName === undefined ? {} : { declaredName }),
       lastUpdated: new Date().toISOString(),
     });
     const known = await this.#readKnown();
@@ -80,7 +97,7 @@ export class MarketplaceRegistry {
   async #readKnown(): Promise<{ schemaVersion: 1; marketplaces: Record<string, KnownMarketplace> }> {
     try {
       const raw = JSON.parse(await readFile(this.#knownFile, "utf8")) as unknown;
-      if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.marketplaces)) {
+      if (!isRecord(raw) || (raw.schemaVersion !== 1 && raw.schemaVersion !== 2) || !isRecord(raw.marketplaces)) {
         throw new TypeError("known_marketplaces.json schemaVersion must be 1");
       }
       const marketplaces: Record<string, KnownMarketplace> = {};
@@ -102,7 +119,7 @@ export class MarketplaceRegistry {
   }
 }
 
-async function syncGithubMarketplace(repo: string, installLocation: string, ref = "main"): Promise<void> {
+async function syncGithubMarketplace(repo: string, installLocation: string, ref = "main"): Promise<string | undefined> {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
     throw new TypeError(`Invalid GitHub repo: ${repo}`);
   }
@@ -111,28 +128,52 @@ async function syncGithubMarketplace(repo: string, installLocation: string, ref 
   try {
     await runGit(["-C", installLocation, "rev-parse", "--is-inside-work-tree"]);
     await runGit(["-C", installLocation, "fetch", "--depth", "1", "origin", ref]);
-    await runGit(["-C", installLocation, "checkout", "FETCH_HEAD"]);
+    await runGit(["-C", installLocation, "checkout", "--detach", "FETCH_HEAD"]);
   } catch {
     await runGit(["clone", "--depth", "1", "--branch", ref, url, installLocation]);
   }
   await assertMarketplaceRoot(installLocation);
+  return readRevision(installLocation);
 }
 
 async function assertMarketplaceRoot(root: string): Promise<void> {
   await readFile(resolve(root, ".claude-plugin", "marketplace.json"), "utf8");
 }
 
-async function runGit(args: readonly string[]): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn("git", args, { stdio: ["ignore", "ignore", "pipe"] });
+async function runGit(args: readonly string[]): Promise<string> {
+  return await new Promise<string>((resolvePromise, reject) => {
+    const child = spawn("git", ["-c", `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`, ...args], {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: minimalHostEnvironment({ GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0", NO_COLOR: "1" }),
+    });
+    const stdout: Buffer[] = [];
     let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
     child.on("error", reject);
     child.on("close", (code) => {
-      if (code === 0) resolvePromise();
+      if (code === 0) resolvePromise(Buffer.concat(stdout).toString("utf8"));
       else reject(new Error(`git ${args.join(" ")} failed: ${stderr.trim() || code}`));
     });
   });
+}
+
+async function readRevision(root: string): Promise<string | undefined> {
+  try {
+    return (await runGit(["-C", root, "rev-parse", "HEAD"])).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readMarketplaceName(root: string): Promise<string | undefined> {
+  try {
+    const raw = JSON.parse(await readFile(resolve(root, ".claude-plugin", "marketplace.json"), "utf8")) as unknown;
+    return isRecord(raw) && typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseKnown(value: unknown, key: string): KnownMarketplace {
@@ -144,6 +185,8 @@ function parseKnown(value: unknown, key: string): KnownMarketplace {
     name,
     source,
     installLocation,
+    ...(typeof value.declaredName === "string" ? { declaredName: value.declaredName } : {}),
+    ...(typeof value.resolvedRevision === "string" ? { resolvedRevision: value.resolvedRevision } : {}),
     ...(typeof value.lastUpdated === "string" ? { lastUpdated: value.lastUpdated } : {}),
   });
 }

@@ -25,7 +25,12 @@ export async function runPluginCliCommand(args: readonly string[]): Promise<bool
     if (operation === "add") {
       const name = required(parsed.positionals.shift(), "marketplace name");
       const source = required(parsed.positionals.shift(), "github:owner/repo | local:PATH");
-      return output(await registry.add(name, parseMarketplaceSource(source)), parsed.json);
+      const parsedSource = parseMarketplaceSource(source);
+      const ref = parsed.values.get("ref");
+      const withRef = parsedSource.kind === "github" && ref
+        ? { ...parsedSource, ref }
+        : parsedSource;
+      return output(await registry.add(name, withRef), parsed.json);
     }
     if (operation === "sync") {
       const name = required(parsed.positionals.shift(), "marketplace name");
@@ -57,8 +62,9 @@ export async function runPluginCliCommand(args: readonly string[]): Promise<bool
     return output(await catalog.listCommands(parsed.positionals.join(" ")), parsed.json);
   }
   if (operation === "install") {
-    const marketplace = required(parsed.positionals.shift(), "marketplace");
-    const plugin = required(parsed.positionals.shift(), "plugin");
+    const first = required(parsed.positionals.shift(), "marketplace or plugin@marketplace");
+    const second = parsed.positionals.shift();
+    const [marketplace, plugin] = second === undefined ? parsePluginSelector(first) : [first, required(second, "plugin")];
     const record = await installer.install(marketplace, plugin);
     const mcpFiles = await installer.materializeMcpDeclarations(record.key);
     return output({ ...record, mcpDeclarations: mcpFiles }, parsed.json);
@@ -85,10 +91,21 @@ function parseMarketplaceSource(value: string): MarketplaceSource {
   if (value.startsWith("github:")) {
     return { kind: "github", repo: value.slice("github:".length) };
   }
+  if (/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/i.test(value)) {
+    const url = new URL(value);
+    const parts = url.pathname.replace(/^\/+|\/+$/g, "").split("/");
+    return { kind: "github", repo: `${parts[0]}/${parts[1]!.replace(/\.git$/i, "")}` };
+  }
   if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) {
     return { kind: "github", repo: value };
   }
   throw new TypeError("marketplace source must be github:owner/repo or local:PATH");
+}
+
+function parsePluginSelector(value: string): [marketplace: string, plugin: string] {
+  const at = value.lastIndexOf("@");
+  if (at <= 0 || at === value.length - 1) throw new TypeError("Plugin selector must be plugin@marketplace");
+  return [value.slice(at + 1), value.slice(0, at)];
 }
 
 function parse(args: readonly string[]): {

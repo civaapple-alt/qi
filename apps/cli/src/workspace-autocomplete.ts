@@ -46,11 +46,7 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
       const items = this.skillNames
         .filter((name) => name.toLowerCase().startsWith(needle))
         .slice(0, MAX_SUGGESTIONS)
-        .map((name) => ({
-          value: `/skill:${name}`,
-          label: `/skill:${name}`,
-          description: "Active Skill",
-        }));
+        .map((name) => dynamicSlashItem("/skill:", name, "Active Skill"));
       return items.length === 0 ? null : { prefix: skillPrefix, items };
     }
     const pluginPrefix = activePrefixedSlash(before, "/plugin:");
@@ -59,11 +55,7 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
       const items = this.pluginCommandIds
         .filter((id) => id.toLowerCase().startsWith(needle) || id.toLowerCase().includes(needle))
         .slice(0, MAX_SUGGESTIONS)
-        .map((id) => ({
-          value: `/plugin:${id}`,
-          label: `/plugin:${id}`,
-          description: "Enabled plugin command",
-        }));
+        .map((id) => dynamicSlashItem("/plugin:", id, "Enabled plugin command"));
       return items.length === 0 ? null : { prefix: pluginPrefix, items };
     }
     const agentPrefix = activePrefixedSlash(before, "/agent:");
@@ -72,11 +64,7 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
       const items = this.agentIds
         .filter((id) => id.toLowerCase().startsWith(needle) || id.toLowerCase().includes(needle))
         .slice(0, MAX_SUGGESTIONS)
-        .map((id) => ({
-          value: `/agent:${id}`,
-          label: `/agent:${id}`,
-          description: "Enabled plugin agent",
-        }));
+        .map((id) => dynamicSlashItem("/agent:", id, "Enabled plugin agent"));
       return items.length === 0 ? null : { prefix: agentPrefix, items };
     }
     const prefix = atPrefix(before);
@@ -182,6 +170,18 @@ function activePrefixedSlash(text: string, prefix: "/plugin:" | "/agent:"): stri
   const escaped = prefix.replace(":", "\\:");
   const match = new RegExp(`(?:^|\\s)(${escaped}[a-z0-9:_-]*)$`, "i").exec(text);
   return match?.[1];
+}
+
+/** Keep the inserted value exact while giving long names a readable primary-column label. */
+function dynamicSlashItem(prefix: "/skill:" | "/plugin:" | "/agent:", id: string, description: string): AutocompleteItem {
+  const value = `${prefix}${id}`;
+  if (value.length <= 32) return { value, label: value, description };
+  const tail = id.slice(id.lastIndexOf(":") + 1);
+  return {
+    value,
+    label: `${prefix}${tail}`,
+    description: `${id} · ${description}`,
+  };
 }
 
 async function fdCandidates(

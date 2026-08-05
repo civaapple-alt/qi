@@ -1,5 +1,5 @@
 import { extname, resolve } from "node:path";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { ToolFailure } from "@civaapple/qi-agent/tools";
 import { runHostProcess, minimalHostEnvironment } from "../workspace/process.js";
 import { resolveShellExecutable } from "../tools/builtins.js";
@@ -86,8 +86,15 @@ async function scriptInvocation(script: string, extension: string, workspaceRoot
       const command = await resolveShellExecutable(process.env.ComSpec ?? "cmd", workspaceRoot);
       return { runtime: "cmd", command, args: ["/d", "/s", "/c", script, ...args] };
     }
-    default:
-      throw new ToolFailure("SKILL_SCRIPT_RUNTIME", `Unsupported Skill script type: ${extension || "<none>"}`);
+    default: {
+      if (extension) throw new ToolFailure("SKILL_SCRIPT_RUNTIME", `Unsupported Skill script type: ${extension}`);
+      const firstLine = (await readFile(script, "utf8")).split(/\r?\n/, 1)[0] ?? "";
+      if (firstLine.trim() !== "#!/usr/bin/env bash") {
+        throw new ToolFailure("SKILL_SCRIPT_RUNTIME", "Extensionless Skill scripts require the exact #!/usr/bin/env bash shebang");
+      }
+      const command = await resolveShellExecutable("bash", workspaceRoot);
+      return { runtime: "bash", command, args: ["--noprofile", "--norc", script, ...args] };
+    }
   }
 }
 

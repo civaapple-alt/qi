@@ -11,6 +11,7 @@ import {
 } from "@civaapple/qi-ai";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import { SHELL_PROFILE_IDS, type ShellProfileId } from "@civaapple/qi-node/tools";
+import type { PluginSkillStatus } from "@civaapple/qi-node/plugins";
 import type { ProcessTaskView } from "@civaapple/qi-agent/kernel";
 import type { Effect } from "@civaapple/qi-agent/capability";
 import {
@@ -161,6 +162,7 @@ export interface PanelFlowContext {
   readonly openInspect: (panel: "overview" | "config" | "context" | "runs" | "steps" | "actions" | "agents" | "skills" | "jobs" | "tasks" | "providers", title: string) => void;
   readonly discoveredSkills: () => readonly PresentedSkill[];
   readonly skillCandidates: () => readonly PresentedSkillCandidate[];
+  readonly pluginSkillStatuses?: (query?: string) => Promise<readonly PluginSkillStatus[]>;
   readonly saveAgentSkillActivation: (names: readonly string[]) => void;
   readonly openHistoryList: (kind: "runs" | "steps" | "actions" | "agents") => void;
   readonly addMount: (path: string) => void;
@@ -1301,6 +1303,19 @@ function alwaysOnSkills(skills: readonly PresentedSkill[]): PresentedSkill[] {
 }
 
 export function openSkillsHubPanel(ctx: PanelFlowContext): void {
+  if (!ctx.pluginSkillStatuses) {
+    openSkillsHubPanelContents(ctx, []);
+    return;
+  }
+  void openSkillsHubPanelAsync(ctx);
+}
+
+async function openSkillsHubPanelAsync(ctx: PanelFlowContext): Promise<void> {
+  const pluginSkills = await (ctx.pluginSkillStatuses?.() ?? Promise.resolve([])).catch(() => []);
+  openSkillsHubPanelContents(ctx, pluginSkills);
+}
+
+function openSkillsHubPanelContents(ctx: PanelFlowContext, pluginSkills: readonly PluginSkillStatus[]): void {
   const locale = ctx.locale();
   const active = ctx.discoveredSkills();
   const candidates = ctx.skillCandidates();
@@ -1325,6 +1340,13 @@ export function openSkillsHubPanel(ctx: PanelFlowContext): void {
           available: String(globalCandidates.length),
         }),
       },
+      ...(pluginSkills.length === 0 ? [] : [{
+        id: "plugin",
+        label: locale === "zh" ? "插件 Skill" : "Plugin Skills",
+        description: locale === "zh"
+          ? `${pluginSkills.filter((entry) => entry.enabled).length} 个已启用 · ${pluginSkills.length} 个已安装 · 通过 plugin_skill 使用`
+          : `${pluginSkills.filter((entry) => entry.enabled).length} enabled · ${pluginSkills.length} installed · use plugin_skill`,
+      }]),
       { id: "install", label: t(locale, "skills.install"), description: t(locale, "skills.install.desc") },
     ],
     onClose: ctx.panels.dismiss,
@@ -1335,6 +1357,10 @@ export function openSkillsHubPanel(ctx: PanelFlowContext): void {
       }
       if (item.id === "activation") {
         openSkillActivationPanel(ctx);
+        return;
+      }
+      if (item.id === "plugin") {
+        void openPluginSkillsPanel(ctx);
         return;
       }
       openSkillInstallScopePanel(ctx);
@@ -1364,6 +1390,39 @@ function openAlwaysOnSkillsPanel(ctx: PanelFlowContext): void {
     onSelect: (item) => {
       ctx.panels.dismiss();
       ctx.presenter.setNotice(t(locale, "skills.always_on.use", { name: item.id }));
+      ctx.render();
+    },
+  }));
+}
+
+async function openPluginSkillsPanel(ctx: PanelFlowContext): Promise<void> {
+  const locale = ctx.locale();
+  const statuses = await (ctx.pluginSkillStatuses?.() ?? Promise.resolve([]));
+  if (statuses.length === 0) {
+    ctx.presenter.setNotice(locale === "zh" ? "没有已安装的插件 Skill。" : "No installed plugin Skills.");
+    ctx.render();
+    return;
+  }
+  ctx.panels.push(new ListPanel({
+    title: locale === "zh" ? "插件 Skill" : "Plugin Skills",
+    hints: locale === "zh" ? "↑↓ 选择 · Enter 查看调用方式 · Esc 返回" : "↑↓ navigate · Enter show usage · Esc back",
+    maxVisible: maxVisible(ctx.terminalRows),
+    searchable: true,
+    items: statuses.map(({ ref, enabled }) => ({
+      id: ref.id,
+      label: (enabled ? "● enabled" : "○ installed") + "  " + ref.name + "@" + ref.marketplace,
+      description: (enabled
+        ? (locale === "zh" ? "模型可用" : "model available")
+        : (locale === "zh" ? "未启用" : "disabled")) + " · " + (ref.version ?? "unversioned") + " · plugin_skill",
+    })),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      const selected = statuses.find(({ ref }) => ref.id === item.id);
+      if (!selected) return;
+      ctx.panels.dismiss();
+      ctx.presenter.setNotice(selected.enabled
+        ? (locale === "zh" ? "通过 plugin_skill 加载：" : "Load with plugin_skill: ") + selected.ref.id
+        : (locale === "zh" ? "先启用插件：" : "Enable the plugin first: ") + selected.ref.pluginKey);
       ctx.render();
     },
   }));
