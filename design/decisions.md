@@ -785,7 +785,10 @@ server startup into ambient authority or unbounded model context.
 Decision:
 
 - User declarations live under `$QI_HOME/resources/mcp`; Workspace declarations under `.qi/mcp` shadow equal
-  names. Declarations are secret-free and inert until a human connects and reviews them.
+  short names for flat files. Declarations discovered under a one-level marketplace subdirectory
+  (`$QI_HOME/resources/mcp/<marketplace>/<name>.json`) use the qualified server id `name@marketplace` so they
+  coexist with workspace `.qi/mcp/<name>.toml` and flat user declarations of the same short name. Declarations
+  are secret-free and inert until a human connects and reviews them.
 - stdio declarations may explicitly use `npx` or `uvx` so npm- and Python-published MCP servers can be launched
   without a separate global install. The resolved launcher path/hash and complete declared argv are part of
   transport identity; changing either drifts existing bindings. Floating selectors such as `@latest` or an
@@ -834,8 +837,10 @@ failed versus indeterminate settlement; explicit rejection of unsupported client
   whose child tool allowlist and lease narrowing remain Runtime-owned. Claude `allowed-tools` / agent `tools` /
   `model` fields are advisory only and never widen Capability Leases.
 - Enabling a plugin never grants authority, never auto-binds MCP, and never expands parent Session leases.
-  Converted `.mcp.json` entries become secret-free declarations that still require human refresh and bind under
-  ADR-0036. `${ENV}` placeholders map to `${env:ENV}`; credential-bearing literals remain rejected.
+  Converted `.mcp.json` entries become secret-free declarations under `$QI_HOME/resources/mcp/<marketplace>/`,
+  discovered as `name@marketplace`, and still require human refresh and bind under ADR-0036. Materialized
+  `npx`/`uvx` stdio declarations set a longer connect timeout so first package resolve is less likely to fail.
+  `${ENV}` placeholders map to `${env:ENV}`; credential-bearing literals remain rejected.
 - Catalog entries must surface `supported | partial | unsupported` so hooks/LSP-only plugins are not presented as
   equivalent to Claude Code. `plugins/` and `external_plugins/` differ only by marketplace `source` path.
 - Phased coverage of the official marketplace: P0 registry/sync/search; P1 skills+commands; P2 MCP declarations;

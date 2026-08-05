@@ -69,16 +69,32 @@ test("credential-free Skill and MCP JSON management commands operate without sta
   const root = await mkdtemp(join(tmpdir(), "qi-extension-cli-"));
   try {
     const workspace = join(root, "workspace"); const source = join(root, "cli-skill");
+    const qiHome = join(root, "qi-home");
     await mkdir(workspace); await mkdir(source);
     await writeFile(join(source, "SKILL.md"), "---\nname: cli-skill\ndescription: Installed by the JSON management command.\n---\nUse it.\n");
+    await mkdir(join(qiHome, "resources", "mcp", "claude-plugins-official"), { recursive: true });
+    await writeFile(
+      join(qiHome, "resources", "mcp", "claude-plugins-official", "context7.json"),
+      `${JSON.stringify({
+        name: "context7",
+        transport: "stdio",
+        command: "npx",
+        args: ["-y", "@upstash/context7-mcp"],
+        enabled: true,
+      }, null, 2)}\n`,
+    );
     const main = join(process.cwd(), "apps", "cli", "dist", "main.js");
-    const environment = { ...process.env, QI_HOME: join(root, "qi-home") };
+    const environment = { ...process.env, QI_HOME: qiHome };
     const installed = JSON.parse((await execFileAsync(process.execPath, [main, "skills", "install", source, "--scope", "workspace", "--workspace", workspace, "--json"], { env: environment })).stdout);
     assert.equal(installed.name, "cli-skill");
     const listed = JSON.parse((await execFileAsync(process.execPath, [main, "skills", "list", "--workspace", workspace, "--json"], { env: environment })).stdout);
-    assert.equal(listed[0].name, "cli-skill");
+    assert.ok(listed.some((entry) => entry.name === "cli-skill"));
     const mcp = JSON.parse((await execFileAsync(process.execPath, [main, "mcp", "status", "--workspace", workspace, "--json"], { env: environment })).stdout);
-    assert.deepEqual(mcp, []);
+    assert.equal(mcp.length, 1);
+    assert.equal(mcp[0].name, "context7@claude-plugins-official");
+    assert.equal(mcp[0].scope, "user");
+    assert.equal(mcp[0].marketplace, "claude-plugins-official");
+    assert.equal(mcp[0].status, "quarantined");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -107,9 +123,33 @@ test("MCP declarations shadow by scope, allow npx and uvx, and reject other laun
     const byName = Object.fromEntries(discovered.map((entry) => [entry.name, entry]));
     assert.equal(byName.demo.scope, "workspace");
     assert.equal(byName.demo.url, "https://workspace.example/mcp");
-    assert.equal(byName.context7.scope, "user");
-    assert.equal(byName.context7.command, "npx");
-    assert.match(byName.context7.sourcePath.replaceAll("\\", "/"), /claude-plugins-official\/context7\.json$/);
+    assert.equal(byName.demo.marketplace, undefined);
+    const marketId = "context7@claude-plugins-official";
+    assert.equal(byName[marketId].scope, "user");
+    assert.equal(byName[marketId].marketplace, "claude-plugins-official");
+    assert.equal(byName[marketId].command, "npx");
+    assert.match(byName[marketId].sourcePath.replaceAll("\\", "/"), /claude-plugins-official\/context7\.json$/);
+    const reviews = new McpReviewStore(join(root, "state", "mcp-bindings.json"));
+    const manager = new McpConnectionManager({
+      catalog: new McpDeclarationCatalog({ workspaceRoot: workspace, userDeclarationsRoot: user }),
+      reviews,
+      workspaceRoot: workspace,
+    });
+    const statuses = Object.fromEntries((await manager.statuses()).map((entry) => [entry.name, entry]));
+    assert.equal(statuses.demo.scope, "workspace");
+    assert.equal(statuses.demo.marketplace, undefined);
+    assert.equal(statuses[marketId].scope, "user");
+    assert.equal(statuses[marketId].marketplace, "claude-plugins-official");
+    // Workspace short-name context7 coexists with the qualified marketplace server.
+    await writeFile(join(workspace, ".qi", "mcp", "context7.toml"), 'transport = "http"\nurl = "https://workspace.example/context7"\n');
+    const both = Object.fromEntries((await manager.statuses()).map((entry) => [entry.name, entry]));
+    assert.equal(both.context7.scope, "workspace");
+    assert.equal(both.context7.marketplace, undefined);
+    assert.equal(both.context7.transport, "http");
+    assert.equal(both[marketId].scope, "user");
+    assert.equal(both[marketId].marketplace, "claude-plugins-official");
+    assert.equal(both[marketId].transport, "stdio");
+    await manager.close();
     const npx = parseDeclaration({ transport: "stdio", command: "npx", args: ["-y", "@playwright/mcp@latest"] }, "playwright", "playwright.toml", "workspace", workspace);
     assert.equal(npx.command, "npx");
     assert.deepEqual(npx.args, ["-y", "@playwright/mcp@latest"]);
@@ -251,6 +291,8 @@ test("official MCP client uses explicit Streamable HTTP without legacy fallback"
     assert.equal(refreshed.snapshot.tools[1].name, "second-page");
     const status = (await manager.statuses())[0];
     assert.equal(status.transport, "http");
+    assert.equal(status.scope, "workspace");
+    assert.equal(status.marketplace, undefined);
   } finally { await manager.close(); httpServer.close(); await once(httpServer, "close"); await rm(root, { recursive: true, force: true }); }
 });
 

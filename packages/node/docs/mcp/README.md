@@ -6,7 +6,9 @@ A quarantine and binding boundary between MCP discovery and Qi's authorized Tool
 
 `McpDeclarationCatalog` reads inert declarations from `.qi/mcp/*.{toml,json}` and
 `$QI_HOME/resources/mcp/` (top-level files plus one marketplace subdirectory level, e.g.
-`$QI_HOME/resources/mcp/claude-plugins-official/context7.json`). Workspace names shadow user names.
+`$QI_HOME/resources/mcp/claude-plugins-official/context7.json`). Nested marketplace directories qualify the
+server id as `name@marketplace` (and set `declaration.marketplace`) so they coexist with workspace
+`.qi/mcp/<name>.toml` and flat user declarations. Workspace short names still shadow flat user short names.
 `McpConnectionManager` wraps the pinned
 official client for stdio, Streamable HTTP, and explicitly selected legacy SSE. Discovery snapshots Tools,
 Resources, Resource Templates, Prompts, and server instructions without making any executable.

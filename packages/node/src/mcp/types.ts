@@ -8,6 +8,11 @@ export interface McpServerDeclaration {
   enabled: boolean;
   scope: "workspace" | "user";
   sourcePath: string;
+  /**
+   * Parent dir under the user/workspace MCP root when nested (plugin marketplace materialization).
+   * Discovery sets `name` to `${short}@${marketplace}` so it does not shadow `.qi/mcp/<short>.toml`.
+   */
+  marketplace?: string;
   command?: string;
   args: readonly string[];
   cwd?: string;
@@ -69,6 +74,9 @@ export interface McpServerStatus {
   name: string;
   transport: McpTransportKind;
   status: McpConnectionStatus;
+  scope: "workspace" | "user";
+  /** Present when the declaration was discovered under a marketplace subdirectory (`name` is then `short@marketplace`). */
+  marketplace?: string;
   detail?: string;
   candidateCount: number;
   bindingCount: number;

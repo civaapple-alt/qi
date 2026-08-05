@@ -109,6 +109,7 @@ test("MCP conversion writes inert declarations without binding", async () => {
     assert.equal(body.transport, "stdio");
     assert.equal(body.command, "npx");
     assert.deepEqual(body.args, ["-y", "@upstash/context7-mcp"]);
+    assert.equal(body.connect_timeout_ms, 60_000);
 
     const http = await convertClaudeMcpJson({
       github: {

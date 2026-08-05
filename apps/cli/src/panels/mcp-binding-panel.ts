@@ -147,10 +147,14 @@ export class McpBindingPanel implements PanelComponent, Focusable {
     for (let index = start; index < end; index += 1) {
       const entry = this.#filtered[index]!;
       const selected = index === this.#cursor;
-      const label = selected ? theme.bold(entry.value.label) : entry.value.label;
+      // Remote MCP metadata (tool descriptions, instructions) often embeds
+      // newlines. Collapse to one terminal row or differential redraw ghosts
+      // previous frames (duplicate pointers / overlapped rows).
+      const labelText = singleLine(entry.value.label);
+      const label = selected ? theme.bold(labelText) : labelText;
       lines.push(truncateToWidth(`${pointer(selected)}${label}`, safe, "…"));
       if (entry.type === "action") {
-        lines.push(truncateToWidth(theme.fg("textDim", `    ${entry.value.description}`), safe, "…"));
+        lines.push(truncateToWidth(theme.fg("textDim", `    ${singleLine(entry.value.description)}`), safe, "…"));
         continue;
       }
       const draft = this.#drafts.get(entry.value.id) ?? "unbound";
@@ -164,7 +168,7 @@ export class McpBindingPanel implements PanelComponent, Focusable {
       const prior = changed
         ? ` · ${this.#locale === "zh" ? "原" : "was"} ${effectLabel(baseline, this.#locale)}`
         : "";
-      const description = `${effectLabel(draft, this.#locale)} ← ${marker}${prior} · ${entry.value.description}`;
+      const description = `${effectLabel(draft, this.#locale)} ← ${marker}${prior} · ${singleLine(entry.value.description)}`;
       lines.push(truncateToWidth(theme.fg("textDim", `    ${description}`), safe, "…"));
     }
     const dirty = this.#changes().length;
@@ -200,4 +204,8 @@ export class McpBindingPanel implements PanelComponent, Focusable {
 function effectLabel(effect: McpDraftEffect, locale: "zh" | "en"): string {
   if (effect === "unbound") return locale === "zh" ? "隔离" : "quarantined";
   return effect;
+}
+
+function singleLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }

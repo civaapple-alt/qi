@@ -111,6 +111,13 @@ export class PluginInstaller {
       if (declaration.url) body.url = declaration.url;
       if (declaration.env && Object.keys(declaration.env).length > 0) body.env = declaration.env;
       if (declaration.headers && Object.keys(declaration.headers).length > 0) body.headers = declaration.headers;
+      // npx/uvx often need longer than the 15s default on first package resolve.
+      if (
+        declaration.transport === "stdio"
+        && (declaration.command === "npx" || declaration.command === "uvx")
+      ) {
+        body.connect_timeout_ms = 60_000;
+      }
       const path = resolve(outRoot, `${declaration.name}.json`);
       await writeFile(path, `${JSON.stringify(body, null, 2)}\n`, "utf8");
       const legacyFlat = resolve(this.#qiHome, "resources", "mcp", `${declaration.name}.json`);

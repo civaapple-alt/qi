@@ -28,8 +28,20 @@ backup plus reset or a new data root rather than an automatic migration.
 - TUI `/skill:` autocomplete now offers active Skill names with prefix filtering; selecting a name still requires a
   user task before execution.
 
+### Fixed
+
+- TUI `/mcp` capability review collapses multiline remote tool descriptions to a single terminal row, matching
+  `ListPanel`, so Context7-style descriptions no longer ghost duplicate pointers when scrolling.
+
 ### Changed
 
+- Plugin-market MCP declarations under `$QI_HOME/resources/mcp/<marketplace>/` are discovered as a distinct
+  server id `name@marketplace` (for example `context7@claude-plugins-official`). They no longer share a slot
+  with workspace `.qi/mcp/<name>.toml` or a flat user declaration of the same short name; `/mcp` and
+  `qi mcp status|refresh|bind` use the qualified id for the market copy and the short name for workspace/flat.
+  Status also surfaces origin (`plugin marketplace` / `workspace` / `user`).
+- Plugin-materialized stdio MCP that launches via `npx` or `uvx` writes `connect_timeout_ms = 60000` so first
+  package resolve is less likely to hit the 15s default connect timeout.
 - Host `runHostProcess` timeout/cancel now awaits process-tree termination, escalates to a forced kill, and
   force-settles when exit/`close` cannot be confirmed so finite `shell` Actions cannot hang cancellation forever.
 - Browser-style resident CLIs such as `agent-browser open` are guided onto background `task`/Jobs; finite `shell`

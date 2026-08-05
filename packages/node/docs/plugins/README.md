@@ -10,7 +10,7 @@ cache under `$QI_HOME/plugins`, enable them without granting authority, and expo
 - commands / skills → `/plugin:<id> <task>`
 - root agents → `/agent:<id> <task>`
 - `.mcp.json` → inert MCP declarations under `$QI_HOME/resources/mcp/<marketplace>/`
-  (still require human refresh/bind)
+  (discovered as `name@marketplace`; still require human refresh/bind)
 
 ## Progress (claude-plugins-official)
 

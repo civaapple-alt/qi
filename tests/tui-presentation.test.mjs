@@ -4231,6 +4231,28 @@ test("MCP binding panel drafts multiple effects with arrows and saves once with 
   assert.equal(closed, true);
 });
 
+test("MCP binding panel collapses multiline remote descriptions to one terminal row", () => {
+  const panel = new McpBindingPanel({
+    title: "context7@claude-plugins-official · MCP",
+    locale: "zh",
+    candidates: [{
+      id: "query-docs",
+      label: "tool · query-docs",
+      description: "You MUST call this tool.\nRetrieves up-to-date documentation\nand code examples.",
+      effects: ["read"],
+      state: "unbound",
+    }],
+    onAction() {},
+    onApply() {},
+    onClose() {},
+  });
+  const lines = stripVTControlCharacters(panel.render(100).join("\n")).split("\n");
+  assert.equal(lines.filter((line) => line.includes("❯") || line.includes("tool · query-docs")).length, 1);
+  assert.equal(lines.filter((line) => line.includes("隔离 ← 当前")).length, 1);
+  assert.ok(lines.some((line) => /You MUST call this tool\. Retrieves up-to-date documentation and code examples\./.test(line)));
+  assert.equal(lines.some((line) => line.trimStart().startsWith("You MUST call this tool.")), false);
+});
+
 test("FormPanel wraps long multi-line descriptions instead of truncating to one line", () => {
   const endpoint = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1";
   const panel = new FormPanel({

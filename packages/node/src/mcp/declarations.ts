@@ -4,6 +4,7 @@ import { parse } from "smol-toml";
 import type { McpServerDeclaration, McpTransportKind } from "./types.js";
 
 const namePattern = /^[a-z][a-z0-9-]{0,63}$/;
+const marketplacePattern = /^[a-z][a-z0-9_-]{0,127}$/;
 const implicitLaunchers = new Set(["npm", "pnpm", "yarn", "bunx", "pipx", "bash", "sh", "cmd", "powershell", "pwsh"]);
 const secretName = /(?:authorization|api[_-]?key|token|secret|password|credential)/i;
 const referencePattern = /^\$\{(?:credential|env):[A-Za-z_][A-Za-z0-9_.-]*\}$/;
@@ -42,7 +43,8 @@ async function discoverRoot(root: string, scope: "workspace" | "user", workspace
   }
   if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`MCP declaration root must be a real directory: ${root}`);
   const canonical = await realpath(root);
-  // Flat files first; one-level marketplace subdirs (e.g. mcp/claude-plugins-official/*.json) overwrite same name.
+  // Flat files use short names. One-level marketplace subdirs qualify as name@marketplace so they
+  // never collide with `.qi/mcp/<name>.toml` or a flat user declaration of the same short name.
   const byName = new Map<string, McpServerDeclaration>();
   for (const entry of await readdir(canonical, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) continue;
@@ -52,6 +54,7 @@ async function discoverRoot(root: string, scope: "workspace" | "user", workspace
       continue;
     }
     if (!entry.isDirectory()) continue;
+    if (!marketplacePattern.test(entry.name)) continue;
     const nestedRoot = resolve(canonical, entry.name);
     let nestedCanonical: string;
     try {
@@ -63,7 +66,12 @@ async function discoverRoot(root: string, scope: "workspace" | "user", workspace
     }
     for (const nested of await readdir(nestedCanonical, { withFileTypes: true })) {
       if (!nested.isFile() || nested.isSymbolicLink()) continue;
-      const parsed = await readDeclarationFile(resolve(nestedCanonical, nested.name), scope, workspaceRoot);
+      const parsed = await readDeclarationFile(
+        resolve(nestedCanonical, nested.name),
+        scope,
+        workspaceRoot,
+        entry.name,
+      );
       if (parsed) byName.set(parsed.name, parsed);
     }
   }
@@ -74,6 +82,7 @@ async function readDeclarationFile(
   path: string,
   scope: "workspace" | "user",
   workspaceRoot: string,
+  marketplace?: string,
 ): Promise<McpServerDeclaration | undefined> {
   const ext = extname(path).toLowerCase();
   if (!new Set([".toml", ".json"]).has(ext)) return undefined;
@@ -81,7 +90,14 @@ async function readDeclarationFile(
   const raw = await readFile(path, "utf8");
   if (Buffer.byteLength(raw) > 256 * 1024) throw new Error(`MCP declaration exceeds 256 KiB: ${path}`);
   const decoded = path.endsWith(".json") ? JSON.parse(raw) : parse(raw);
-  return parseDeclaration(decoded, fileName, path, scope, workspaceRoot);
+  const parsed = parseDeclaration(decoded, fileName, path, scope, workspaceRoot);
+  if (marketplace === undefined) return parsed;
+  // Qualified server id keeps plugin-market MCP distinct from workspace/flat declarations.
+  return {
+    ...parsed,
+    name: `${parsed.name}@${marketplace}`,
+    marketplace,
+  };
 }
 
 export function parseDeclaration(value: unknown, fileName: string, sourcePath: string, scope: "workspace" | "user", workspaceRoot: string): McpServerDeclaration {

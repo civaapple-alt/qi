@@ -71,12 +71,17 @@ export class McpConnectionManager {
         candidateCount: candidateCount(document.snapshots[declaration.name]),
         bindingCount: Object.values(document.bindings).filter((binding) => binding.server === declaration.name && binding.state === "bound").length,
       };
-      return current ? { ...current, ...counts } : {
-        name: declaration.name,
-        transport: declaration.transport,
-        status: declaration.enabled ? "quarantined" : "disabled",
-        ...counts,
-      };
+      const base: McpServerStatus = current
+        ? { ...current, ...counts }
+        : {
+          name: declaration.name,
+          transport: declaration.transport,
+          status: declaration.enabled ? "quarantined" : "disabled",
+          scope: declaration.scope,
+          ...counts,
+        };
+      const { marketplace: _priorMarketplace, ...withoutMarketplace } = base;
+      return { ...withoutMarketplace, ...statusOrigin(declaration) };
     }));
   }
 
@@ -315,11 +320,19 @@ export class McpConnectionManager {
       name: declaration.name,
       transport: declaration.transport,
       status,
+      ...statusOrigin(declaration),
       ...(detail === undefined ? {} : { detail }),
       candidateCount: prior?.candidateCount ?? 0,
       bindingCount: prior?.bindingCount ?? 0,
     });
   }
+}
+
+function statusOrigin(declaration: McpServerDeclaration): Pick<McpServerStatus, "scope" | "marketplace"> {
+  return {
+    scope: declaration.scope,
+    ...(declaration.marketplace === undefined ? {} : { marketplace: declaration.marketplace }),
+  };
 }
 
 export class McpBindingDriftError extends Error {

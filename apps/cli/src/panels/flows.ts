@@ -1391,7 +1391,7 @@ async function openMcpPanelAsync(ctx: PanelFlowContext): Promise<void> {
         }]
         : statuses.map((status) => ({
           id: status.name,
-          label: status.name,
+          label: mcpDisplayName(status),
           description: formatMcpStatus(status, locale),
         })),
       onClose: ctx.panels.dismiss,
@@ -1411,6 +1411,7 @@ async function openMcpServerPanel(ctx: PanelFlowContext, server: string): Promis
   try {
     const [statuses, review] = await Promise.all([ctx.mcpStatuses(), ctx.mcpReview()]);
     const status = statuses.find((entry) => entry.name === server);
+    const displayName = status ? mcpDisplayName(status) : server;
     const snapshot = review.snapshots[server];
     const bindings = new Map(
       Object.values(review.bindings)
@@ -1473,7 +1474,7 @@ async function openMcpServerPanel(ctx: PanelFlowContext, server: string): Promis
     };
     if (candidates.length === 0) {
       ctx.panels.push(new ListPanel({
-        title: `${server} · MCP`,
+        title: `${displayName} · MCP`,
         hints: locale === "zh" ? "↑↓ 选择 · Enter 执行 · Esc 返回" : "↑↓ navigate · Enter run · Esc back",
         maxVisible: mcpServerMaxVisible(ctx.terminalRows),
         items: [
@@ -1491,7 +1492,7 @@ async function openMcpServerPanel(ctx: PanelFlowContext, server: string): Promis
       return;
     }
     ctx.panels.push(new McpBindingPanel({
-      title: `${server} · MCP`,
+      title: `${displayName} · MCP`,
       locale,
       maxVisible: mcpServerMaxVisible(ctx.terminalRows),
       actions,
@@ -1619,6 +1620,21 @@ function candidateId(candidate: McpPanelCandidate): string {
   return `candidate:${candidate.kind}:${encodeURIComponent(candidate.name)}`;
 }
 
+function mcpDisplayName(status: Pick<McpServerStatus, "name" | "marketplace">): string {
+  // Marketplace declarations already use the qualified server id `name@marketplace`.
+  return status.name;
+}
+
+function formatMcpSource(status: Pick<McpServerStatus, "scope" | "marketplace">, locale: Locale): string {
+  if (status.marketplace !== undefined) {
+    return locale === "zh" ? "插件市场" : "plugin marketplace";
+  }
+  if (status.scope === "workspace") {
+    return locale === "zh" ? "工作区" : "workspace";
+  }
+  return locale === "zh" ? "用户" : "user";
+}
+
 function formatMcpStatus(status: McpServerStatus, locale: Locale): string {
   const state = locale === "zh"
     ? ({ disabled: "禁用", quarantined: "隔离（未连接）", connecting: "连接中", ready: "就绪", "needs-auth": "需要登录", drifted: "发生漂移", failed: "失败", idle: "空闲" } as const)[status.status]
@@ -1626,7 +1642,7 @@ function formatMcpStatus(status: McpServerStatus, locale: Locale): string {
   const bindingSummary = status.candidateCount > 0
     ? `${status.bindingCount}/${status.candidateCount} ${locale === "zh" ? "已绑定" : "bound"}`
     : `${status.bindingCount} ${locale === "zh" ? "个绑定" : "binding(s)"}`;
-  return `${state} · ${status.transport} · ${status.candidateCount} ${locale === "zh" ? "项能力" : "capabilities"} · ${bindingSummary}`;
+  return `${formatMcpSource(status, locale)} · ${state} · ${status.transport} · ${status.candidateCount} ${locale === "zh" ? "项能力" : "capabilities"} · ${bindingSummary}`;
 }
 
 function openSkillActivationPanel(ctx: PanelFlowContext): void {

@@ -85,8 +85,10 @@ max 4 and depth 1.
 login without writing secrets into Session events or TOML. Esc pops one panel level; an empty stack restores the
 composer.
 
-`/mcp` is a single panel stack, matching `/settings` and `/permissions`. The server list reports connection
-state separately from binding coverage (for example, `隔离（未连接） · 2/3 已绑定` after a restart). Enter opens
+`/mcp` is a single panel stack, matching `/settings` and `/permissions`. The server list reports declaration
+origin, connection state, and binding coverage. Plugin-market servers use the qualified id
+`name@marketplace` (for example `context7@claude-plugins-official` with `插件市场 · …`) and coexist with a
+workspace `.qi/mcp/<name>.toml` of the same short name. Refresh/bind use that listed server id. Enter opens
 refresh, OAuth, capability inspection, and explicit bind/unbind actions. Tool, Resource, Prompt, Template, and
 server-level `instructions` candidates remain quarantined until reviewed; `instructions` is remote guidance, not
 a callable Tool. The review binding is project-persistent, while each Session/Run still performs fresh capability

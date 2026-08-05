@@ -422,7 +422,11 @@ adds no TUI command, panel, or query API.
 
 MCP declarations live at `<workspace>/.qi/mcp/<server>.toml` and
 `$QI_HOME/resources/mcp/<server>.toml` (Workspace shadows user) and remain inert until `/mcp` → **Refresh
-discovery**. The panel binds an exact Tool/Resource/Template/Prompt/instructions fingerprint to an effect and
+discovery**. Plugin-materialized declarations under `$QI_HOME/resources/mcp/<marketplace>/` are a distinct server id
+`name@marketplace` (for example `context7@claude-plugins-official`) and coexist with workspace
+`.qi/mcp/<name>.toml` of the same short name. Refresh/bind and JSON `server` arguments use that qualified id
+for the market copy, and the short name for workspace/flat declarations. The panel binds an exact
+Tool/Resource/Template/Prompt/instructions fingerprint to an effect and
 resource patterns. Bindings persist in the machine-private project review store at
 `$QI_HOME/projects/<project-id>/state/mcp-bindings.json`; the per-Session/Run capability lease is still checked
 on every call. Ask/Plan may inspect only frozen local `mcp_catalog`; live `mcp` is Agent-only. stdio requires
