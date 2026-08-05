@@ -115,6 +115,31 @@ export function minimalHostEnvironment(
   return environment;
 }
 
+/** Preserve only credential-free loopback proxy settings for explicit network child processes. */
+export function preserveLocalProxyEnvironment(
+  environment: NodeJS.ProcessEnv,
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"] as const) {
+    const value = source[name];
+    if (value === undefined) continue;
+    if (name === "NO_PROXY") {
+      environment[name] = value;
+      continue;
+    }
+    try {
+      const url = new URL(value);
+      if ((url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password &&
+        ["localhost", "127.0.0.1", "::1"].includes(url.hostname.toLowerCase())) {
+        environment[name] = value;
+      }
+    } catch {
+      // Ignore malformed or credential-bearing proxy settings.
+    }
+  }
+  return environment;
+}
+
 export async function terminateProcessTree(child: ChildProcess): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === "win32") {

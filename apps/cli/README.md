@@ -458,6 +458,10 @@ The `/plugins` and `/agents` panels show each installed plugin as `name@marketpl
 
 Claude-compatible marketplaces (ADR-0037) use an explicit `qi marketplace add` → `qi plugin install` →
 `qi plugin enable` flow, plus `qi marketplace sync|search`, `qi plugin list|commands`, and `qi agent list`.
+GitHub sources may be entered as `github:owner/repo`, `owner/repo`, or a full
+`https://github.com/owner/repo` URL; local checkouts use `local:<path>`. The interactive `/plugins` →
+`Add Marketplace` form accepts the same source formats, then keeps marketplace registration, plugin installation,
+and plugin enablement as separate actions.
 Both `superpowers`' self marketplace and `claude-plugins-official` are supported; install selectors use
 `plugin@marketplace`, while the legacy two-argument install form remains accepted. Plugin Skills are selected in
 `/skills`; their upstream `user-invocable` / `disable-model-invocation` policy controls slash and model discovery.

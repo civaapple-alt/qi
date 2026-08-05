@@ -12,11 +12,19 @@ import {
   parseMarketplaceCatalog,
   searchMarketplacePlugins,
   convertClaudeMcpJson,
+  normalizeGithubMarketplaceRepo,
 } from "@civaapple/qi-node/plugins";
 import { ensureQiLayout } from "@civaapple/qi-node/paths";
 import { removeFixture } from "./helpers/remove-fixture.mjs";
 
 const fixtureMarketplace = fileURLToPath(new URL("./fixtures/claude-marketplace", import.meta.url));
+
+test("GitHub marketplace sources normalize full URLs", () => {
+  assert.equal(normalizeGithubMarketplaceRepo("https://github.com/mattpocock/skills"), "mattpocock/skills");
+  assert.equal(normalizeGithubMarketplaceRepo("github:mattpocock/skills.git"), "mattpocock/skills");
+  assert.equal(normalizeGithubMarketplaceRepo("mattpocock/skills"), "mattpocock/skills");
+  assert.equal(normalizeGithubMarketplaceRepo("https://github.com/mattpocock/skills/tree/main"), "https://github.com/mattpocock/skills/tree/main");
+});
 
 test("marketplace.json parse and search", async () => {
   const raw = JSON.parse(await readFile(join(fixtureMarketplace, ".claude-plugin", "marketplace.json"), "utf8"));

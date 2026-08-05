@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { minimalHostEnvironment } from "../workspace/process.js";
+import { minimalHostEnvironment, preserveLocalProxyEnvironment } from "../workspace/process.js";
 import { parseMarketplaceCatalog } from "./marketplace.js";
 import type { KnownMarketplace, MarketplaceCatalog, MarketplaceSource } from "./types.js";
 
@@ -32,22 +32,27 @@ export class MarketplaceRegistry {
     if (!/^[a-z][a-z0-9_-]{0,127}$/.test(name)) {
       throw new TypeError("marketplace name must match /^[a-z][a-z0-9_-]{0,127}$/");
     }
+    const normalizedSource = source.kind === "github"
+      ? Object.freeze({ ...source, repo: normalizeGithubMarketplaceRepo(source.repo) })
+      : source;
     await mkdir(this.#marketplacesRoot, { recursive: true });
     let installLocation: string;
     let resolvedRevision: string | undefined;
-    if (source.kind === "local") {
-      installLocation = resolve(source.path);
+    if (normalizedSource.kind === "local") {
+      installLocation = resolve(normalizedSource.path);
       await assertMarketplaceRoot(installLocation);
       resolvedRevision = await readRevision(installLocation);
     } else {
       installLocation = resolve(this.#marketplacesRoot, name);
-      resolvedRevision = await syncGithubMarketplace(source.repo, installLocation, source.ref);
+      resolvedRevision = await syncGithubMarketplace(normalizedSource.repo, installLocation, normalizedSource.ref);
     }
     const declaredName = await readMarketplaceName(installLocation);
     const entry: KnownMarketplace = Object.freeze({
       name,
       enabled: true,
-      source: source.kind === "local" ? Object.freeze({ kind: "local", path: installLocation }) : source,
+      source: normalizedSource.kind === "local"
+        ? Object.freeze({ kind: "local", path: installLocation })
+        : normalizedSource,
       installLocation,
       ...(declaredName === undefined ? {} : { declaredName }),
       ...(resolvedRevision === undefined ? {} : { resolvedRevision }),
@@ -133,11 +138,12 @@ export class MarketplaceRegistry {
 }
 
 async function syncGithubMarketplace(repo: string, installLocation: string, ref = "main"): Promise<string | undefined> {
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
+  const normalizedRepo = normalizeGithubMarketplaceRepo(repo);
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalizedRepo)) {
     throw new TypeError(`Invalid GitHub repo: ${repo}`);
   }
   await mkdir(resolve(installLocation, ".."), { recursive: true });
-  const url = `https://github.com/${repo}.git`;
+  const url = `https://github.com/${normalizedRepo}.git`;
   try {
     await runGit(["-C", installLocation, "rev-parse", "--is-inside-work-tree"]);
     await runGit(["-C", installLocation, "fetch", "--depth", "1", "origin", ref]);
@@ -150,6 +156,23 @@ async function syncGithubMarketplace(repo: string, installLocation: string, ref 
   return readRevision(installLocation);
 }
 
+/** Normalize GitHub marketplace input to the canonical owner/repository form. */
+export function normalizeGithubMarketplaceRepo(value: string): string {
+  const trimmed = value.trim().replace(/^github:/i, "");
+  if (/^https?:\/\/github\.com\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      if (url.hostname.toLowerCase() !== "github.com" || url.search || url.hash) return trimmed;
+      const parts = url.pathname.replace(/^\/+|\/+$/g, "").split("/");
+      if (parts.length !== 2 || !parts[0] || !parts[1]) return trimmed;
+      return `${parts[0]}/${parts[1].replace(/\.git$/i, "")}`;
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
+}
+
 async function assertMarketplaceRoot(root: string): Promise<void> {
   await readFile(resolve(root, ".claude-plugin", "marketplace.json"), "utf8");
 }
@@ -159,7 +182,9 @@ async function runGit(args: readonly string[]): Promise<string> {
     const child = spawn("git", ["-c", `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`, ...args], {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
-      env: minimalHostEnvironment({ GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0", NO_COLOR: "1" }),
+      env: preserveLocalProxyEnvironment(
+        minimalHostEnvironment({ GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0", NO_COLOR: "1" }),
+      ),
     });
     const stdout: Buffer[] = [];
     let stderr = "";
@@ -216,7 +241,7 @@ function parseSource(value: unknown, key: string): MarketplaceSource {
   if (kind === "github") {
     return Object.freeze({
       kind: "github",
-      repo: requiredString(value.repo, `${key}.source.repo`),
+      repo: normalizeGithubMarketplaceRepo(requiredString(value.repo, `${key}.source.repo`)),
       ...(typeof value.ref === "string" ? { ref: value.ref } : {}),
     });
   }

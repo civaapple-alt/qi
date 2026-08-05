@@ -40,6 +40,7 @@ granting authority. Qi exposes:
 ```bash
 qi marketplace add claude-plugins-official local:D:/path/to/claude-plugins-official
 qi marketplace add claude-plugins-official github:anthropics/claude-plugins-official
+qi marketplace add mattpocock https://github.com/mattpocock/skills
 qi marketplace add superpowers-marketplace https://github.com/obra/superpowers.git --ref 44c9b2d6e889982ac18c27d05a19fefe335194e1
 qi marketplace search claude-plugins-official frontend
 qi plugin install frontend-design@claude-plugins-official
@@ -50,6 +51,13 @@ qi plugin enable superpowers@superpowers-marketplace
 qi plugin commands
 qi agent list
 ```
+
+Marketplace registration is separate from plugin installation and enablement. The GitHub source accepts
+`github:owner/repo`, `owner/repo`, or a full `https://github.com/owner/repo` URL (an optional `.git` suffix is
+allowed); local sources use `local:<path>`. The TUI exposes the same flow under `/plugins` → `Add Marketplace`:
+choose GitHub or Local clone, enter the source, then browse the marketplace and explicitly choose `Install` and
+`Enable`. The Add Marketplace tab also lists registered sources; pressing Enter on a source disables or re-enables
+the marketplace. Disabling a marketplace disables its enabled plugins but retains installed caches.
 
 The official Anthropic catalog and Superpowers' self marketplace are both supported. A plugin may be
 installed from both, but only one marketplace source for the same plugin name may be enabled at a time;

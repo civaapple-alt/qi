@@ -1722,7 +1722,7 @@ export class InteractiveTui {
       this.#presenter.setNotice(
         `Installed ${installed.name} ${installed.version} in ${installed.scope} scope.`,
       );
-      this.#openInspectPanel("skills", "/skills");
+      openSkillsHubPanel(this.#panelFlow());
     });
   }
 
@@ -1741,7 +1741,7 @@ export class InteractiveTui {
       this.#presenter.setNotice(
         `Installed ${installed.name} ${installed.version} in ${installed.scope} scope (GitHub commit pinned).`,
       );
-      this.#openInspectPanel("skills", "/skills");
+      openSkillsHubPanel(this.#panelFlow());
     });
   }
 
@@ -1777,7 +1777,7 @@ export class InteractiveTui {
       this.#presenter.setSkills(this.#runtime.skillCatalog(), this.#runtime.skillCandidates());
       this.#syncAutocomplete();
       this.#presenter.setNotice(`Activated global Agent Skill ${activated.name}.`);
-      this.#openInspectPanel("skills", "/skills");
+      openSkillsHubPanel(this.#panelFlow());
     }, "Skill");
   }
 
