@@ -76,6 +76,22 @@ progressively loads individual Skills through the read-only `plugin_skill` Tool,
 `plugin_skill` discovery/loading does not grant Workspace or host authority; plugin scripts require the separate
 Execute capability and remain bounded by the normal Tool and Effect Journal checks.
 
+### Troubleshooting `plugin_skill ... denied`
+
+If the model can see `plugin_skill` but an invocation is denied, check the runtime state rather than changing the
+Skill prompt:
+
+1. `qi plugin list --json` must contain the exact enabled key, for example
+   `superpowers@superpowers-marketplace` with `enabled: true`.
+2. `qi plugin install` and `qi plugin enable` are separate operations. Enable the key if it is only installed.
+3. Restart the CLI after changing enablement. Capability leases and the enabled plugin Skill snapshot are created
+   when the runtime starts / when a Run begins.
+4. For `run-script`, also enable the separate Execute capability; read-only `list`, `load`, and `read-resource`
+   do not require it.
+
+Only the enabled marketplace copy contributes Skills to `plugin_skill`; installing the same plugin from a second
+marketplace does not make both copies active.
+
 ## Invariants
 
 - Enable never grants a Capability Lease and never auto-binds MCP.
