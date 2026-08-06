@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Qi CLI application composition, plugin management, and terminal runtime",
   "type": "module",
   "bin": {
@@ -15,11 +15,11 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@civaapple/qi-agent": "0.7.3",
-    "@civaapple/qi-ai": "0.7.3",
-    "@civaapple/qi-node": "0.7.3",
-    "@civaapple/qi-protocol": "0.7.3",
-    "@civaapple/qi-tui": "0.7.3",
+    "@civaapple/qi-agent": "0.7.4",
+    "@civaapple/qi-ai": "0.7.4",
+    "@civaapple/qi-node": "0.7.4",
+    "@civaapple/qi-protocol": "0.7.4",
+    "@civaapple/qi-tui": "0.7.4",
     "@earendil-works/pi-tui": "0.81.1",
     "@sinclair/typebox": "0.34.52",
     "smol-toml": "1.7.0"

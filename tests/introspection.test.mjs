@@ -146,7 +146,7 @@ test("qi_introspect remains default-deny and executes only with an explicit read
     { section: "identity" },
     { ...context, actionId: "act_introspection_granted" },
   );
-  assert.equal(settlement.output.release, "0.7.3");
+  assert.equal(settlement.output.release, "0.7.4");
   assert.match(settlement.output.authorityNotice, /cannot grant capabilities/u);
 });
 

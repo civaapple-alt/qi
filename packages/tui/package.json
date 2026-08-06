@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-tui",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Reusable terminal presenters, controls, panels, themes, and Session projections for Qi",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,8 +20,8 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-agent": "0.7.3",
-    "@civaapple/qi-protocol": "0.7.3",
+    "@civaapple/qi-agent": "0.7.4",
+    "@civaapple/qi-protocol": "0.7.4",
     "@earendil-works/pi-tui": "0.81.1"
   },
   "repository": {

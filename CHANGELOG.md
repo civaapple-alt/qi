@@ -8,6 +8,10 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [0.7.4] - 2026-08-06
+
 ### Added
 
 - Human-operated Skill installation now accepts `qi skill install <github-url> --skill <name>` and the matching
@@ -58,27 +62,6 @@ backup plus reset or a new data root rather than an automatic migration.
 - Model `skill` Tool `list` now returns native Qi Skills and enabled model-invocable marketplace Skills in one
   response (`origin: qi|plugin`), so “what skills do you have?” needs a single tool call. Load/read/run-script
   accept optional `pluginKey` or unique short names; `plugin_skill` remains for explicit pluginKey workflows.
-
-### Fixed
-
-- `/plugins` **All** and **Installed** tabs no longer list plugins from disabled marketplaces. Only enabled
-  marketplace catalogs (plus installed rows still declared or orphaned under those sources) appear; caches from
-  disabled sources remain on disk under **Manage**.
-- `/skills` marketplace tabs now omit disabled plugin marketplaces, matching `/plugins`. Installed Skill caches
-  from a disabled source remain on disk but no longer appear as horizontal tabs until the marketplace is
-  re-enabled.
-- TUI `Add Marketplace` now accepts full `https://github.com/<owner>/<repo>` inputs and stores the canonical
-  `owner/repo` source used by the marketplace synchronizer.
-- Windows GitHub Skill installs no longer fail while removing a still-open Git pack file (`EBUSY`). Git metadata
-  remains isolated until staging cleanup, which now retries transient Windows locks; the TUI immediately shows the
-  active Skill installation notice while the source is being resolved.
-- GitHub Skill and GitHub Marketplace acquisition preserve credential-free loopback proxy settings (for example
-  `127.0.0.1:7890`) for Git transport, while continuing to scrub general child-process environment variables.
-- Runtime base leases now authorize read-only `plugin_skill` discovery/loading and the Execute lease covers
-  explicitly allowed plugin Skill scripts; installed Superpowers Skills no longer fail closed at the capability
-  boundary with `plugin_skill ... denied`.
-- TUI `/mcp` capability review collapses multiline remote tool descriptions to a single terminal row, matching
-  `ListPanel`, so Context7-style descriptions no longer ghost duplicate pointers when scrolling.
 
 ### Changed
 
@@ -165,6 +148,25 @@ backup plus reset or a new data root rather than an automatic migration.
   so long Markdown responses can be expanded reliably.
 
 ### Fixed
+
+- `/plugins` **All** and **Installed** tabs no longer list plugins from disabled marketplaces. Only enabled
+  marketplace catalogs (plus installed rows still declared or orphaned under those sources) appear; caches from
+  disabled sources remain on disk under **Manage**.
+- `/skills` marketplace tabs now omit disabled plugin marketplaces, matching `/plugins`. Installed Skill caches
+  from a disabled source remain on disk but no longer appear as horizontal tabs until the marketplace is
+  re-enabled.
+- TUI `Add Marketplace` now accepts full `https://github.com/<owner>/<repo>` inputs and stores the canonical
+  `owner/repo` source used by the marketplace synchronizer.
+- Windows GitHub Skill installs no longer fail while removing a still-open Git pack file (`EBUSY`). Git metadata
+  remains isolated until staging cleanup, which now retries transient Windows locks; the TUI immediately shows the
+  active Skill installation notice while the source is being resolved.
+- GitHub Skill and GitHub Marketplace acquisition preserve credential-free loopback proxy settings (for example
+  `127.0.0.1:7890`) for Git transport, while continuing to scrub general child-process environment variables.
+- Runtime base leases now authorize read-only `plugin_skill` discovery/loading and the Execute lease covers
+  explicitly allowed plugin Skill scripts; installed Superpowers Skills no longer fail closed at the capability
+  boundary with `plugin_skill ... denied`.
+- TUI `/mcp` capability review collapses multiline remote tool descriptions to a single terminal row, matching
+  `ListPanel`, so Context7-style descriptions no longer ghost duplicate pointers when scrolling.
 
 - `/model` now shows catalogued image capability and an Image input setting for providers such as
   `qianwenai/qwen3.8-max`, instead of limiting the control to generic `compatible` endpoints. User-default and

@@ -220,7 +220,7 @@ export class McpConnectionManager {
     try {
       built = await this.#transport(declaration);
       client = new Client(
-        { name: "qi", version: "0.7.3" },
+        { name: "qi", version: "0.7.4" },
         { versionNegotiation: { mode: "auto" }, enforceStrictCapabilities: true },
       );
       const connection: LiveConnection = { declaration, client, transport: built.transport, transportIdentity: built.identity, lastUsed: Date.now(), stderr: "" };

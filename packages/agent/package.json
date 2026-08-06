@@ -1,6 +1,6 @@
 {
   "name": "@civaapple/qi-agent",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Qi Agent state machine, lifecycle, authority, tools, effects, memory, and extension contracts",
   "type": "module",
   "main": "./dist/index.js",
@@ -52,8 +52,8 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@civaapple/qi-ai": "0.7.3",
-    "@civaapple/qi-protocol": "0.7.3",
+    "@civaapple/qi-ai": "0.7.4",
+    "@civaapple/qi-protocol": "0.7.4",
     "@sinclair/typebox": "0.34.52"
   },
   "repository": {
