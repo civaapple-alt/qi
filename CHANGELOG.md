@@ -49,6 +49,15 @@ backup plus reset or a new data root rather than an automatic migration.
 - Superpowers bootstrap no longer requires a fixed commit/version pin. An enabled `superpowers` plugin injects
   bootstrap after structural checks (`plugin.json` name + `skills/using-superpowers/SKILL.md`); marketplace sync
   and re-install can refresh content. Missing bootstrap Skill fails closed.
+- Plugin Skills surface both the on-disk directory name and SKILL.md frontmatter `name` when they differ
+  (`declaredName`). `/skills` marketplace rows are compact: `[*] dir → md-name` plus short mode + description
+  (marketplace is the tab; Enter shows full detail). Stable ids remain `marketplace:plugin:<directory>`.
+- `/skill:` prefers short unique names for both autocomplete completion and runtime resolution
+  (`/skill:taste-skill` auto-resolves when unique; ambiguous names fall back to `marketplace:name` or full id).
+  The list only includes enabled Skills; description shows marketplace · plugin provenance (no “Enabled” suffix).
+- Model `skill` Tool `list` now returns native Qi Skills and enabled model-invocable marketplace Skills in one
+  response (`origin: qi|plugin`), so “what skills do you have?” needs a single tool call. Load/read/run-script
+  accept optional `pluginKey` or unique short names; `plugin_skill` remains for explicit pluginKey workflows.
 
 ### Fixed
 

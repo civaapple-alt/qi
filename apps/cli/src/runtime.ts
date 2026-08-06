@@ -699,10 +699,12 @@ export class TuiRuntime {
     registry.register("git", builtinTools.git);
     registry.register("artifact", builtinTools.artifact);
     registry.register("artifact_get", builtinTools.artifact_get);
-    registry.register("skill", createTuiSkillTool(skills, options.workspaceRoot));
     const pluginRegistry = new MarketplaceRegistry(qiHome);
     const pluginInstaller = new PluginInstaller(qiHome, pluginRegistry);
     const pluginCatalog = new PluginCatalog(qiHome, pluginRegistry, pluginInstaller);
+    // Unified discovery on `skill` (native + enabled plugin Skills). `plugin_skill` remains for
+    // explicit pluginKey workflows and older model prompts.
+    registry.register("skill", createTuiSkillTool(skills, options.workspaceRoot, pluginCatalog));
     registry.register("plugin_skill", createTuiPluginSkillTool(pluginCatalog, options.workspaceRoot));
     registry.register("mcp_catalog", createMcpCatalogTool({ manager: mcp, reviews: mcpReviews }));
     const mcpLiveRegistration = registry.register("mcp", createMcpLiveTool({ manager: mcp, declarations: mcpDeclarationSnapshot, bindings: mcpBindingSnapshot }));

@@ -10,7 +10,7 @@ plugin while user-only Skills remain explicitly selectable, without granting aut
 
 - commands → `/plugin:<marketplace>:<plugin>:<command> <task>`
 - user-invocable plugin Skills → `/skill:<marketplace>:<plugin>:<skill> <task>`
-- model-invocable plugin Skills → model-facing `plugin_skill` Tool (`list`, `load`, `read-resource`, bounded `run-script`)
+- model-invocable plugin Skills → model-facing `skill` Tool (combined list with native Skills; load via short name or `pluginKey`) and dedicated `plugin_skill` Tool for explicit `pluginKey` workflows
 - root agents → `/agent:<id> <task>`
 - `.mcp.json` → inert MCP declarations under `$QI_HOME/resources/mcp/<marketplace>/`
   (discovered as `name@marketplace`; still require human refresh/bind)
@@ -70,6 +70,16 @@ array is authoritative for Skill discovery (including nested paths such as `./sk
 Extra `skills/**/SKILL.md` files that are not listed in `plugin.json` are not exposed by `/skills`, `/skill:`, or
 `plugin_skill`. For older plugins without a `skills` array, Qi retains a directory-scan compatibility fallback.
 
+Plugin Skill **ids** always use the Skill **directory** basename
+(`marketplace:plugin:dir`). Frontmatter `name` (when different, e.g. dir `taste-skill` with
+`name: design-taste-frontend`) is exposed as `declaredName`. In `/skills` marketplace tabs the
+compact row is `[*] dir → md-name` plus `both|user|model · description` (marketplace is the tab);
+full directory / SKILL.md / invocation detail remains on Enter.
+
+Human `/skill:` prefers a **short unique selector**: `/skill:taste-skill` when only one enabled Skill
+has that directory name; otherwise `marketplace:name` or the full `marketplace:plugin:dir` id.
+Resolution accepts short name, `marketplace:name`, declared frontmatter name, or full id.
+
 The official Anthropic catalog and Superpowers' self marketplace are both supported. A plugin may be
 installed from both, but only one marketplace source for the same plugin name may be enabled at a time;
 disable the current source before enabling the other. When an enabled plugin is named `superpowers`, Qi injects
@@ -108,27 +118,27 @@ The explicit Skill entry requires a task and activates the `using-superpowers` i
 ```
 
 For ordinary prompts, an enabled Superpowers plugin that passes structural checks automatically contributes its bootstrap. The model
-progressively loads individual Skills through the read-only `plugin_skill` Tool, for example with
-`operation = "load"`, `pluginKey = "superpowers@superpowers-marketplace"`, and `skill = "using-superpowers"`.
-`plugin_skill` discovery/loading does not grant Workspace or host authority; plugin scripts require the separate
-Execute capability and remain bounded by the normal Tool and Effect Journal checks.
+progressively loads individual Skills through the model-facing `skill` Tool (combined list; load with short name
+or `pluginKey`) or the dedicated `plugin_skill` Tool with `pluginKey` / `skill`. Neither path grants Workspace or
+host authority; plugin scripts require the separate Execute capability and remain bounded by the normal Tool and
+Effect Journal checks.
 
-### Troubleshooting `plugin_skill ... denied`
+### Troubleshooting `skill` / `plugin_skill` denied for marketplace Skills
 
-If the model can see `plugin_skill` but an invocation is denied, check the runtime state rather than changing the
-Skill prompt:
+If the model can see plugin Skills in `skill` list (or via `plugin_skill`) but an invocation is denied, check the
+runtime state rather than changing the Skill prompt:
 
 1. `qi plugin list --json` must contain the exact enabled key, for example
    `superpowers@superpowers-marketplace` with `enabled: true`.
 2. `qi plugin install` and `qi plugin enable` are separate operations; `qi skill enable` is only required for
    user-only Skills or for re-enabling a model Skill that was explicitly disabled.
-3. A Skill marked `user-only` by `disable-model-invocation: true` is intentionally absent from `plugin_skill`;
-   activate it through `/skill:` instead.
+3. A Skill marked `user-only` by `disable-model-invocation: true` is intentionally absent from model `skill` /
+   `plugin_skill` lists; activate it through a human `/skill:` Run instead.
 4. For `run-script`, also enable the separate Execute capability; read-only `list`, `load`, and `read-resource`
    do not require it.
 
-Only the enabled marketplace copy contributes Skills to `plugin_skill`; installing the same plugin from a second
-marketplace does not make both copies active.
+Only the enabled marketplace copy contributes Skills to the model catalog; installing the same plugin from a
+second marketplace does not make both copies active.
 
 ## Invariants
 

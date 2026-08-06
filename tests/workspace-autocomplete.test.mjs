@@ -137,7 +137,7 @@ test("/plugin and /agent completion do not double the leading slash", async () =
   );
 });
 
-test("long dynamic slash names keep an exact value and readable full-name description", async () => {
+test("long dynamic slash names keep an exact value and compact source description", async () => {
   const provider = new WorkspaceAutocompleteProvider(
     [],
     process.cwd(),
@@ -153,6 +153,90 @@ test("long dynamic slash names keep an exact value and readable full-name descri
   });
   assert.equal(suggestions?.items[0]?.value, "/plugin:superpowers:receiving-code-review");
   assert.equal(suggestions?.items[0]?.label, "/plugin:receiving-code-review");
-  assert.match(suggestions?.items[0]?.description ?? "", /superpowers:receiving-code-review/);
+  assert.equal(suggestions?.items[0]?.description, "superpowers · receiving-code-review");
   assert.equal(suggestions?.items[0]?.label.includes("…"), false);
+});
+
+test("/skill marketplace rows complete short unique names and show source", async () => {
+  const provider = new WorkspaceAutocompleteProvider(
+    [],
+    process.cwd(),
+    undefined,
+    new Set(),
+    ["prompting-guide"],
+    [],
+    [],
+    [
+      {
+        id: "mattpocock:mattpocock-skills:grill-me",
+        name: "grill-me",
+        marketplace: "mattpocock",
+        plugin: "mattpocock-skills",
+      },
+      {
+        id: "taste-skill:taste-skill:taste-skill",
+        name: "taste-skill",
+        marketplace: "taste-skill",
+        plugin: "taste-skill",
+        declaredName: "design-taste-frontend",
+      },
+      {
+        id: "taste-skill:taste-skill:image-to-code-skill",
+        name: "image-to-code-skill",
+        marketplace: "taste-skill",
+        plugin: "taste-skill",
+        declaredName: "image-to-code",
+      },
+    ],
+  );
+  const all = await provider.getSuggestions(["/skill:"], 0, "/skill:".length, {
+    signal: new AbortController().signal,
+  });
+  assert.ok(all?.items.some((item) => item.value === "/skill:prompting-guide" && item.description === "Native Skill"));
+  const grill = all?.items.find((item) => item.label === "/skill:grill-me");
+  assert.equal(grill?.value, "/skill:grill-me");
+  assert.equal(grill?.description, "mattpocock · mattpocock-skills");
+  assert.doesNotMatch(grill?.description ?? "", /Enabled/);
+
+  const taste = all?.items.find((item) => item.label === "/skill:taste-skill");
+  assert.equal(taste?.value, "/skill:taste-skill");
+  assert.equal(taste?.description, "taste-skill · design-taste-frontend");
+
+  const byMd = await provider.getSuggestions(["/skill:image-to-code"], 0, "/skill:image-to-code".length, {
+    signal: new AbortController().signal,
+  });
+  const image = byMd?.items.find((item) => item.label.includes("image-to-code"));
+  assert.equal(image?.value, "/skill:image-to-code-skill");
+  assert.equal(image?.description, "taste-skill · image-to-code");
+});
+
+test("/skill short completion disambiguates colliding skill names", async () => {
+  const provider = new WorkspaceAutocompleteProvider(
+    [],
+    process.cwd(),
+    undefined,
+    new Set(),
+    [],
+    [],
+    [],
+    [
+      {
+        id: "alpha:plug:shared",
+        name: "shared",
+        marketplace: "alpha",
+        plugin: "plug",
+      },
+      {
+        id: "beta:plug:shared",
+        name: "shared",
+        marketplace: "beta",
+        plugin: "plug",
+      },
+    ],
+  );
+  const suggestions = await provider.getSuggestions(["/skill:shared"], 0, "/skill:shared".length, {
+    signal: new AbortController().signal,
+  });
+  const values = suggestions?.items.map((item) => item.value).sort() ?? [];
+  assert.deepEqual(values, ["/skill:alpha:shared", "/skill:beta:shared"]);
 });

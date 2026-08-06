@@ -235,7 +235,7 @@ export class PluginCatalog {
     const needle = query.trim().toLowerCase();
     return Object.freeze(statuses
       .filter(({ ref }) => !needle
-        || `${ref.id}\n${ref.name}\n${ref.marketplace}\n${ref.description}`.toLowerCase().includes(needle))
+        || `${ref.id}\n${ref.name}\n${ref.declaredName ?? ""}\n${ref.marketplace}\n${ref.description}`.toLowerCase().includes(needle))
       .sort((left, right) => left.ref.id.localeCompare(right.ref.id)));
   }
 
@@ -254,7 +254,7 @@ export class PluginCatalog {
 
   async resolveSkill(pluginKey: string, name: string): Promise<PluginSkillRef> {
     const skills = await this.listSkills();
-    const found = skills.find((entry) => entry.pluginKey === pluginKey && (entry.name === name || entry.id === name));
+    const found = skills.find((entry) => entry.pluginKey === pluginKey && skillMatchesSelector(entry, name));
     if (!found) throw new Error(`Unknown plugin Skill: ${name} (${pluginKey})`);
     return found;
   }
@@ -268,7 +268,7 @@ export class PluginCatalog {
     const skills = await this.listSkills();
     const found = skills.find((entry) => entry.modelInvocable
       && entry.pluginKey === pluginKey
-      && (entry.name === name || entry.id === name));
+      && skillMatchesSelector(entry, name));
     if (!found) throw new Error(`Unknown model-invocable plugin Skill: ${name} (${pluginKey})`);
     return found;
   }
@@ -296,7 +296,7 @@ export class PluginCatalog {
   async resolveSelectedSkill(selector: string): Promise<PluginSkillRef> {
     const skills = await this.listSkills();
     const exact = skills.filter((entry) => entry.id === selector);
-    const short = skills.filter((entry) => entry.name === selector);
+    const short = skills.filter((entry) => skillMatchesSelector(entry, selector));
     const matches = exact.length > 0 ? exact : short;
     if (matches.length > 1) throw new Error(`Ambiguous plugin Skill: ${selector}; choose one of ${matches.map((entry) => entry.id).join(", ")}`);
     const found = matches[0];
@@ -364,7 +364,7 @@ export class PluginCatalog {
 
   async #setSkill(selector: string, selected: boolean): Promise<PluginSkillStatus> {
     const statuses = await this.listInstalledSkills();
-    const found = statuses.find(({ ref }) => ref.id === selector || ref.name === selector);
+    const found = statuses.find(({ ref }) => skillMatchesSelector(ref, selector));
     if (!found) throw new Error(`Unknown installed plugin Skill: ${selector}`);
     const record = await this.#installer.getInstalled(found.ref.pluginKey);
     const state = await this.#readEnabled();
@@ -456,6 +456,40 @@ function filterByQuery<T extends { readonly id: string; readonly name: string; r
 function isSkillSelected(ref: PluginSkillRef, plugin: PluginEnablementRecord): boolean {
   if (ref.modelInvocable) return !plugin.disabledSkills.includes(ref.name);
   return plugin.skills.includes(ref.name);
+}
+
+/**
+ * Match full id, directory / declared name, or compact `marketplace:name`.
+ * Used by `/skill:<selector>` so operators can type a short name when unique.
+ */
+export function skillMatchesSelector(entry: PluginSkillRef, selector: string): boolean {
+  if (entry.id === selector || entry.name === selector) return true;
+  if (entry.declaredName !== undefined && entry.declaredName === selector) return true;
+  if (selector === `${entry.marketplace}:${entry.name}`) return true;
+  if (entry.declaredName !== undefined && selector === `${entry.marketplace}:${entry.declaredName}`) return true;
+  if (selector === `${entry.marketplace}:${entry.plugin}:${entry.name}`) return true;
+  return false;
+}
+
+/**
+ * Shortest unique selector for human `/skill:` use among enabled peers.
+ * Prefers directory name, then `marketplace:name`, then full id.
+ */
+export function preferredPluginSkillSelector(
+  entry: PluginSkillRef,
+  peers: readonly PluginSkillRef[],
+  reservedNames: ReadonlySet<string> = new Set(),
+): string {
+  const others = peers.filter((peer) => peer.id !== entry.id);
+  const nameClash = reservedNames.has(entry.name)
+    || others.some((peer) => peer.name === entry.name || peer.declaredName === entry.name);
+  if (!nameClash) return entry.name;
+  const marketSkill = `${entry.marketplace}:${entry.name}`;
+  const marketClash = others.some((peer) =>
+    `${peer.marketplace}:${peer.name}` === marketSkill
+    || (peer.declaredName !== undefined && `${peer.marketplace}:${peer.declaredName}` === marketSkill));
+  if (!marketClash) return marketSkill;
+  return entry.id;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

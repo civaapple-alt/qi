@@ -80,11 +80,13 @@ Scripts require the separate `skill.run-script` execute path. Only `scripts/**`,
 bounded timeout, and startup-frozen interpreter profiles are accepted. Host execution remains a full local-code
 trust boundary and settles through the ordinary Action/Effect Journal path; Ask and Plan modes deny it.
 
-Claude-compatible plugin Skills use a separate `plugin_skill` catalog backed by the immutable plugin cache. They
-are never merged into native `/skills` names, and a Run snapshots the enabled plugin Skills before model
-execution. Model-invocable Skills are included automatically when their Plugin is enabled unless the user has
-persisted an explicit opt-out; user-only Skills require an explicit `/skill:<marketplace>:<plugin>:<skill>` Run.
-`run-script` remains Execute-authorized.
+Claude-compatible plugin Skills use a separate immutable plugin cache and enablement pin. Human `/skills` names
+stay unmerged with native catalog names. For the **model**, the `skill` Tool `list` operation returns a **combined**
+inventory (`origin: qi | plugin`) so a single call answers “what skills are available?”. Load/read/run-script route
+to plugin Skills via optional `pluginKey` or a unique short name among enabled model-invocable Skills. The dedicated
+`plugin_skill` Tool remains for explicit `pluginKey` workflows. A Run snapshots enabled plugin Skills before model
+execution. Model-invocable Skills appear when their Plugin is enabled unless the user has persisted an explicit
+opt-out; user-only Skills require an explicit human `/skill:` Run. `run-script` remains Execute-authorized.
 Extensionless plugin scripts are accepted only with the exact `#!/usr/bin/env bash` shebang. Plugin hooks,
 lifecycle commands, visual companion servers, and dependency installers are rejected or explicitly unavailable.
 

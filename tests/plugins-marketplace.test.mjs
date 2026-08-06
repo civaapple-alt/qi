@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,10 @@ import {
   MarketplaceRegistry,
   PluginCatalog,
   PluginInstaller,
+  formatPluginSkillLabel,
   inspectClaudePlugin,
+  listPluginSkills,
+  preferredPluginSkillSelector,
   parseMarketplaceCatalog,
   searchMarketplacePlugins,
   convertClaudeMcpJson,
@@ -77,6 +80,60 @@ test("marketplace registry local add + install + enable + /plugin command resolv
     const loaded = await plugins.loadCommandBody("fixture-marketplace:code-review:code-review");
     assert.match(loaded.body, /Review the pull request/);
     assert.equal(loaded.digest.length, 64);
+  } finally {
+    await removeFixture(qiHome);
+  }
+});
+
+test("plugin Skills keep directory name and expose distinct SKILL.md frontmatter name", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-plugin-skill-names-"));
+  try {
+    const skillDir = join(root, "skills", "taste-skill");
+    await mkdir(join(root, ".claude-plugin"), { recursive: true });
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(root, ".claude-plugin", "plugin.json"), `${JSON.stringify({
+      name: "taste-skill",
+      description: "demo",
+    }, null, 2)}\n`, "utf8");
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: design-taste-frontend\ndescription: Anti-slop frontend\n---\nBody.\n",
+      "utf8",
+    );
+    const refs = await listPluginSkills(root, "taste-skill", "taste-mkt");
+    assert.equal(refs.length, 1);
+    assert.equal(refs[0].name, "taste-skill");
+    assert.equal(refs[0].declaredName, "design-taste-frontend");
+    assert.equal(refs[0].id, "taste-mkt:taste-skill:taste-skill");
+    assert.equal(formatPluginSkillLabel(refs[0]), "taste-skill · design-taste-frontend");
+    assert.equal(formatPluginSkillLabel({ name: "same", declaredName: "same" }), "same");
+    assert.equal(preferredPluginSkillSelector(refs[0], refs), "taste-skill");
+    assert.equal(
+      preferredPluginSkillSelector(refs[0], refs, new Set(["taste-skill"])),
+      "taste-mkt:taste-skill",
+    );
+  } finally {
+    await removeFixture(root);
+  }
+});
+
+test("loadSelectedSkill resolves short /skill: names when unique", async () => {
+  const qiHome = await mkdtemp(join(tmpdir(), "qi-plugin-short-skill-"));
+  try {
+    await ensureQiLayout(qiHome);
+    const registry = new MarketplaceRegistry(qiHome);
+    await registry.add("fixture-marketplace", { kind: "local", path: fixtureMarketplace });
+    const installer = new PluginInstaller(qiHome, registry);
+    const installed = await installer.install("fixture-marketplace", "frontend-design");
+    const plugins = new PluginCatalog(qiHome, registry, installer);
+    await plugins.enable(installed.key);
+    await plugins.enableSkill("fixture-marketplace:frontend-design:frontend-design");
+    const byShort = await plugins.loadSelectedSkill("frontend-design");
+    assert.equal(byShort.ref.id, "fixture-marketplace:frontend-design:frontend-design");
+    const byMarket = await plugins.loadSelectedSkill("fixture-marketplace:frontend-design");
+    assert.equal(byMarket.ref.id, byShort.ref.id);
+    const byFull = await plugins.loadSelectedSkill("fixture-marketplace:frontend-design:frontend-design");
+    assert.equal(byFull.ref.id, byShort.ref.id);
   } finally {
     await removeFixture(qiHome);
   }

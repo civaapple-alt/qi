@@ -18,6 +18,18 @@ interface Candidate {
   directory: boolean;
 }
 
+/**
+ * Enabled marketplace Skill for `/skill:` autocomplete.
+ * Completion value prefers a short unique selector; full id remains resolvable.
+ */
+export interface PluginSkillAutocompleteEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly marketplace: string;
+  readonly plugin: string;
+  readonly declaredName?: string;
+}
+
 export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
   readonly #inner: CombinedAutocompleteProvider;
 
@@ -29,7 +41,7 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
     readonly skillNames: readonly string[] = [],
     readonly pluginCommandIds: readonly string[] = [],
     readonly agentIds: readonly string[] = [],
-    readonly pluginSkillIds: readonly string[] = [],
+    readonly pluginSkills: readonly PluginSkillAutocompleteEntry[] = [],
   ) {
     this.#inner = new CombinedAutocompleteProvider([...commands], workspaceRoot);
   }
@@ -47,11 +59,12 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
       const native = this.skillNames
         .filter((name) => name.toLowerCase().startsWith(needle))
         .slice(0, MAX_SUGGESTIONS)
-        .map((name) => dynamicSlashItem("/skill:", name, "Active Skill"));
-      const plugin = this.pluginSkillIds
-        .filter((id) => id.toLowerCase().startsWith(needle) || id.toLowerCase().includes(needle))
+        .map((name) => dynamicSlashItem("/skill:", name, "Native Skill"));
+      const reservedNative = new Set(this.skillNames);
+      const plugin = this.pluginSkills
+        .filter((entry) => pluginSkillMatchesNeedle(entry, needle))
         .slice(0, MAX_SUGGESTIONS)
-        .map((id) => dynamicSlashItem("/skill:", id, "Enabled marketplace Skill"));
+        .map((entry) => pluginSkillSlashItem(entry, this.pluginSkills, reservedNative));
       const items = [...native, ...plugin].slice(0, MAX_SUGGESTIONS);
       return items.length === 0 ? null : { prefix: skillPrefix, items };
     }
@@ -61,7 +74,7 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
       const items = this.pluginCommandIds
         .filter((id) => id.toLowerCase().startsWith(needle) || id.toLowerCase().includes(needle))
         .slice(0, MAX_SUGGESTIONS)
-        .map((id) => dynamicSlashItem("/plugin:", id, "Enabled plugin command"));
+        .map((id) => dynamicSlashItem("/plugin:", id, pluginSourceDescription(id)));
       return items.length === 0 ? null : { prefix: pluginPrefix, items };
     }
     const agentPrefix = activePrefixedSlash(before, "/agent:");
@@ -70,7 +83,7 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
       const items = this.agentIds
         .filter((id) => id.toLowerCase().startsWith(needle) || id.toLowerCase().includes(needle))
         .slice(0, MAX_SUGGESTIONS)
-        .map((id) => dynamicSlashItem("/agent:", id, "Enabled plugin agent"));
+        .map((id) => dynamicSlashItem("/agent:", id, pluginSourceDescription(id)));
       return items.length === 0 ? null : { prefix: agentPrefix, items };
     }
     const prefix = atPrefix(before);
@@ -178,7 +191,10 @@ function activePrefixedSlash(text: string, prefix: "/plugin:" | "/agent:"): stri
   return match?.[1];
 }
 
-/** Keep the inserted value exact while giving long names a readable primary-column label. */
+/**
+ * Keep the inserted value exact while giving long names a readable primary-column label.
+ * Description carries marketplace / plugin provenance (no "Enabled" — only enabled entries are listed).
+ */
 function dynamicSlashItem(prefix: "/skill:" | "/plugin:" | "/agent:", id: string, description: string): AutocompleteItem {
   const value = `${prefix}${id}`;
   if (value.length <= 32) return { value, label: value, description };
@@ -186,8 +202,74 @@ function dynamicSlashItem(prefix: "/skill:" | "/plugin:" | "/agent:", id: string
   return {
     value,
     label: `${prefix}${tail}`,
-    description: `${id} · ${description}`,
+    description,
   };
+}
+
+/**
+ * Prefer `/skill:<name>` when unique; otherwise `marketplace:name` or full id.
+ * Description shows marketplace / plugin provenance (and md name when different).
+ */
+function pluginSkillSlashItem(
+  entry: PluginSkillAutocompleteEntry,
+  peers: readonly PluginSkillAutocompleteEntry[],
+  reservedNative: ReadonlySet<string>,
+): AutocompleteItem {
+  const selector = preferredAutocompleteSelector(entry, peers, reservedNative);
+  const source = entry.plugin === entry.marketplace
+    ? entry.marketplace
+    : `${entry.marketplace} · ${entry.plugin}`;
+  const declared = entry.declaredName && entry.declaredName !== entry.name
+    ? ` · ${entry.declaredName}`
+    : "";
+  return {
+    value: `/skill:${selector}`,
+    label: `/skill:${selector}`,
+    description: `${source}${declared}`,
+  };
+}
+
+function preferredAutocompleteSelector(
+  entry: PluginSkillAutocompleteEntry,
+  peers: readonly PluginSkillAutocompleteEntry[],
+  reservedNative: ReadonlySet<string>,
+): string {
+  const others = peers.filter((peer) => peer.id !== entry.id);
+  const nameClash = reservedNative.has(entry.name)
+    || others.some((peer) => peer.name === entry.name || peer.declaredName === entry.name);
+  if (!nameClash) return entry.name;
+  const marketSkill = `${entry.marketplace}:${entry.name}`;
+  const marketClash = others.some((peer) =>
+    `${peer.marketplace}:${peer.name}` === marketSkill
+    || (peer.declaredName !== undefined && `${peer.marketplace}:${peer.declaredName}` === marketSkill));
+  if (!marketClash) return marketSkill;
+  return entry.id;
+}
+
+function pluginSkillMatchesNeedle(entry: PluginSkillAutocompleteEntry, needle: string): boolean {
+  if (!needle) return true;
+  const haystack = [
+    entry.id,
+    entry.name,
+    entry.marketplace,
+    entry.plugin,
+    entry.declaredName ?? "",
+  ].join("\n").toLowerCase();
+  return haystack.includes(needle) || entry.name.toLowerCase().startsWith(needle);
+}
+
+/** marketplace[:plugin[:rest]] → compact source line without repeating redundant segments. */
+function pluginSourceDescription(id: string): string {
+  const parts = id.split(":").filter(Boolean);
+  if (parts.length === 0) return id;
+  if (parts.length === 1) return parts[0]!;
+  if (parts.length === 2) {
+    return parts[0] === parts[1] ? parts[0]! : `${parts[0]} · ${parts[1]}`;
+  }
+  const [marketplace, plugin, ...rest] = parts;
+  const source = plugin === marketplace ? marketplace! : `${marketplace} · ${plugin}`;
+  const tail = rest.join(":");
+  return tail && tail !== plugin ? `${source} · ${tail}` : source!;
 }
 
 async function fdCandidates(

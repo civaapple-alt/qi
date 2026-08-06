@@ -84,7 +84,16 @@ export interface PluginSkillRef {
   readonly pluginKey: string;
   readonly plugin: string;
   readonly marketplace: string;
+  /**
+   * Stable Skill id segment: directory basename under the plugin root
+   * (used in `/skill:<marketplace>:<plugin>:<name>` and enablement records).
+   */
   readonly name: string;
+  /**
+   * Frontmatter `name` from SKILL.md when present (may differ from the directory,
+   * e.g. dir `taste-skill` with `name: design-taste-frontend`).
+   */
+  readonly declaredName?: string;
   readonly description: string;
   readonly path: string;
   readonly userInvocable: boolean;

@@ -89,12 +89,16 @@ export async function listPluginSkills(
     const { metadata } = await readMarkdown(path);
     const userInvocable = metadata["user-invocable"] !== false;
     const modelInvocable = metadata["disable-model-invocation"] !== true;
+    const declaredName = typeof metadata.name === "string" && metadata.name.trim()
+      ? metadata.name.trim()
+      : undefined;
     refs.push(Object.freeze({
       id: `${marketplace}:${plugin}:${skillName}`,
       pluginKey,
       plugin,
       marketplace,
       name: skillName,
+      ...(declaredName === undefined || declaredName === skillName ? {} : { declaredName }),
       description: typeof metadata.description === "string" ? metadata.description.trim() : skillName,
       path,
       userInvocable,
@@ -104,6 +108,13 @@ export async function listPluginSkills(
     }));
   }
   return Object.freeze(refs);
+}
+
+/** Human-facing label: directory name, plus frontmatter name when they differ. */
+export function formatPluginSkillLabel(ref: Pick<PluginSkillRef, "name" | "declaredName">): string {
+  return ref.declaredName && ref.declaredName !== ref.name
+    ? `${ref.name} · ${ref.declaredName}`
+    : ref.name;
 }
 
 export async function listPluginAgents(

@@ -11,7 +11,11 @@ import {
 } from "@civaapple/qi-ai";
 import type { VerificationCandidate } from "@civaapple/qi-node/tools";
 import { SHELL_PROFILE_IDS, type ShellProfileId } from "@civaapple/qi-node/tools";
-import type { PluginSkillStatus } from "@civaapple/qi-node/plugins";
+import {
+  formatPluginSkillLabel,
+  preferredPluginSkillSelector,
+  type PluginSkillStatus,
+} from "@civaapple/qi-node/plugins";
 import type { ProcessTaskView } from "@civaapple/qi-agent/kernel";
 import type { Effect } from "@civaapple/qi-agent/capability";
 import {
@@ -1372,10 +1376,11 @@ function openSkillsHubPanelContents(ctx: PanelFlowContext, pluginSkills: readonl
       if (!current) return;
       const nextSelected = !current.selected;
       ctx.togglePluginSkillSelection?.(item.id, nextSelected, () => {
-        browser?.updateItem({
-          ...item,
-          label: `${nextSelected ? "[*]" : "[ ]"} ${current.ref.name}@${current.ref.marketplace}`,
-        });
+        browser?.updateItem(pluginSkillListItem({
+          ...current,
+          selected: nextSelected,
+          enabled: nextSelected && !current.blockedReason,
+        }));
       });
     },
     onInstall: () => {
@@ -1414,43 +1419,83 @@ function openAlwaysOnSkillsPanel(ctx: PanelFlowContext): void {
 
 function groupPluginSkills(pluginSkills: readonly PluginSkillStatus[]): readonly { marketplace: string; items: readonly SkillBrowserItem[] }[] {
   const grouped = new Map<string, SkillBrowserItem[]>();
-  for (const { ref, enabled, selected } of pluginSkills) {
-    const items = grouped.get(ref.marketplace) ?? [];
-    items.push({
-      id: ref.id,
-      label: `${enabled ? "[*]" : selected ? "[~]" : "[ ]"} ${ref.name}@${ref.marketplace}`,
-      description: `${ref.invocationMode} · ${ref.description}`,
-    });
-    grouped.set(ref.marketplace, items);
+  for (const status of pluginSkills) {
+    const items = grouped.get(status.ref.marketplace) ?? [];
+    items.push(pluginSkillListItem(status));
+    grouped.set(status.ref.marketplace, items);
   }
   return [...grouped.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([marketplace, items]) => ({ marketplace, items }));
 }
 
+/**
+ * Compact one-line list row. Marketplace is the tab, so it is omitted here.
+ * Primary: state + directory (→ frontmatter name when different).
+ * Secondary: short invocation mode + description.
+ */
+function pluginSkillListItem(status: PluginSkillStatus): SkillBrowserItem {
+  const { ref, enabled, selected } = status;
+  const mark = enabled ? "[*]" : selected ? "[~]" : "[ ]";
+  const primary = ref.declaredName && ref.declaredName !== ref.name
+    ? `${ref.name} → ${ref.declaredName}`
+    : ref.name;
+  return {
+    id: ref.id,
+    label: `${mark} ${primary}`,
+    description: `${shortInvocationMode(ref.invocationMode)} · ${ref.description}`,
+  };
+}
+
+function shortInvocationMode(mode: PluginSkillStatus["ref"]["invocationMode"]): string {
+  switch (mode) {
+    case "user-only": return "user";
+    case "model-only": return "model";
+    case "user+model": return "both";
+    case "not-directly-invocable": return "hidden";
+    default: return mode;
+  }
+}
+
 async function openPluginSkillDetails(ctx: PanelFlowContext, item: SkillBrowserItem): Promise<void> {
   const locale = ctx.locale();
-  const status = (await (ctx.pluginSkillStatuses?.() ?? Promise.resolve([]))).find((entry) => entry.ref.id === item.id);
+  const allStatuses = await (ctx.pluginSkillStatuses?.() ?? Promise.resolve([]));
+  const status = allStatuses.find((entry) => entry.ref.id === item.id);
   if (!status) {
     ctx.presenter.setNotice(locale === "zh" ? "找不到这个插件 Skill。" : "Plugin Skill not found.");
     ctx.render();
     return;
   }
   const state = status.enabled ? "enabled" : status.selected ? "selected but blocked" : "not selected";
+  const label = formatPluginSkillLabel(status.ref);
+  const enabledPeers = allStatuses.filter((entry) => entry.enabled).map((entry) => entry.ref);
+  const reservedNative = new Set(
+    alwaysOnSkills(ctx.discoveredSkills()).map((skill) => skill.name),
+  );
+  const shortSelector = preferredPluginSkillSelector(status.ref, enabledPeers, reservedNative);
   const lines = [
-    `${status.ref.name}@${status.ref.marketplace}`,
+    `${label} · ${status.ref.marketplace}`,
+    `Directory · ${status.ref.name}`,
+    ...(status.ref.declaredName && status.ref.declaredName !== status.ref.name
+      ? [`SKILL.md name · ${status.ref.declaredName}`]
+      : []),
     `State · ${state}`,
     `Invocation · ${status.ref.invocationMode}`,
     "",
     status.ref.description,
     "",
-    status.ref.userInvocable
-      ? `Explicit invocation · /skill:${status.ref.id} <task>`
-      : "Invocation · model-only via plugin_skill",
+    ...(status.ref.userInvocable
+      ? [
+        `Call · /skill:${shortSelector} <task>`,
+        ...(shortSelector !== status.ref.id
+          ? [`Full id · ${status.ref.id}`]
+          : []),
+      ]
+      : ["Invocation · model-only via plugin_skill"]),
     locale === "zh" ? "在 Skills 列表中按 Space 可直接切换该 Skill。" : "Press Space on this row in Skills to toggle it.",
   ];
   ctx.panels.push(new ScrollPanel({
-    title: `${status.ref.name}@${status.ref.marketplace}`,
+    title: `${label} · ${status.ref.marketplace}`,
     lines,
     maxVisible: maxVisible(ctx.terminalRows),
     hints: locale === "zh" ? "Esc 返回 · ↑↓ 滚动" : "Esc back · ↑↓ scroll",

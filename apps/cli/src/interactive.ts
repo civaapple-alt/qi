@@ -1455,7 +1455,12 @@ export class InteractiveTui {
         "Skills",
         ...(skills.length === 0
           ? ["  No declared Skills."]
-          : skills.map((status) => `  ${status.enabled ? "[*]" : status.selected ? "[~]" : "[ ]"} ${status.ref.name} · ${status.ref.invocationMode}${status.blockedReason ? ` · ${status.blockedReason}` : ""}`)),
+          : skills.map((status) => {
+            const names = status.ref.declaredName && status.ref.declaredName !== status.ref.name
+              ? `${status.ref.name} · ${status.ref.declaredName}`
+              : status.ref.name;
+            return `  ${status.enabled ? "[*]" : status.selected ? "[~]" : "[ ]"} ${names} · ${status.ref.invocationMode}${status.blockedReason ? ` · ${status.blockedReason}` : ""}`;
+          })),
         "",
         item.enabled
           ? "Space in the browser disables this plugin. Use /skills to choose individual Skills."
@@ -1634,7 +1639,13 @@ export class InteractiveTui {
     );
     const install = (
       fdPath?: string,
-      pluginSkillIds: readonly string[] = [],
+      pluginSkills: readonly {
+        readonly id: string;
+        readonly name: string;
+        readonly marketplace: string;
+        readonly plugin: string;
+        readonly declaredName?: string;
+      }[] = [],
       pluginCommandIds: readonly string[] = [],
       agentIds: readonly string[] = [],
     ) => this.#editor.setAutocompleteProvider(
@@ -1646,19 +1657,27 @@ export class InteractiveTui {
         this.#runtime.skillCatalog().map((skill) => skill.name),
         pluginCommandIds,
         agentIds,
-        pluginSkillIds,
+        pluginSkills,
       ),
     );
     install();
     void Promise.all([
       findTrustedExecutable("fd", this.#presenter.launch.workspaceRoot),
       this.#runtime.plugins().listInstalledSkills()
-        .then((entries) => entries.filter((entry) => entry.enabled && entry.ref.userInvocable).map((entry) => entry.ref.id)).catch(() => []),
+        .then((entries) => entries
+          .filter((entry) => entry.enabled && entry.ref.userInvocable)
+          .map((entry) => ({
+            id: entry.ref.id,
+            name: entry.ref.name,
+            marketplace: entry.ref.marketplace,
+            plugin: entry.ref.plugin,
+            ...(entry.ref.declaredName === undefined ? {} : { declaredName: entry.ref.declaredName }),
+          }))).catch(() => []),
       this.#runtime.plugins().listCommands().then((entries) => entries.map((entry) => entry.id)).catch(() => []),
       this.#runtime.plugins().listAgents().then((entries) => entries.map((entry) => entry.id)).catch(() => []),
-    ]).then(([fdPath, pluginSkillIds, pluginCommandIds, agentIds]) => {
+    ]).then(([fdPath, pluginSkills, pluginCommandIds, agentIds]) => {
       if (generation === this.#autocompleteGeneration && !this.#closing) {
-        install(fdPath, pluginSkillIds, pluginCommandIds, agentIds);
+        install(fdPath, pluginSkills, pluginCommandIds, agentIds);
       }
     });
   }

@@ -2708,8 +2708,15 @@ test("Skills browser splits marketplace Skills into per-market tabs", () => {
     native: [],
     global: [],
     pluginMarkets: [
-      { marketplace: "mattpocock", items: [{ id: "matt:ask", label: "[ ] ask-matt@mattpocock", description: "user-only" }] },
-      { marketplace: "claude-plugins-official", items: [{ id: "official:design", label: "[ ] frontend-design@claude-plugins-official", description: "user+model" }] },
+      { marketplace: "mattpocock", items: [{ id: "matt:ask", label: "[ ] ask-matt", description: "user · Ask Matt" }] },
+      {
+        marketplace: "taste-skill",
+        items: [{
+          id: "taste-skill:taste-skill:taste-skill",
+          label: "[ ] taste-skill → design-taste-frontend",
+          description: "both · Anti-slop frontend",
+        }],
+      },
     ],
     onSelect: (tab, item) => selected.push([tab, item.id]),
     onToggle: (tab, item) => toggled.push([tab, item.id]),
@@ -2719,19 +2726,23 @@ test("Skills browser splits marketplace Skills into per-market tabs", () => {
   const initial = stripVTControlCharacters(panel.render(100).join("\n"));
   assert.match(initial, /Native \(0\)/);
   assert.match(initial, /Global Agent \(0\)/);
-  assert.match(initial, /claude-plugins-official \(0\/1\)/);
+  assert.match(initial, /taste-skill \(0\/1\)/);
   assert.match(initial, /mattpocock \(0\/1\)/);
   assert.doesNotMatch(initial, /Plugin Skills/);
 
   panel.handleInput("\t"); // Global Agent
-  panel.handleInput("\t"); // claude-plugins-official
-  panel.handleInput("\t"); // mattpocock
+  panel.handleInput("\t"); // mattpocock (sorted before taste-skill)
   panel.handleInput(" ");
   assert.deepEqual(toggled, [["plugin:mattpocock", "matt:ask"]]);
-  panel.updateItem({ id: "matt:ask", label: "[*] ask-matt@mattpocock", description: "user-only" });
+  panel.updateItem({ id: "matt:ask", label: "[*] ask-matt", description: "user · Ask Matt" });
   assert.match(stripVTControlCharacters(panel.render(100).join("\n")), /mattpocock \(1\/1\)/);
+  panel.handleInput("\t"); // taste-skill
+  const taste = stripVTControlCharacters(panel.render(100).join("\n"));
+  assert.match(taste, /taste-skill → design-taste-frontend/);
+  assert.match(taste, /both · Anti-slop frontend/);
+  assert.doesNotMatch(taste, /@taste-skill|dir taste-skill · md/);
   panel.handleInput("\r");
-  assert.deepEqual(selected, [["plugin:mattpocock", "matt:ask"]]);
+  assert.deepEqual(selected, [["plugin:taste-skill", "taste-skill:taste-skill:taste-skill"]]);
 });
 
 test("Skills hub omits disabled plugin marketplaces from horizontal tabs", async () => {
@@ -2802,8 +2813,9 @@ test("Skills hub omits disabled plugin marketplaces from horizontal tabs", async
   hub.handleInput("\t"); // Global Agent
   hub.handleInput("\t"); // enabled-mkt
   const marketText = stripVTControlCharacters(hub.render(100).join("\n"));
-  assert.match(marketText, /alpha@enabled-mkt/);
-  assert.doesNotMatch(marketText, /beta@disabled-mkt/);
+  assert.match(marketText, /\[\*\] alpha/);
+  assert.match(marketText, /both · from enabled marketplace/);
+  assert.doesNotMatch(marketText, /beta|disabled-mkt/);
 });
 
 test("info notices expire while Run notices remain until explicitly cleared", () => {
