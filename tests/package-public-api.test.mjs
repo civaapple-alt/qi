@@ -107,7 +107,7 @@ const expectedRuntimeExports = {
     "SkillStaleError", "SkillUpdateIndeterminateError", "acquireImmutableSkillSource",
     "agentSkillLockHash", "assertSkillDirectoryName", "evaluateSkillReadiness", "loadAgentDefinition",
     "parseFrontmatter", "parseSkillMetadata", "readAgentSkillActivations", "readAgentSkillLock",
-    "requireString", "runSkillScript", "writeAgentSkillActivations",
+    "requireString", "resolveGithubSkillSource", "runSkillScript", "writeAgentSkillActivations",
   ],
   "@civaapple/qi-node/stream": ["EventStreamService", "SessionEventHub", "encodeSseEvent", "sseStream"],
   "@civaapple/qi-node/tools": [
@@ -154,7 +154,8 @@ const expectedRuntimeExports = {
   "@civaapple/qi-node/workspace": [
     "ContainerWorkspaceAdapter", "GitWorktreeAdapter", "LocalWorkspace",
     "SqliteEffectJournal", "effectIdempotencyKey", "effectIntentHash", "hostProcessRunner",
-    "forceTerminateProcessTree", "minimalHostEnvironment", "runHostProcess", "scrubCredentialEnvironment",
+    "forceTerminateProcessTree", "minimalHostEnvironment", "preserveLocalProxyEnvironment",
+    "runHostProcess", "scrubCredentialEnvironment",
     "terminateProcessTree", "waitForChildExit",
   ],
 };
