@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,8 @@ import {
   PluginCatalog,
   PluginInstaller,
   loadSuperpowersBootstrap,
-  SUPERPOWERS_COMMIT,
+  SUPERPOWERS_BOOTSTRAP_RELATIVE_PATH,
+  SUPERPOWERS_BOOTSTRAP_SKILL,
 } from "@civaapple/qi-node/plugins";
 import { ensureQiLayout } from "@civaapple/qi-node/paths";
 import { removeFixture } from "./helpers/remove-fixture.mjs";
@@ -69,31 +70,59 @@ test("same plugin cannot be enabled from two marketplaces at once", async () => 
   }
 });
 
-test("canonical Superpowers bootstrap is provenance-bound", async () => {
+test("Superpowers bootstrap uses structural skill path checks without commit/version pin", async () => {
   const bootstrap = await loadSuperpowersBootstrap({
     key: "superpowers@superpowers-marketplace",
     marketplace: "superpowers-marketplace",
     name: "superpowers",
-    pin: SUPERPOWERS_COMMIT,
+    pin: "floating-or-local-pin",
     cachePath: fixture,
     installedAt: new Date(0).toISOString(),
     sourceKind: "vendored",
     sourceUrl: "https://github.com/obra/superpowers.git",
-    commit: SUPERPOWERS_COMMIT,
-    version: "6.2.0",
+    commit: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    version: "9.9.9",
   });
   assert.ok(bootstrap);
+  assert.equal(bootstrap.bootstrapSkill, SUPERPOWERS_BOOTSTRAP_SKILL);
+  assert.equal(bootstrap.bootstrapPath, SUPERPOWERS_BOOTSTRAP_RELATIVE_PATH);
+  assert.equal(bootstrap.commit, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+  assert.equal(bootstrap.version, "9.9.9");
   assert.match(bootstrap.instructions, /plugin_skill/);
+  assert.match(bootstrap.instructions, /Use plugin skills before acting/);
+
+  // Non-superpowers name is ignored (no bootstrap attempt).
   assert.equal(await loadSuperpowersBootstrap({
-    key: "superpowers@other",
-    marketplace: "other",
-    name: "superpowers",
-    pin: "main",
+    key: "other@m",
+    marketplace: "m",
+    name: "other",
+    pin: "x",
     cachePath: fixture,
     installedAt: new Date(0).toISOString(),
     sourceKind: "vendored",
-    sourceUrl: "https://github.com/obra/superpowers.git",
-    commit: "main",
-    version: "6.2.0",
   }), undefined);
+
+  // Missing bootstrap Skill fails closed with a structural error.
+  const brokenRoot = await mkdtemp(join(tmpdir(), "qi-superpowers-broken-"));
+  try {
+    await mkdir(join(brokenRoot, ".claude-plugin"), { recursive: true });
+    await writeFile(join(brokenRoot, ".claude-plugin", "plugin.json"), JSON.stringify({
+      name: "superpowers",
+      version: "1.0.0",
+    }), "utf8");
+    await assert.rejects(
+      () => loadSuperpowersBootstrap({
+        key: "superpowers@broken",
+        marketplace: "broken",
+        name: "superpowers",
+        pin: "x",
+        cachePath: brokenRoot,
+        installedAt: new Date(0).toISOString(),
+        sourceKind: "vendored",
+      }),
+      /using-superpowers|bootstrap Skill is missing/,
+    );
+  } finally {
+    await removeFixture(brokenRoot);
+  }
 });

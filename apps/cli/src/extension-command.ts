@@ -42,7 +42,20 @@ export async function runExtensionCliCommand(args: readonly string[]): Promise<b
         ? await pluginCatalog.disableSkill(name)
         : { name, disabled: await catalog.deactivateAgentSkill(name) }, parsed.json);
     }
-    if (operation !== "install") throw new TypeError("Usage: qi skill list|enable|disable|install SOURCE [--skill NAME | --scope user|workspace] [--commit SHA --subdir PATH | --sha256 DIGEST] [--json]");
+    if (operation === "remove" || operation === "uninstall") {
+      const name = required(parsed.positionals.shift(), "Skill name");
+      const scopeValue = parsed.values.get("scope");
+      if (scopeValue !== undefined && scopeValue !== "user" && scopeValue !== "workspace") {
+        throw new TypeError("--scope must be user or workspace");
+      }
+      const scope = scopeValue as SkillScope | undefined;
+      return output(await catalog.remove(name, scope === undefined ? {} : { scope }), parsed.json);
+    }
+    if (operation !== "install") {
+      throw new TypeError(
+        "Usage: qi skill list|enable|disable|install SOURCE [--skill NAME | --scope user|workspace] | remove NAME [--scope user|workspace] [--json]",
+      );
+    }
     const source = required(parsed.positionals.shift(), "Skill SOURCE");
     const scope = (parsed.values.get("scope") ?? "user") as SkillScope;
     if (scope !== "user" && scope !== "workspace") throw new TypeError("--scope must be user or workspace");

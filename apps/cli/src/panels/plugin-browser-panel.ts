@@ -1,7 +1,7 @@
 import { Input, Key, matchesKey, truncateToWidth, type Focusable } from "@earendil-works/pi-tui";
 import { panelFooter, panelHeader, pointer, theme, type PanelComponent } from "@civaapple/qi-tui";
 
-export type PluginBrowserTab = "all" | "installed" | "add" | `marketplace:${string}`;
+export type PluginBrowserTab = "all" | "installed" | "manage" | `marketplace:${string}`;
 
 export interface PluginBrowserItem {
   readonly id: string;
@@ -24,7 +24,8 @@ export interface PluginBrowserPanelOptions {
   readonly maxVisible?: number;
   readonly onOpen: (item: PluginBrowserItem) => void;
   readonly onToggle: (item: PluginBrowserItem) => void;
-  readonly onAddMarketplace: () => void;
+  /** Open marketplace management (add / sync / enable / browse). */
+  readonly onManageMarketplaces: () => void;
   readonly onClose: () => void;
 }
 
@@ -40,7 +41,7 @@ export class PluginBrowserPanel implements PanelComponent, Focusable {
   readonly #maxVisible: number;
   readonly #onOpen: (item: PluginBrowserItem) => void;
   readonly #onToggle: (item: PluginBrowserItem) => void;
-  readonly #onAddMarketplace: () => void;
+  readonly #onManageMarketplaces: () => void;
   readonly #onClose: () => void;
   readonly #search = new Input();
   #tabIndex = 0;
@@ -50,11 +51,11 @@ export class PluginBrowserPanel implements PanelComponent, Focusable {
 
   constructor(options: PluginBrowserPanelOptions) {
     this.#all = options.items;
-    this.#tabs = ["all", "installed", ...options.marketplaces.map((name) => `marketplace:${name}` as const), "add"];
+    this.#tabs = ["all", "installed", ...options.marketplaces.map((name) => `marketplace:${name}` as const), "manage"];
     this.#maxVisible = Math.max(5, options.maxVisible ?? 12);
     this.#onOpen = options.onOpen;
     this.#onToggle = options.onToggle;
-    this.#onAddMarketplace = options.onAddMarketplace;
+    this.#onManageMarketplaces = options.onManageMarketplaces;
     this.#onClose = options.onClose;
     this.#search.focused = false;
     const initialTab = options.initialTab;
@@ -101,14 +102,14 @@ export class PluginBrowserPanel implements PanelComponent, Focusable {
       return;
     }
     if (matchesKey(data, Key.enter)) {
-      if (this.#tab === "add") this.#onAddMarketplace();
+      if (this.#tab === "manage") this.#onManageMarketplaces();
       else {
         const item = this.#filtered[this.#selected];
         if (item) this.#onOpen(item);
       }
       return;
     }
-    if (data === " " && this.#tab !== "add") {
+    if (data === " " && this.#tab !== "manage") {
       const item = this.#filtered[this.#selected];
       if (item) this.#onToggle(item);
       return;
@@ -128,10 +129,10 @@ export class PluginBrowserPanel implements PanelComponent, Focusable {
       truncateToWidth(this.#tabs.map((tab, index) => this.#renderTab(tab, index === this.#tabIndex)).join("  "), safe, "…"),
       "",
     ];
-    if (this.#tab === "add") {
+    if (this.#tab === "manage") {
       lines.push(
-        theme.bold("Add Marketplace"),
-        theme.fg("textDim", "Enter shows the command needed to register a local or GitHub marketplace."),
+        theme.bold("Manage marketplaces"),
+        theme.fg("textDim", "Enter: add source · sync catalog · enable/disable · browse plugins."),
         "",
         ...panelFooter(safe),
       );
@@ -161,8 +162,8 @@ export class PluginBrowserPanel implements PanelComponent, Focusable {
       ? `All (${this.#all.length})`
       : tab === "installed"
         ? `Installed (${this.#all.filter((item) => item.installed).length})`
-        : tab === "add"
-          ? "Add Marketplace"
+        : tab === "manage"
+          ? "Manage"
           : tab.slice("marketplace:".length);
     return selected ? theme.bold(`[${label}]`) : theme.fg("textDim", label);
   }
@@ -199,7 +200,7 @@ export class PluginBrowserPanel implements PanelComponent, Focusable {
       ? this.#all
       : tab === "installed"
         ? this.#all.filter((item) => item.installed)
-        : tab === "add"
+        : tab === "manage"
           ? []
           : this.#all.filter((item) => item.marketplace === tab.slice("marketplace:".length));
     const needle = this.#query.trim().toLowerCase();

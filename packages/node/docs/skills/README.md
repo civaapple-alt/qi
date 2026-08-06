@@ -76,6 +76,11 @@ const parsed = parseFrontmatter(
 the API default; callers must request Workspace scope explicitly. Installing a compatibility candidate is a
 copy-and-validate migration; the source directory remains unchanged.
 
+`SkillCatalog.remove(name, { scope? })` is the human-operated inverse for Qi-managed trees only
+(`$QI_HOME/resources/skills` and `<workspace>/.qi/skills`). It deletes the Skill directory and drops the matching
+lock entry; it never touches global or project `.agents` roots. When the same name exists in both scopes, callers
+must pass `scope`. `listManagedSkills()` returns every removable Qi copy across both scopes.
+
 Human-operated `installImmutable()` additionally accepts an exact Git/GitHub commit or an HTTPS tar archive with
 SHA-256. It rejects floating identities, redirects, lifecycle execution, links, special files, non-portable paths,
 and trees above 512 files / 8 MiB per file / 64 MiB total / depth 16. Provenance and the content-tree digest are

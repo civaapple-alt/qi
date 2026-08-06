@@ -5,8 +5,8 @@ Claude-compatible plugin marketplace adaptation (ADR-0037).
 ## Purpose
 
 Register and sync Claude-style marketplaces (`marketplace.json`), install complete plugins into a pinned
-cache under `$QI_HOME/plugins`, then separately enable the plugin and selected manifest-declared Skills without
-granting authority. Qi exposes:
+cache under `$QI_HOME/plugins`, then separately enable the plugin; model-invocable Skills become available with the
+plugin while user-only Skills remain explicitly selectable, without granting authority. Qi exposes:
 
 - commands → `/plugin:<marketplace>:<plugin>:<command> <task>`
 - user-invocable plugin Skills → `/skill:<marketplace>:<plugin>:<skill> <task>`
@@ -41,7 +41,8 @@ granting authority. Qi exposes:
 qi marketplace add claude-plugins-official local:D:/path/to/claude-plugins-official
 qi marketplace add claude-plugins-official github:anthropics/claude-plugins-official
 qi marketplace add mattpocock https://github.com/mattpocock/skills
-qi marketplace add superpowers-marketplace https://github.com/obra/superpowers.git --ref 44c9b2d6e889982ac18c27d05a19fefe335194e1
+qi marketplace add superpowers-marketplace https://github.com/obra/superpowers.git
+qi marketplace sync superpowers-marketplace
 qi marketplace search claude-plugins-official frontend
 qi plugin install frontend-design@claude-plugins-official
 qi plugin enable frontend-design@claude-plugins-official
@@ -54,34 +55,59 @@ qi agent list
 
 Marketplace registration is separate from plugin installation and enablement. The GitHub source accepts
 `github:owner/repo`, `owner/repo`, or a full `https://github.com/owner/repo` URL (an optional `.git` suffix is
-allowed); local sources use `local:<path>`. The TUI exposes the same flow under `/plugins` → `Add Marketplace`:
-choose GitHub or Local clone, enter the source, then browse the marketplace and explicitly choose `Install` and
-`Enable`. The Add Marketplace tab also lists registered sources; pressing Enter on a source disables or re-enables
-the marketplace. Disabling a marketplace disables its enabled plugins but retains installed caches.
+allowed); local sources use `local:<path>`. The TUI exposes the same flow under `/plugins` → **Manage**:
+add a source (GitHub or local clone), then **Sync catalog** / enable/disable / browse. After browsing, install
+and enable plugins separately. Enter on a registered source opens maintenance actions including **Sync catalog**
+(GitHub fetch, same as `qi marketplace sync <name>`). Sync updates the catalog only; re-install a plugin to
+refresh its pinned cache. Disabling a marketplace disables its enabled plugins but retains installed caches.
+`/plugins` **All** / **Installed** and per-marketplace tabs only include **enabled** sources; caches from a
+disabled marketplace stay hidden until that source is re-enabled under Manage.
+
+The two Claude manifests have different responsibilities. Qi reads the marketplace root's
+`.claude-plugin/marketplace.json` only to discover plugin names, descriptions, and `source` roots. After a plugin
+is installed, Qi resolves that source root and reads the plugin's own `.claude-plugin/plugin.json`; its `skills`
+array is authoritative for Skill discovery (including nested paths such as `./skills/engineering/ask-matt`).
+Extra `skills/**/SKILL.md` files that are not listed in `plugin.json` are not exposed by `/skills`, `/skill:`, or
+`plugin_skill`. For older plugins without a `skills` array, Qi retains a directory-scan compatibility fallback.
 
 The official Anthropic catalog and Superpowers' self marketplace are both supported. A plugin may be
 installed from both, but only one marketplace source for the same plugin name may be enabled at a time;
-disable the current source before enabling the other. Superpowers is accepted only at the pinned repository
-commit/version and injects its `using-superpowers` bootstrap as required, untrusted user context. Its visual
+disable the current source before enabling the other. When an enabled plugin is named `superpowers`, Qi injects
+the `using-superpowers` bootstrap as untrusted user context after structural checks
+(`.claude-plugin/plugin.json` name + `skills/using-superpowers/SKILL.md`). Commit/version are not pinned, so
+`qi marketplace sync` / re-install can refresh the plugin; bootstrap still maps workflows to Qi Tools. Visual
 companion server, hooks, lifecycle commands, and dependency installers remain unavailable.
 
 ### Using Superpowers
 
-`plugin install` only places the immutable plugin in the private cache; it does not enable the plugin. A newly
-enabled plugin has no selected Skills. Select individual Skills in `/skills` or with `qi skill enable`; changes
-apply to the next Run without changing an active Run snapshot.
+`plugin install` only places the immutable plugin in the private cache; it does not enable the plugin. After the
+plugin is enabled, model-invocable Skills (those without `disable-model-invocation: true`) are available to
+`plugin_skill` automatically. User-only Skills still require selection in `/skills` or with `qi skill enable`.
+Space can explicitly disable an otherwise model-invocable Skill; that opt-out is stored with the plugin pin.
+Changes apply to the next Run without changing an active Run snapshot.
+
+The local checkout can be registered as its own marketplace:
 
 ```bash
+qi marketplace add superpowers-marketplace local:D:/gh-ws/skill-ws/superpowers
+qi plugin install superpowers@superpowers-marketplace
 qi plugin enable superpowers@superpowers-marketplace
 ```
 
-The explicit Skill entry requires a task and activates the pinned `using-superpowers` instructions for that Run:
+This repository's `marketplace.json` declares the `superpowers` plugin, while its `plugin.json` has no `skills`
+array; Qi therefore discovers the Skill directories under `skills/` using the compatibility fallback. The
+`using-superpowers` Skill is the bootstrap Skill: when the plugin is enabled and the structural path checks pass,
+Qi injects that Skill automatically for ordinary prompts. Local checkouts and post-sync revisions are eligible as
+long as `plugin.json` names `superpowers` and `skills/using-superpowers/SKILL.md` loads. A missing or misnamed
+bootstrap Skill fails closed when Superpowers is enabled.
+
+The explicit Skill entry requires a task and activates the `using-superpowers` instructions for that Run:
 
 ```text
 /skill:superpowers-marketplace:superpowers:using-superpowers implement the requested feature and verify it
 ```
 
-For ordinary prompts, an enabled canonical Superpowers plugin automatically contributes its bootstrap. The model
+For ordinary prompts, an enabled Superpowers plugin that passes structural checks automatically contributes its bootstrap. The model
 progressively loads individual Skills through the read-only `plugin_skill` Tool, for example with
 `operation = "load"`, `pluginKey = "superpowers@superpowers-marketplace"`, and `skill = "using-superpowers"`.
 `plugin_skill` discovery/loading does not grant Workspace or host authority; plugin scripts require the separate
@@ -94,7 +120,8 @@ Skill prompt:
 
 1. `qi plugin list --json` must contain the exact enabled key, for example
    `superpowers@superpowers-marketplace` with `enabled: true`.
-2. `qi plugin install`, `qi plugin enable`, and `qi skill enable` are separate operations.
+2. `qi plugin install` and `qi plugin enable` are separate operations; `qi skill enable` is only required for
+   user-only Skills or for re-enabling a model Skill that was explicitly disabled.
 3. A Skill marked `user-only` by `disable-model-invocation: true` is intentionally absent from `plugin_skill`;
    activate it through `/skill:` instead.
 4. For `run-script`, also enable the separate Execute capability; read-only `list`, `load`, and `read-resource`

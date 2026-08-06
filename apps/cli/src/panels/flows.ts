@@ -64,7 +64,7 @@ import type { PanelHost } from "./host.js";
 import { ListPanel } from "./list-panel.js";
 import { McpBindingPanel, type McpDraftEffect } from "./mcp-binding-panel.js";
 import { MultiSelectPanel } from "./multi-select-panel.js";
-import { SkillBrowserPanel } from "./skill-browser-panel.js";
+import { SkillBrowserPanel, type SkillBrowserItem } from "./skill-browser-panel.js";
 import { ScrollPanel } from "./scroll-panel.js";
 import {
   NEW_SESSION_ID,
@@ -164,7 +164,9 @@ export interface PanelFlowContext {
   readonly discoveredSkills: () => readonly PresentedSkill[];
   readonly skillCandidates: () => readonly PresentedSkillCandidate[];
   readonly pluginSkillStatuses?: (query?: string) => Promise<readonly PluginSkillStatus[]>;
-  readonly savePluginSkillSelection?: (ids: readonly string[]) => void;
+  /** Enabled marketplace names; Skills hub tabs omit disabled marketplaces (same as `/plugins`). */
+  readonly listEnabledMarketplaces?: () => Promise<readonly string[]>;
+  readonly togglePluginSkillSelection?: (id: string, selected: boolean, onSuccess?: () => void) => void;
   readonly saveAgentSkillActivation: (names: readonly string[]) => void;
   readonly openHistoryList: (kind: "runs" | "steps" | "actions" | "agents") => void;
   readonly addMount: (path: string) => void;
@@ -181,6 +183,7 @@ export interface PanelFlowContext {
   readonly applyVerificationSetup: (selected: readonly VerificationCandidate[]) => void;
   readonly installSkill: (source: string, scope: "user" | "workspace") => void;
   readonly installGithubSkill: (url: string, name: string, scope: "user" | "workspace") => void;
+  readonly removeSkill: (name: string, scope: "user" | "workspace") => void;
   readonly listTasks: () => ProcessTaskView[];
   readonly stopTask: (taskId: string) => void;
   readonly listSessions: () => SessionEntry[];
@@ -1314,8 +1317,19 @@ export function openSkillsHubPanel(ctx: PanelFlowContext): void {
 }
 
 async function openSkillsHubPanelAsync(ctx: PanelFlowContext): Promise<void> {
-  const pluginSkills = await (ctx.pluginSkillStatuses?.() ?? Promise.resolve([])).catch(() => []);
-  openSkillsHubPanelContents(ctx, pluginSkills);
+  const [pluginSkills, enabledMarketplaces] = await Promise.all([
+    (ctx.pluginSkillStatuses?.() ?? Promise.resolve([])).catch(() => [] as readonly PluginSkillStatus[]),
+    (ctx.listEnabledMarketplaces?.() ?? Promise.resolve(undefined)).catch(() => undefined),
+  ]);
+  // Match `/plugins`: disabled marketplaces stay out of the horizontal tab strip even when
+  // their plugin caches (and Skill rows) remain on disk.
+  const enabled = enabledMarketplaces === undefined
+    ? undefined
+    : new Set(enabledMarketplaces);
+  const visible = enabled === undefined
+    ? pluginSkills
+    : pluginSkills.filter((status) => enabled.has(status.ref.marketplace));
+  openSkillsHubPanelContents(ctx, visible);
 }
 
 function openSkillsHubPanelContents(ctx: PanelFlowContext, pluginSkills: readonly PluginSkillStatus[]): void {
@@ -1324,7 +1338,8 @@ function openSkillsHubPanelContents(ctx: PanelFlowContext, pluginSkills: readonl
   const alwaysOn = alwaysOnSkills(active);
   const activeGlobal = active.filter((skill) => skill.scope === "user" && skill.origin === "agent");
   const globalCandidates = candidates.filter((skill) => skill.source === "global-agent");
-  ctx.panels.push(new SkillBrowserPanel({
+  let browser: SkillBrowserPanel | undefined;
+  browser = new SkillBrowserPanel({
     native: alwaysOn.map((skill) => ({
       id: skill.name,
       label: skill.name,
@@ -1335,14 +1350,10 @@ function openSkillsHubPanelContents(ctx: PanelFlowContext, pluginSkills: readonl
       label: `${activeGlobal.some((activeSkill) => activeSkill.name === skill.name) ? "[*]" : "[ ]"} ${skill.name}`,
       description: `${skill.version} · ${skill.description}`,
     })),
-    plugin: pluginSkills.map(({ ref, enabled, selected }) => ({
-      id: ref.id,
-      label: `${enabled ? "[*]" : selected ? "[~]" : "[ ]"} ${ref.name}@${ref.marketplace}`,
-      description: `${ref.invocationMode} · ${ref.description}`,
-    })),
+    pluginMarkets: groupPluginSkills(pluginSkills),
     maxVisible: maxVisible(ctx.terminalRows),
     onClose: ctx.panels.dismiss,
-    onSelect: (tab) => {
+    onSelect: (tab, item) => {
       if (tab === "native") {
         openAlwaysOnSkillsPanel(ctx);
         return;
@@ -1351,14 +1362,27 @@ function openSkillsHubPanelContents(ctx: PanelFlowContext, pluginSkills: readonl
         openSkillActivationPanel(ctx);
         return;
       }
-      if (tab === "plugin") {
-        void openPluginSkillsPanel(ctx);
+      if (tab.startsWith("plugin:")) {
+        void openPluginSkillDetails(ctx, item);
       }
     },
-    onInstall: () => {
-      openSkillInstallSourcePanel(ctx);
+    onToggle: (tab, item) => {
+      if (!tab.startsWith("plugin:")) return;
+      const current = pluginSkills.find((status) => status.ref.id === item.id);
+      if (!current) return;
+      const nextSelected = !current.selected;
+      ctx.togglePluginSkillSelection?.(item.id, nextSelected, () => {
+        browser?.updateItem({
+          ...item,
+          label: `${nextSelected ? "[*]" : "[ ]"} ${current.ref.name}@${current.ref.marketplace}`,
+        });
+      });
     },
-  }));
+    onInstall: () => {
+      openSkillManagePanel(ctx);
+    },
+  });
+  ctx.panels.push(browser);
 }
 
 function openAlwaysOnSkillsPanel(ctx: PanelFlowContext): void {
@@ -1388,30 +1412,49 @@ function openAlwaysOnSkillsPanel(ctx: PanelFlowContext): void {
   }));
 }
 
-async function openPluginSkillsPanel(ctx: PanelFlowContext): Promise<void> {
+function groupPluginSkills(pluginSkills: readonly PluginSkillStatus[]): readonly { marketplace: string; items: readonly SkillBrowserItem[] }[] {
+  const grouped = new Map<string, SkillBrowserItem[]>();
+  for (const { ref, enabled, selected } of pluginSkills) {
+    const items = grouped.get(ref.marketplace) ?? [];
+    items.push({
+      id: ref.id,
+      label: `${enabled ? "[*]" : selected ? "[~]" : "[ ]"} ${ref.name}@${ref.marketplace}`,
+      description: `${ref.invocationMode} · ${ref.description}`,
+    });
+    grouped.set(ref.marketplace, items);
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([marketplace, items]) => ({ marketplace, items }));
+}
+
+async function openPluginSkillDetails(ctx: PanelFlowContext, item: SkillBrowserItem): Promise<void> {
   const locale = ctx.locale();
-  const statuses = await (ctx.pluginSkillStatuses?.() ?? Promise.resolve([]));
-  if (statuses.length === 0) {
-    ctx.presenter.setNotice(locale === "zh" ? "没有已安装的插件 Skill。" : "No installed plugin Skills.");
+  const status = (await (ctx.pluginSkillStatuses?.() ?? Promise.resolve([]))).find((entry) => entry.ref.id === item.id);
+  if (!status) {
+    ctx.presenter.setNotice(locale === "zh" ? "找不到这个插件 Skill。" : "Plugin Skill not found.");
     ctx.render();
     return;
   }
-  ctx.panels.push(new MultiSelectPanel({
-    title: locale === "zh" ? "插件 Skill" : "Plugin Skills",
-    hints: locale === "zh" ? "↑↓ 选择 · Space 切换 · Enter 应用 · Esc 返回" : "↑↓ navigate · Space toggle · Enter apply · Esc back",
+  const state = status.enabled ? "enabled" : status.selected ? "selected but blocked" : "not selected";
+  const lines = [
+    `${status.ref.name}@${status.ref.marketplace}`,
+    `State · ${state}`,
+    `Invocation · ${status.ref.invocationMode}`,
+    "",
+    status.ref.description,
+    "",
+    status.ref.userInvocable
+      ? `Explicit invocation · /skill:${status.ref.id} <task>`
+      : "Invocation · model-only via plugin_skill",
+    locale === "zh" ? "在 Skills 列表中按 Space 可直接切换该 Skill。" : "Press Space on this row in Skills to toggle it.",
+  ];
+  ctx.panels.push(new ScrollPanel({
+    title: `${status.ref.name}@${status.ref.marketplace}`,
+    lines,
     maxVisible: maxVisible(ctx.terminalRows),
-    items: statuses.map(({ ref, enabled }) => ({
-      id: ref.id,
-      label: (enabled ? "● enabled" : "○ disabled") + "  " + ref.name + "@" + ref.marketplace,
-      description: `${ref.invocationMode} · ${ref.version ?? "unversioned"}`,
-    })),
-    selectedIds: statuses.filter(({ selected }) => selected).map(({ ref }) => ref.id),
-    currentIds: statuses.filter(({ enabled }) => enabled).map(({ ref }) => ref.id),
+    hints: locale === "zh" ? "Esc 返回 · ↑↓ 滚动" : "Esc back · ↑↓ scroll",
     onClose: ctx.panels.dismiss,
-    onApply: (selectedIds) => {
-      ctx.panels.dismiss();
-      ctx.savePluginSkillSelection?.(selectedIds);
-    },
   }));
 }
 
@@ -1733,6 +1776,105 @@ function openSkillActivationPanel(ctx: PanelFlowContext): void {
 }
 
 type SkillInstallAction = (scope: "user" | "workspace") => void;
+
+/** Install tab hub: install new Qi Skills or remove user/Workspace copies. */
+function openSkillManagePanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const removable = managedQiSkills(ctx.discoveredSkills());
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "skills.manage.title"),
+    hints: t(locale, "skills.hints"),
+    items: [
+      {
+        id: "install",
+        label: t(locale, "skills.install"),
+        description: t(locale, "skills.install.desc"),
+      },
+      {
+        id: "remove",
+        label: t(locale, "skills.remove"),
+        description: removable.length === 0
+          ? t(locale, "skills.remove.empty")
+          : t(locale, "skills.remove.desc", { count: String(removable.length) }),
+      },
+    ],
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      if (item.id === "install") {
+        openSkillInstallSourcePanel(ctx);
+        return;
+      }
+      openSkillRemovePanel(ctx);
+    },
+  }));
+}
+
+function managedQiSkills(skills: readonly PresentedSkill[]): readonly PresentedSkill[] {
+  return skills
+    .filter((skill) => (skill.origin ?? "qi") === "qi")
+    .slice()
+    .sort((left, right) => left.name.localeCompare(right.name) || left.scope.localeCompare(right.scope));
+}
+
+function openSkillRemovePanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  // Prefer active catalog rows (winning scope). Shadowed user copies stay until the
+  // workspace copy is removed, or the operator uses `qi skill remove --scope user`.
+  const removable = managedQiSkills(ctx.discoveredSkills());
+  if (removable.length === 0) {
+    ctx.presenter.setNotice(t(locale, "skills.remove.empty"));
+    ctx.render();
+    return;
+  }
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "skills.remove.title"),
+    hints: t(locale, "skills.remove.hints"),
+    maxVisible: maxVisible(ctx.terminalRows),
+    searchable: true,
+    items: removable.map((skill) => ({
+      id: `${skill.scope}:${skill.name}`,
+      label: skill.name,
+      description: `${skill.scope} · ${skill.origin ?? "qi"} · ${skill.version}`,
+    })),
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      const skill = removable.find((candidate) => `${candidate.scope}:${candidate.name}` === item.id);
+      if (!skill) return;
+      openSkillRemoveConfirmPanel(ctx, skill);
+    },
+  }));
+}
+
+function openSkillRemoveConfirmPanel(ctx: PanelFlowContext, skill: PresentedSkill): void {
+  const locale = ctx.locale();
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "skills.remove.confirm.title", { name: skill.name }),
+    hints: locale === "zh" ? "Enter 确认 · Esc 取消" : "Enter confirm · Esc cancel",
+    items: [
+      {
+        id: "remove",
+        label: t(locale, "skills.remove.confirm"),
+        description: t(locale, "skills.remove.confirm.desc", {
+          name: skill.name,
+          scope: skill.scope,
+        }),
+      },
+      {
+        id: "cancel",
+        label: locale === "zh" ? "取消" : "Cancel",
+      },
+    ],
+    onClose: ctx.panels.dismiss,
+    onSelect: (choice) => {
+      if (choice.id === "cancel") {
+        ctx.panels.dismiss();
+        return;
+      }
+      ctx.panels.closeAll();
+      ctx.removeSkill(skill.name, skill.scope);
+    },
+  }));
+}
 
 function openSkillInstallSourcePanel(ctx: PanelFlowContext): void {
   const locale = ctx.locale();

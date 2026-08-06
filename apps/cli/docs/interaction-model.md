@@ -333,7 +333,9 @@ The `/skills` hub intentionally contains only activation management and installa
 only inside activation management; this panel does not implicitly start a Run. Use an enabled Skill explicitly with
 `/skill:<name> <task>`. Workspace/user Qi Skills are always active and are not toggleable.
 
-`/skills` → **Install skill** opens a scope list (user vs Workspace) then a form for a Skill name or local path.
+`/skills` → **Install** opens install-or-remove management. **Install skill** chooses GitHub/local source, then
+scope (user vs Workspace). **Remove installed Skill** lists Qi-managed user (`$QI_HOME/resources/skills`) and
+Workspace (`.qi/skills`) copies (not global `.agents` Skills), confirms, and deletes the directory plus lock entry.
 Installation is disabled while a Run or another TUI management action is active. A model does not receive
 global-install authority: its `skill install-workspace` operation requires the
 write lease, settles as an ordinary Action, and can only publish a Workspace draft or a named Skill from a

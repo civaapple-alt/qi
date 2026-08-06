@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { SkillCatalog, SkillLoader, loadAgentDefinition } from "@civaapple/qi-node/skills";
 
@@ -107,6 +107,25 @@ test("Skill catalog installs a complete compatible Skill tree while omitting cac
     await writeFile(join(draft, "SKILL.md"), "---\nname: local-helper\ndescription: Local helper\n---\nHelp locally.\n");
     const workspaceInstall = await catalog.install({ source: "skill-drafts/local-helper", scope: "workspace" });
     assert.equal(workspaceInstall.root, join(workspace, ".qi", "skills", "local-helper"));
+
+    const managed = await catalog.listManagedSkills();
+    assert.deepEqual(
+      managed.map((skill) => `${skill.scope}:${skill.name}`).sort(),
+      ["user:skill-creator", "workspace:local-helper"],
+    );
+
+    const removedUser = await catalog.remove("skill-creator");
+    assert.equal(removedUser.scope, "user");
+    await assert.rejects(access(join(userSkills, "skill-creator")));
+    assert.equal((await catalog.discover()).some((skill) => skill.name === "skill-creator"), false);
+    const userLockPath = join(dirname(userSkills), "skills.lock.json");
+    const userLock = JSON.parse(await readFile(userLockPath, "utf8"));
+    assert.equal(userLock.skills["skill-creator"], undefined);
+
+    const removedWorkspace = await catalog.remove("local-helper", { scope: "workspace" });
+    assert.equal(removedWorkspace.scope, "workspace");
+    await assert.rejects(access(join(workspace, ".qi", "skills", "local-helper")));
+    await assert.rejects(catalog.remove("local-helper"), /not installed/);
   });
 });
 

@@ -81,9 +81,9 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/login …` | Provider login; API-key form asks for Key, Base URL (prefilled), and Model. Providers list marks **configured** accounts (sealed key kept). Switch without re-entering the key via Providers → provider → **Switch**, or `/login use <provider>` (e.g. `/login use deepseek` / `volcengine-agent-plan` / `qianwenai` / a `$QI_HOME/providers` overlay id). For a full custom vendor (wire dialect, window, thinking), use Providers → **Add OpenAI-compatible provider** (writes `$QI_HOME/providers/<name>.toml` and seals the key). For thin multi-alias Chat Completions, use **OpenAI Compatible** with a **Name** (e.g. `zhipu`) under `[[compatible]]`. Open a saved name for **Switch / Reconfigure / Logout**, or `/login use <name>`. **Kimi** uses a four-model dropdown plus final custom-model input and shows editable effort/context defaults for API-key and device login. Slash: `/login <provider> key <api-key> [name <id>] [model <id>] [base_url <url>] [effort <level>] [context <tokens>]`. |
 | `/plan [prompt]` | Create a plan from a prompt (switches to Plan mode); bare `/plan` shows the plan / review options |
 | `/plan accept\|revise\|reject …` | Settle a pending Plan review |
-| `/skills` | Horizontal Skills browser: Native, Global Agent, Plugin Skills, and Install tabs; type to search and Enter opens the corresponding selection flow |
+| `/skills` | Horizontal Skills browser: Native, Global Agent, one tab per **enabled** plugin marketplace that has installed Skills, and Install; disabled marketplaces are omitted (same as `/plugins`). Marketplace tabs show enabled/total Skill counts, Space toggles a Skill in place, and Enter opens native/global management or Skill details. **Install** opens install-or-remove: remove deletes user (`$QI_HOME/resources/skills`) or Workspace (`.qi/skills`) Qi copies after confirmation (`qi skill remove [--scope user\|workspace] <name>`) |
 | `/skill:<name> <task>` | Start a Run with a native Skill or `/skill:<marketplace>:<plugin>:<skill>` marketplace Skill |
-| `/plugins [query]` | Marketplace-first plugin browser: ←/→ cycles All, Installed, each enabled marketplace, and Add Marketplace; Add Marketplace lists registered sources and can enable/disable them. Disabling a marketplace also disables its installed plugins but retains their caches; re-enabling does not restore them. Enter offers install/enable/details, and Space enables/disables an installed plugin. A query selects a marketplace tab or seeds the search. |
+| `/plugins [query]` | Marketplace-first plugin browser: ←/→ cycles All, Installed, each **enabled** marketplace, and **Manage**. All/Installed only show plugins from enabled sources (disabled marketplaces’ installed caches stay hidden until re-enabled). Manage lists registered sources (add / sync / enable / browse); Enter on a source opens **Sync catalog** / enable-disable / browse. Sync matches `qi marketplace sync <name>` (GitHub fetch). Disabling a marketplace also disables its plugins but retains caches; re-enabling does not restore plugin enablement. Enter on a plugin offers install/enable/details; Space toggles installed enablement. |
 | `/plugin:<id> <task>` | Start a Run with one enabled marketplace command body |
 | `/agents [query]` | List enabled marketplace agents; invoke with `/agent:<marketplace>:<plugin>:<agent> <task>` |
 | `/agent:<id> <task>` | Start a Run with one enabled marketplace agent profile |
@@ -395,9 +395,12 @@ usable through `/skills` → **启用 / 停用全局 Skill** (Space toggles, Ent
 `~/.claude/skills` are not scanned by default; use an explicit local path or configured compatibility root. Only independently omittable metadata entries enter initial model context, plus a short required
 progressive-discovery hint in the advertised `skill` Tool schema and an optional context index. The `skill` tool
 progressively loads a selected
-`SKILL.md` or named resource. `/skills` → **Install** first chooses GitHub or local source, captures the
-repository plus Skill name (or an explicit local directory), and only then asks for user vs Workspace scope.
-`qi skill install https://github.com/shadcn/ui --skill shadcn` follows the same path: Qi resolves current GitHub
+`SKILL.md` or named resource. `/skills` → **Install** opens install-or-remove management. **Install skill** first chooses GitHub or local
+source, captures the repository plus Skill name (or an explicit local directory), and only then asks for user vs
+Workspace scope. **Remove installed Skill** lists Qi-managed copies under `$QI_HOME/resources/skills` and
+`<workspace>/.qi/skills` (not global `.agents` Skills) and deletes the chosen directory plus its lock entry after
+confirmation. Slash form: `/skill remove [--workspace] <name>`; CLI: `qi skill remove <name> [--scope user|workspace]`.
+`qi skill install https://github.com/shadcn/ui --skill shadcn` follows the install path: Qi resolves current GitHub
 `HEAD` to an exact commit, installs `skills/shadcn`, and records that commit in the Skill lock. A non-standard
 layout may use `--subdir`; exact Git/GitHub commits and SHA-256-pinned HTTPS archives remain available. Remote
 installation is human-initiated only, never triggered by a model mention; review `SKILL.md` before installing.
@@ -460,8 +463,10 @@ Claude-compatible marketplaces (ADR-0037) use an explicit `qi marketplace add` �
 `qi plugin enable` flow, plus `qi marketplace sync|search`, `qi plugin list|commands`, and `qi agent list`.
 GitHub sources may be entered as `github:owner/repo`, `owner/repo`, or a full
 `https://github.com/owner/repo` URL; local checkouts use `local:<path>`. The interactive `/plugins` →
-`Add Marketplace` form accepts the same source formats, then keeps marketplace registration, plugin installation,
-and plugin enablement as separate actions.
+`/plugins` → **Manage** is the marketplace maintenance hub (add source, sync catalog, enable/disable, browse).
+The add form accepts the same source formats. After registration, open a source and choose **Sync catalog** to
+pull the latest GitHub marketplace checkout (same as `qi marketplace sync <name>`). Plugin installation and
+enablement stay separate; re-install a plugin after sync to refresh its immutable cache pin.
 Both `superpowers`' self marketplace and `claude-plugins-official` are supported; install selectors use
 `plugin@marketplace`, while the legacy two-argument install form remains accepted. Plugin Skills are selected in
 `/skills`; their upstream `user-invocable` / `disable-model-invocation` policy controls slash and model discovery.

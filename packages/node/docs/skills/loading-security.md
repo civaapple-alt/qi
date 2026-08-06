@@ -81,9 +81,10 @@ bounded timeout, and startup-frozen interpreter profiles are accepted. Host exec
 trust boundary and settles through the ordinary Action/Effect Journal path; Ask and Plan modes deny it.
 
 Claude-compatible plugin Skills use a separate `plugin_skill` catalog backed by the immutable plugin cache. They
-are never merged into native `/skills` names, and a Run snapshots enabled, individually selected Skills before
-model execution. Only model-invocable Skills appear through `plugin_skill`; user-only Skills require an explicit
-`/skill:<marketplace>:<plugin>:<skill>` Run. `run-script` remains Execute-authorized.
+are never merged into native `/skills` names, and a Run snapshots the enabled plugin Skills before model
+execution. Model-invocable Skills are included automatically when their Plugin is enabled unless the user has
+persisted an explicit opt-out; user-only Skills require an explicit `/skill:<marketplace>:<plugin>:<skill>` Run.
+`run-script` remains Execute-authorized.
 Extensionless plugin scripts are accepted only with the exact `#!/usr/bin/env bash` shebang. Plugin hooks,
 lifecycle commands, visual companion servers, and dependency installers are rejected or explicitly unavailable.
 

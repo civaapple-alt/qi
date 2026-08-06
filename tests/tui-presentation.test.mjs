@@ -17,6 +17,7 @@ import {
   ListPanel,
   MultiSelectPanel,
   QuestionPanel,
+  SkillBrowserPanel,
   loadProjectConfig,
   openJobsHubPanel,
   openSkillsHubPanel,
@@ -2613,7 +2614,7 @@ test("/skills exposes always-on catalog, activation management, and installation
   const hubText = hub.render(100).join("\n");
   assert.match(hubText, /Native \(1\)/);
   assert.match(hubText, /Global Agent \(1\)/);
-  assert.match(hubText, /Plugin Skills \(0\)/);
+  assert.doesNotMatch(hubText, /Plugin Skills/);
   assert.match(hubText, /Install/);
   assert.match(hubText, /prompting-guide/);
 
@@ -2636,6 +2637,173 @@ test("/skills exposes always-on catalog, activation management, and installation
   activation.handleInput(" ");
   activation.handleInput("\r");
   assert.deepEqual(applied, []);
+});
+
+test("Skills Install tab offers remove for user/Workspace Qi Skills", () => {
+  /** @type {{ name: string, scope: string }[]} */
+  const removed = [];
+  const pushed = [];
+  const ctx = {
+    panels: {
+      depth: 0,
+      push(panel) { pushed.push(panel); },
+      closeAll() { pushed.length = 0; },
+      dismiss() { pushed.pop(); },
+    },
+    presenter: {
+      setNotice() {},
+    },
+    locale: () => "zh",
+    terminalRows: 40,
+    discoveredSkills: () => [
+      {
+        name: "user-helper",
+        version: "1.0.0",
+        description: "User installed",
+        scope: "user",
+        origin: "qi",
+      },
+      {
+        name: "project-agent",
+        version: "unversioned",
+        description: "Workspace agent",
+        scope: "workspace",
+        origin: "agent",
+      },
+    ],
+    skillCandidates: () => [],
+    saveAgentSkillActivation() {},
+    installSkill() {},
+    installGithubSkill() {},
+    removeSkill(name, scope) { removed.push({ name, scope }); },
+    render() {},
+  };
+
+  openSkillsHubPanel(ctx);
+  const hub = pushed[0];
+  hub.handleInput("\t"); // Global Agent
+  hub.handleInput("\t"); // Install
+  assert.match(stripVTControlCharacters(hub.render(100).join("\n")), /Install \/ Remove|Install/);
+  hub.handleInput("\r");
+  const manage = pushed.at(-1);
+  const manageText = stripVTControlCharacters(manage.render(100).join("\n"));
+  assert.match(manageText, /安装技能|Install skill/);
+  assert.match(manageText, /删除已安装 Skill|Remove installed Skill/);
+  manage.handleInput("\u001b[B"); // remove row
+  manage.handleInput("\r");
+  const list = pushed.at(-1);
+  assert.match(stripVTControlCharacters(list.render(100).join("\n")), /user-helper/);
+  assert.doesNotMatch(stripVTControlCharacters(list.render(100).join("\n")), /project-agent/);
+  list.handleInput("\r");
+  const confirm = pushed.at(-1);
+  assert.match(stripVTControlCharacters(confirm.render(100).join("\n")), /确认删除|Confirm remove/);
+  confirm.handleInput("\r");
+  assert.deepEqual(removed, [{ name: "user-helper", scope: "user" }]);
+});
+
+test("Skills browser splits marketplace Skills into per-market tabs", () => {
+  const selected = [];
+  const toggled = [];
+  const panel = new SkillBrowserPanel({
+    native: [],
+    global: [],
+    pluginMarkets: [
+      { marketplace: "mattpocock", items: [{ id: "matt:ask", label: "[ ] ask-matt@mattpocock", description: "user-only" }] },
+      { marketplace: "claude-plugins-official", items: [{ id: "official:design", label: "[ ] frontend-design@claude-plugins-official", description: "user+model" }] },
+    ],
+    onSelect: (tab, item) => selected.push([tab, item.id]),
+    onToggle: (tab, item) => toggled.push([tab, item.id]),
+    onInstall: () => {},
+    onClose: () => {},
+  });
+  const initial = stripVTControlCharacters(panel.render(100).join("\n"));
+  assert.match(initial, /Native \(0\)/);
+  assert.match(initial, /Global Agent \(0\)/);
+  assert.match(initial, /claude-plugins-official \(0\/1\)/);
+  assert.match(initial, /mattpocock \(0\/1\)/);
+  assert.doesNotMatch(initial, /Plugin Skills/);
+
+  panel.handleInput("\t"); // Global Agent
+  panel.handleInput("\t"); // claude-plugins-official
+  panel.handleInput("\t"); // mattpocock
+  panel.handleInput(" ");
+  assert.deepEqual(toggled, [["plugin:mattpocock", "matt:ask"]]);
+  panel.updateItem({ id: "matt:ask", label: "[*] ask-matt@mattpocock", description: "user-only" });
+  assert.match(stripVTControlCharacters(panel.render(100).join("\n")), /mattpocock \(1\/1\)/);
+  panel.handleInput("\r");
+  assert.deepEqual(selected, [["plugin:mattpocock", "matt:ask"]]);
+});
+
+test("Skills hub omits disabled plugin marketplaces from horizontal tabs", async () => {
+  const pushed = [];
+  const ctx = {
+    panels: {
+      depth: 0,
+      push(panel) { pushed.push(panel); },
+      closeAll() {},
+      dismiss() { pushed.pop(); },
+    },
+    presenter: {
+      setNotice() {},
+    },
+    locale: () => "en",
+    terminalRows: 40,
+    discoveredSkills: () => [],
+    skillCandidates: () => [],
+    saveAgentSkillActivation() {},
+    render() {},
+    pluginSkillStatuses: async () => [
+      {
+        ref: {
+          id: "enabled-mkt:plugin:alpha",
+          pluginKey: "plugin@enabled-mkt",
+          plugin: "plugin",
+          marketplace: "enabled-mkt",
+          name: "alpha",
+          description: "from enabled marketplace",
+          path: "/tmp/alpha",
+          userInvocable: true,
+          modelInvocable: true,
+          invocationMode: "user+model",
+        },
+        enabled: true,
+        selected: true,
+      },
+      {
+        ref: {
+          id: "disabled-mkt:plugin:beta",
+          pluginKey: "plugin@disabled-mkt",
+          plugin: "plugin",
+          marketplace: "disabled-mkt",
+          name: "beta",
+          description: "from disabled marketplace",
+          path: "/tmp/beta",
+          userInvocable: true,
+          modelInvocable: false,
+          invocationMode: "user-only",
+        },
+        enabled: false,
+        selected: true,
+        blockedReason: "plugin-disabled",
+      },
+    ],
+    listEnabledMarketplaces: async () => ["enabled-mkt"],
+  };
+
+  openSkillsHubPanel(ctx);
+  await new Promise((resolve) => setImmediate(resolve));
+  const hub = pushed.at(-1);
+  assert.ok(hub, "Skills hub panel should open after marketplace filter resolves");
+  const text = stripVTControlCharacters(hub.render(100).join("\n"));
+  assert.match(text, /Native \(0\)/);
+  assert.match(text, /enabled-mkt \(1\/1\)/);
+  assert.doesNotMatch(text, /disabled-mkt/);
+
+  hub.handleInput("\t"); // Global Agent
+  hub.handleInput("\t"); // enabled-mkt
+  const marketText = stripVTControlCharacters(hub.render(100).join("\n"));
+  assert.match(marketText, /alpha@enabled-mkt/);
+  assert.doesNotMatch(marketText, /beta@disabled-mkt/);
 });
 
 test("info notices expire while Run notices remain until explicitly cleared", () => {
@@ -4383,7 +4551,7 @@ test("MultiSelectPanel Space toggles and Enter applies selected capability ids",
 test("PluginBrowserPanel groups marketplace entries, filters, and separates details from enablement", () => {
   const opened = [];
   const toggled = [];
-  let addMarketplace = false;
+  let manageMarketplaces = false;
   const panel = new PluginBrowserPanel({
     items: [
       { id: "alpha:review", pluginName: "review", name: "Review", marketplace: "alpha", description: "Review pull requests", installed: true, enabled: true, version: "1.0.0" },
@@ -4393,7 +4561,7 @@ test("PluginBrowserPanel groups marketplace entries, filters, and separates deta
     marketplaces: ["alpha", "beta"],
     onOpen: (item) => opened.push(item.id),
     onToggle: (item) => toggled.push(item.id),
-    onAddMarketplace: () => { addMarketplace = true; },
+    onManageMarketplaces: () => { manageMarketplaces = true; },
     onClose: () => {},
   });
   const initial = stripVTControlCharacters(panel.render(90).join("\n"));
@@ -4412,9 +4580,10 @@ test("PluginBrowserPanel groups marketplace entries, filters, and separates deta
   panel.handleInput("\r");
   assert.deepEqual(opened, ["alpha:review"]);
   panel.handleInput("\t"); // beta tab
-  panel.handleInput("\t"); // Add Marketplace
+  panel.handleInput("\t"); // Manage
+  assert.match(stripVTControlCharacters(panel.render(90).join("\n")), /Manage marketplaces/);
   panel.handleInput("\r");
-  assert.equal(addMarketplace, true);
+  assert.equal(manageMarketplaces, true);
 });
 
 test("QuestionPanel answers multiple/text questions and persists Esc as skip", () => {

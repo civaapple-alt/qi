@@ -107,7 +107,7 @@ commit, or local directories hashed by content. It downloads/checks out into sta
 scripts, validates the tree and manifest, then publishes immutable content to `packages/store/sha256-*`.
 Resource registration does not grant authority. Plugin Skills remain untrusted context; hooks, lifecycle entrypoints,
 visual companion servers, and dependency installers are outside the Qi contract. Superpowers can be installed from
-either its self marketplace or `claude-plugins-official` at the pinned source revision, with only one same-name
-marketplace enabled at a time.
+either its self marketplace or `claude-plugins-official` (sync/reinstall allowed; bootstrap requires structural
+`using-superpowers` path checks), with only one same-name marketplace enabled at a time.
 
 Detailed adapter contracts live under [`docs/`](docs/).

@@ -282,6 +282,51 @@ export class SkillCatalog {
     return digestInstallFiles(await collectInstallFiles(skill.root));
   }
 
+  /**
+   * Lists Qi-managed Skills that human operators may remove: copies under
+   * `$QI_HOME/resources/skills` and `<workspace>/.qi/skills`. Agent / global
+   * `.agents` Skills are never included.
+   */
+  async listManagedSkills(): Promise<readonly CatalogSkill[]> {
+    const user = await this.#discoverScope(this.userSkillsRoot, "user", "qi");
+    const workspace = await this.#discoverScope(this.workspaceSkillsRoot, "workspace", "qi");
+    return Object.freeze(
+      [...workspace, ...user].sort((left, right) =>
+        left.name.localeCompare(right.name) || left.scope.localeCompare(right.scope)),
+    );
+  }
+
+  /**
+   * Human-operated removal of a Qi-managed Skill tree. Only deletes directories
+   * under the user or Workspace Qi roots and drops the matching lock entry.
+   * Agent roots, symbolic links, and non-directory targets are rejected.
+   */
+  async remove(name: string, options: { scope?: SkillScope } = {}): Promise<CatalogSkill> {
+    if (!skillNamePattern.test(name)) throw new TypeError(`Invalid Skill name: ${name}`);
+    const scope = options.scope ?? (await this.#resolveManagedScope(name));
+    const skillsRoot = scope === "workspace" ? this.workspaceSkillsRoot : this.userSkillsRoot;
+    const parent = await this.#managedSkillsRoot(skillsRoot, scope);
+    const target = resolve(parent, name);
+    assertContained(parent, target, "Skill");
+    let info;
+    try {
+      info = await lstat(target);
+    } catch (error) {
+      if (isMissing(error)) throw new Error(`Skill ${name} is not installed in ${scope} scope`);
+      throw error;
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error(`Skill ${name} must be a real directory under the ${scope} Qi root`);
+    }
+    const summary = await this.#loader.inspect(await realpath(target));
+    if (summary.name !== name) {
+      throw new Error(`Skill directory ${name} declares metadata name ${summary.name}; refusing remove`);
+    }
+    await rm(target, { recursive: true, force: false });
+    await removeSkillLockEntry(skillsRoot, name);
+    return Object.freeze({ ...summary, scope, origin: "qi" as const });
+  }
+
   async install(request: SkillInstallRequest): Promise<InstalledSkill> {
     const scope = request.scope ?? "user";
     const sourceRoot = await this.#resolveSource(request.source);
@@ -527,6 +572,32 @@ export class SkillCatalog {
     return skill;
   }
 
+  async #resolveManagedScope(name: string): Promise<SkillScope> {
+    const managed = await this.listManagedSkills();
+    const matches = managed.filter((skill) => skill.name === name);
+    if (matches.length === 0) throw new Error(`Skill ${name} is not installed under a Qi-managed root`);
+    if (matches.length > 1) {
+      throw new Error(
+        `Skill ${name} exists in both user and workspace scopes; pass --scope user|workspace`,
+      );
+    }
+    return matches[0]!.scope;
+  }
+
+  async #managedSkillsRoot(skillsRoot: string, scope: SkillScope): Promise<string> {
+    let info;
+    try {
+      info = await lstat(skillsRoot);
+    } catch (error) {
+      if (isMissing(error)) throw new Error(`No Skills are installed in ${scope} scope`);
+      throw error;
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error(`${scope} Skill root must be a real directory: ${skillsRoot}`);
+    }
+    return realpath(skillsRoot);
+  }
+
   async #workspaceSkillRoot(name: string): Promise<string> {
     if (!skillNamePattern.test(name)) throw new TypeError(`Invalid Skill name: ${name}`);
     const parent = await ensureRealDirectory(this.workspaceSkillsRoot);
@@ -763,10 +834,7 @@ async function writeSkillLock(
   digest: string,
   source: SkillSourceProvenance | { type: "local"; resolved: string; subdir: string },
 ): Promise<void> {
-  const scope = skillsRoot.endsWith(`${sep}.qi${sep}skills`) ? "workspace" : "user";
-  const lockPath = scope === "workspace"
-    ? resolve(dirname(skillsRoot), "skills.lock.json")
-    : resolve(dirname(skillsRoot), "skills.lock.json");
+  const lockPath = skillLockPath(skillsRoot);
   let current: { schemaVersion: 1; skills: Record<string, unknown> } = { schemaVersion: 1, skills: {} };
   try {
     current = JSON.parse(await readFile(lockPath, "utf8")) as typeof current;
@@ -786,6 +854,30 @@ async function writeSkillLock(
   const temporary = `${lockPath}.${randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(current, null, 2)}\n`, { flag: "wx" });
   await rename(temporary, lockPath);
+}
+
+async function removeSkillLockEntry(skillsRoot: string, name: string): Promise<void> {
+  const lockPath = skillLockPath(skillsRoot);
+  let current: { schemaVersion: 1; skills: Record<string, unknown> };
+  try {
+    current = JSON.parse(await readFile(lockPath, "utf8")) as typeof current;
+    if (current.schemaVersion !== 1 || typeof current.skills !== "object" || current.skills === null) {
+      throw new TypeError(`Invalid Skill lock: ${lockPath}`);
+    }
+  } catch (error) {
+    if (isMissing(error)) return;
+    throw error;
+  }
+  if (!(name in current.skills)) return;
+  delete current.skills[name];
+  await mkdir(dirname(lockPath), { recursive: true });
+  const temporary = `${lockPath}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(current, null, 2)}\n`, { flag: "wx" });
+  await rename(temporary, lockPath);
+}
+
+function skillLockPath(skillsRoot: string): string {
+  return resolve(dirname(skillsRoot), "skills.lock.json");
 }
 
 async function ensureRealDirectory(path: string): Promise<string> {

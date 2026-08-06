@@ -1329,6 +1329,17 @@ export class TuiRuntime {
     return installed;
   }
 
+  async removeSkill(name: string, scope?: SkillScope): Promise<CatalogSkill> {
+    if (this.active) throw new Error("Cannot remove a Skill while a Run is active");
+    const removed = await this.#skills.remove(name, scope === undefined ? {} : { scope });
+    await this.refreshSkills();
+    return removed;
+  }
+
+  async listManagedSkills(): Promise<readonly CatalogSkill[]> {
+    return this.#skills.listManagedSkills();
+  }
+
   async mcpStatuses() {
     return this.#mcp.statuses();
   }
@@ -1704,9 +1715,8 @@ export class TuiRuntime {
     for (const key of await catalog.listEnabled()) {
       const record = await catalog.getInstalled(key);
       if (record.name !== "superpowers") continue;
-      const bootstrap = await loadSuperpowersBootstrap(record);
-      if (!bootstrap) throw new Error(`Enabled Superpowers ${key} is not the supported pinned Qi source`);
-      return bootstrap;
+      // Structural checks (plugin.json + using-superpowers path); no fixed commit/version pin.
+      return loadSuperpowersBootstrap(record);
     }
     return undefined;
   }
@@ -2066,15 +2076,23 @@ export class TuiRuntime {
       });
       const superpowers = await this.#superpowersBootstrap();
       if (superpowers) {
+        const provenance = superpowers.commit ?? superpowers.version ?? superpowers.bootstrapSkill;
         contextBlocks.push({
           id: `plugin:superpowers:bootstrap:${superpowers.digest.slice(0, 16)}`,
           kind: "skill",
-          source: `qi:plugin:${superpowers.pluginKey}:${superpowers.commit}`,
+          source: `qi:plugin:${superpowers.pluginKey}:${provenance}`,
           role: "user",
-          content: `<active-superpowers plugin="${xmlAttribute(superpowers.pluginKey)}" commit="${superpowers.commit}" instructions-sha256="${superpowers.digest}">\n${xmlText(superpowers.instructions)}\n</active-superpowers>`,
+          content: [
+            `<active-superpowers plugin="${xmlAttribute(superpowers.pluginKey)}"`,
+            superpowers.commit ? ` commit="${xmlAttribute(superpowers.commit)}"` : "",
+            superpowers.version ? ` version="${xmlAttribute(superpowers.version)}"` : "",
+            ` skill="${xmlAttribute(superpowers.bootstrapSkill)}"`,
+            ` instructions-sha256="${superpowers.digest}">`,
+            `\n${xmlText(superpowers.instructions)}\n</active-superpowers>`,
+          ].join(""),
           priority: 94,
           required: true,
-          retentionReason: "Enabled canonical Superpowers bootstrap",
+          retentionReason: "Enabled Superpowers bootstrap (structural skill path)",
         });
       }
       contextBlocks.push(...(options.extraContextBlocks ?? []));

@@ -82,7 +82,7 @@ test("marketplace registry local add + install + enable + /plugin command resolv
   }
 });
 
-test("manifest-declared nested Skills are selected independently and preserve invocation policy", async () => {
+test("manifest-declared nested Skills honor user-only and automatic model invocation policy", async () => {
   const qiHome = await mkdtemp(join(tmpdir(), "qi-plugins-skill-"));
   try {
     await ensureQiLayout(qiHome);
@@ -98,11 +98,24 @@ test("manifest-declared nested Skills are selected independently and preserve in
     assert.deepEqual(statuses.map((entry) => entry.ref.name), ["frontend-design", "model-review"]);
     assert.equal(statuses[0].ref.invocationMode, "user-only");
     assert.equal(statuses[1].ref.invocationMode, "model-only");
+    assert.equal(statuses[0].selected, false);
+    assert.equal(statuses[1].selected, true);
+    assert.equal(statuses[1].enabled, true);
+    assert.deepEqual((await plugins.listSkills()).map((entry) => entry.id), ["fixture-marketplace:frontend-design:model-review"]);
     await plugins.enableSkill("fixture-marketplace:frontend-design:frontend-design");
     const selected = await plugins.listSkills();
-    assert.deepEqual(selected.map((entry) => entry.id), ["fixture-marketplace:frontend-design:frontend-design"]);
+    assert.deepEqual(selected.map((entry) => entry.id), [
+      "fixture-marketplace:frontend-design:frontend-design",
+      "fixture-marketplace:frontend-design:model-review",
+    ]);
     await assert.rejects(
       () => plugins.resolveModelSkill(installed.key, "frontend-design"),
+      /model-invocable/,
+    );
+    await plugins.disableSkill("fixture-marketplace:frontend-design:model-review");
+    assert.deepEqual((await plugins.listSkills()).map((entry) => entry.id), ["fixture-marketplace:frontend-design:frontend-design"]);
+    await assert.rejects(
+      () => plugins.resolveModelSkill(installed.key, "model-review"),
       /model-invocable/,
     );
     await plugins.enableSkill("fixture-marketplace:frontend-design:model-review");
@@ -122,9 +135,13 @@ test("catalog supports the TUI add → install → enable plugin flow", async ()
     const plugins = new PluginCatalog(qiHome, registry, installer);
     const marketplace = await plugins.addMarketplace("fixture-marketplace", { kind: "local", path: fixtureMarketplace });
     assert.equal(marketplace.name, "fixture-marketplace");
+    const synced = await plugins.syncMarketplace(marketplace.name);
+    assert.equal(synced.name, marketplace.name);
+    assert.ok(synced.lastUpdated);
     const disabled = await plugins.setMarketplaceEnabled(marketplace.name, false);
     assert.equal(disabled.enabled, false);
     await assert.rejects(() => plugins.searchMarketplace(marketplace.name, ""), /disabled/);
+    await assert.rejects(() => plugins.syncMarketplace(marketplace.name), /disabled/);
     await plugins.setMarketplaceEnabled(marketplace.name, true);
     const installed = await plugins.installMarketplacePlugin("fixture-marketplace", "frontend-design");
     assert.equal(installed.record.key, "frontend-design@fixture-marketplace");

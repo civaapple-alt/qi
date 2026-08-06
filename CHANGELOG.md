@@ -16,6 +16,9 @@ backup plus reset or a new data root rather than an automatic migration.
 - Marketplace Skills now support manifest-declared nested paths, independent per-Skill enablement, fixed
   user/model invocation policy, and pin-confirmed activation. `/skill:` accepts enabled marketplace Skills;
   `/plugin:` now invokes commands only.
+- Enabled plugins now expose model-invocable Skills automatically; Skills marked
+  `disable-model-invocation: true` remain user-only and require explicit selection. Users can still explicitly
+  disable an otherwise model-invocable Skill per plugin pin.
 - Claude-compatible plugin marketplace (ADR-0037): `qi marketplace` / `qi plugin` / `qi agent`, TUI
   `/plugins` · `/plugin:<id>` · `/agents` · `/agent:<id>`, vendored skills/commands/MCP declarations/agents from
   `claude-plugins-official`-shaped catalogs. MCP still requires human bind; hooks/LSP are unsupported.
@@ -34,11 +37,27 @@ backup plus reset or a new data root rather than an automatic migration.
 - TUI `/skill:` autocomplete now offers active Skill names with prefix filtering; selecting a name still requires a
   user task before execution.
 - Superpowers plugin integration: install from either the `superpowers` self marketplace or
-  `claude-plugins-official`, enforce the pinned `6.2.0` commit, inject the required bootstrap, and expose its
+  `claude-plugins-official`, inject the `using-superpowers` bootstrap when structural checks pass, and expose its
   bounded Skills/resources/scripts through the model-facing `plugin_skill` Tool.
+- `/skills` → **Install** can remove Qi-managed Skills installed under `$QI_HOME/resources/skills` or
+  `<workspace>/.qi/skills` (with confirmation). CLI: `qi skill remove <name> [--scope user|workspace]`;
+  slash: `/skill remove [--workspace] <name>`. Global `.agents` Skills stay enable/disable-only and are not
+  deleted by this path.
+- `/plugins` → **Manage** tab (formerly Add Marketplace) is the marketplace maintenance hub: list sources, add,
+  **Sync catalog** (GitHub fetch, same as `qi marketplace sync <name>`), enable/disable, and browse. Sync
+  refreshes the marketplace catalog only; re-install a plugin to pick up content pin changes.
+- Superpowers bootstrap no longer requires a fixed commit/version pin. An enabled `superpowers` plugin injects
+  bootstrap after structural checks (`plugin.json` name + `skills/using-superpowers/SKILL.md`); marketplace sync
+  and re-install can refresh content. Missing bootstrap Skill fails closed.
 
 ### Fixed
 
+- `/plugins` **All** and **Installed** tabs no longer list plugins from disabled marketplaces. Only enabled
+  marketplace catalogs (plus installed rows still declared or orphaned under those sources) appear; caches from
+  disabled sources remain on disk under **Manage**.
+- `/skills` marketplace tabs now omit disabled plugin marketplaces, matching `/plugins`. Installed Skill caches
+  from a disabled source remain on disk but no longer appear as horizontal tabs until the marketplace is
+  re-enabled.
 - TUI `Add Marketplace` now accepts full `https://github.com/<owner>/<repo>` inputs and stores the canonical
   `owner/repo` source used by the marketplace synchronizer.
 - Windows GitHub Skill installs no longer fail while removing a still-open Git pack file (`EBUSY`). Git metadata
@@ -61,8 +80,10 @@ backup plus reset or a new data root rather than an automatic migration.
 - Marketplace sources now have their own persisted enabled state. Disabled sources are omitted from plugin
   browsing and reject sync/install. Disabling a source also disables its installed plugins while retaining their
   caches; re-enabling a source does not restore plugin enablement.
-- `/skills` now uses the same compact horizontal browser pattern with Native, Global Agent, Plugin Skills, and
-  Install tabs; detailed selection remains an explicit Enter action.
+- `/skills` now uses the same compact horizontal browser pattern with Native, Global Agent, one tab per enabled
+  plugin marketplace that has installed Skills, and Install. Disabled marketplaces are omitted (same as
+  `/plugins`). Space toggles the selected marketplace Skill directly; Enter opens Skill details or the
+  native/global management flow. Marketplace tabs show enabled/total counts and update in place.
 - `/plugins` and `/agents` now show every installed plugin with its `name@marketplace`, enabled/installed state,
   source kind, and command/agent marketplace. `/skills` adds a separate plugin-Skill view (still distinct from
   native `/skill:` activation); entries stay single-line so long descriptions do not distort panel row height.

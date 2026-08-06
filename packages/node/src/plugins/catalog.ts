@@ -35,6 +35,7 @@ interface PluginEnablementRecord {
   enabled: boolean;
   acceptedPin?: string;
   skills: string[];
+  disabledSkills: string[];
 }
 
 interface PluginEnablementState {
@@ -81,6 +82,7 @@ export class PluginCatalog {
       enabled: true,
       acceptedPin: record.pin,
       skills: (previous?.skills ?? []).filter((name) => refs.some((ref) => ref.name === name)),
+      disabledSkills: (previous?.disabledSkills ?? []).filter((name) => refs.some((ref) => ref.name === name)),
     };
     await this.#writeEnabled(enabled);
     return { key, enabled: true, ...(previous && previous.acceptedPin !== record.pin ? { needsConfirmation: true } : {}) };
@@ -88,7 +90,7 @@ export class PluginCatalog {
 
   async disable(key: string): Promise<EnabledPluginState> {
     const enabled = await this.#readEnabled();
-    const current = enabled.plugins[key] ?? { enabled: false, skills: [] };
+    const current = enabled.plugins[key] ?? { enabled: false, skills: [], disabledSkills: [] };
     enabled.plugins[key] = { ...current, enabled: false };
     await this.#writeEnabled(enabled);
     return { key, enabled: false };
@@ -136,6 +138,11 @@ export class PluginCatalog {
 
   async listMarketplaces(): Promise<readonly KnownMarketplace[]> {
     return this.#registry.list();
+  }
+
+  /** Refresh a marketplace catalog (GitHub fetch/checkout or local metadata). Requires the source to be enabled. */
+  async syncMarketplace(name: string): Promise<KnownMarketplace> {
+    return this.#registry.sync(name);
   }
 
   async setMarketplaceEnabled(name: string, enabled: boolean): Promise<KnownMarketplace> {
@@ -198,9 +205,9 @@ export class PluginCatalog {
     const refs: PluginSkillRef[] = [];
     for (const key of await this.listEnabled()) {
       const record = await this.#installer.getInstalled(key);
-      const selected = await this.#selectedSkillNames(record.key);
-      refs.push(...(await listPluginSkills(record.cachePath, record.name, record.marketplace, record.key))
-        .filter((ref) => selected.has(ref.name)));
+      const pluginRefs = await listPluginSkills(record.cachePath, record.name, record.marketplace, record.key);
+      const selected = await this.#selectedSkillNames(record.key, pluginRefs);
+      refs.push(...pluginRefs.filter((ref) => selected.has(ref.name)));
     }
     return filterByQuery(refs, query);
   }
@@ -213,7 +220,9 @@ export class PluginCatalog {
       const plugin = state.plugins[record.key];
       const pinMatches = plugin?.acceptedPin === record.pin;
       const pluginEnabled = Boolean(plugin?.enabled && pinMatches);
-      const selected = new Set(plugin?.skills ?? []);
+      const selected = plugin === undefined
+        ? new Set<string>()
+        : new Set(refs.filter((ref) => isSkillSelected(ref, plugin)).map((ref) => ref.name));
       for (const ref of refs) statuses.push(Object.freeze({
         ref,
         selected: selected.has(ref.name),
@@ -236,9 +245,9 @@ export class PluginCatalog {
     for (const key of await this.listEnabled()) {
       const record = await this.#installer.getInstalled(key);
       plugins.push(record);
-      const selected = await this.#selectedSkillNames(record.key);
-      skills.push(...(await listPluginSkills(record.cachePath, record.name, record.marketplace, record.key))
-        .filter((ref) => selected.has(ref.name)));
+      const pluginRefs = await listPluginSkills(record.cachePath, record.name, record.marketplace, record.key);
+      const selected = await this.#selectedSkillNames(record.key, pluginRefs);
+      skills.push(...pluginRefs.filter((ref) => selected.has(ref.name)));
     }
     return Object.freeze({ plugins: Object.freeze(plugins), skills: Object.freeze(skills) });
   }
@@ -346,9 +355,11 @@ export class PluginCatalog {
     return { ref, body: loaded.body, digest };
   }
 
-  async #selectedSkillNames(key: string): Promise<Set<string>> {
+  async #selectedSkillNames(key: string, refs: readonly PluginSkillRef[]): Promise<Set<string>> {
     const state = await this.#readEnabled();
-    return new Set(state.plugins[key]?.skills ?? []);
+    const plugin = state.plugins[key];
+    if (!plugin) return new Set();
+    return new Set(refs.filter((ref) => isSkillSelected(ref, plugin)).map((ref) => ref.name));
   }
 
   async #setSkill(selector: string, selected: boolean): Promise<PluginSkillStatus> {
@@ -362,8 +373,20 @@ export class PluginCatalog {
       throw new Error(`Enable plugin ${record.key} before changing Skill selection`);
     }
     const skills = new Set(plugin.skills);
-    if (selected) skills.add(found.ref.name); else skills.delete(found.ref.name);
-    state.plugins[record.key] = { ...plugin, skills: [...skills].sort() };
+    const disabledSkills = new Set(plugin.disabledSkills);
+    if (found.ref.modelInvocable) {
+      if (selected) disabledSkills.delete(found.ref.name); else disabledSkills.add(found.ref.name);
+      skills.delete(found.ref.name);
+    } else if (selected) {
+      skills.add(found.ref.name);
+    } else {
+      skills.delete(found.ref.name);
+    }
+    state.plugins[record.key] = {
+      ...plugin,
+      skills: [...skills].sort(),
+      disabledSkills: [...disabledSkills].sort(),
+    };
     await this.#writeEnabled(state);
     return Object.freeze({ ref: found.ref, selected, enabled: selected });
   }
@@ -382,6 +405,9 @@ export class PluginCatalog {
             enabled: Boolean(value.enabled),
             ...(typeof value.acceptedPin === "string" ? { acceptedPin: value.acceptedPin } : {}),
             skills: Array.isArray(value.skills) ? value.skills.filter((item): item is string => typeof item === "string") : [],
+            disabledSkills: Array.isArray(value.disabledSkills)
+              ? value.disabledSkills.filter((item): item is string => typeof item === "string")
+              : [],
           };
         }
         return { schemaVersion: 2, plugins };
@@ -396,6 +422,7 @@ export class PluginCatalog {
           enabled: Boolean(value),
           ...(record === undefined ? {} : { acceptedPin: record.pin }),
           skills: Boolean(value) ? refs.map((ref) => ref.name) : [],
+          disabledSkills: [],
         };
       }
       const migrated = { schemaVersion: 2 as const, plugins };
@@ -424,6 +451,11 @@ function filterByQuery<T extends { readonly id: string; readonly name: string; r
     ? refs
     : refs.filter((entry) => `${entry.id}\n${entry.name}\n${entry.plugin}\n${entry.description}`.toLowerCase().includes(needle));
   return Object.freeze([...filtered].sort((left, right) => left.id.localeCompare(right.id)));
+}
+
+function isSkillSelected(ref: PluginSkillRef, plugin: PluginEnablementRecord): boolean {
+  if (ref.modelInvocable) return !plugin.disabledSkills.includes(ref.name);
+  return plugin.skills.includes(ref.name);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

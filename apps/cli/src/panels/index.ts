@@ -46,6 +46,7 @@ export {
 export {
   SkillBrowserPanel,
   type SkillBrowserItem,
+  type SkillBrowserPluginMarket,
   type SkillBrowserPanelOptions,
   type SkillBrowserTab,
 } from "./skill-browser-panel.js";

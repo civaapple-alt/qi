@@ -855,11 +855,16 @@ failed versus indeterminate settlement; explicit rejection of unsupported client
 - Catalog entries must surface `supported | partial | unsupported` so hooks/LSP-only plugins are not presented as
   equivalent to Claude Code. `plugins/` and `external_plugins/` differ only by marketplace `source` path.
 - Plugin Skills remain a separate model-facing `plugin_skill` Tool catalog, but `/skills` is the unified human
-  selection surface. A plugin and each selected Skill are pinned at Run start; a changed pin requires a new
-  plugin confirmation before it becomes effective. Same-name plugins from different marketplaces may both be
-  installed, but only one may be enabled at a time. Superpowers `6.2.0` is accepted only at commit
-  `44c9b2d6e889982ac18c27d05a19fefe335194e1`; its bootstrap maps supported workflows to Qi and explicitly degrades
-  visual companion, hooks, lifecycle, and dependency-installer behavior.
+  selection surface. Enabling a plugin automatically exposes its Skills unless their frontmatter sets
+  `disable-model-invocation: true`; those user-only Skills require explicit selection. A user may explicitly
+  disable an otherwise model-invocable Skill, and that opt-out is persisted per plugin pin. A plugin and each
+  effective Skill are pinned at Run start; a changed pin requires a new plugin confirmation before it becomes
+  effective. Same-name plugins from different marketplaces may both be installed, but only one may be enabled at
+  a time. Superpowers bootstrap (auto-injected when the enabled plugin is named `superpowers`) is gated by
+  structural checks only: `.claude-plugin/plugin.json` name `superpowers` and a loadable
+  `skills/using-superpowers/SKILL.md` (frontmatter name when present). Fixed upstream commit/version pins are not
+  required so marketplace sync + reinstall can refresh content; the bootstrap still maps workflows to Qi Tools and
+  explicitly degrades visual companion, hooks, lifecycle, and dependency-installer behavior.
 - Phased coverage: P0 registry/sync/search; P1 skills+commands; P2 MCP declarations; P3 agents; P4 pinned URL
   sources, dual Superpowers marketplaces, plugin Skill Tool, and Run snapshots. Hooks/LSP remain permanently out of scope.
 
