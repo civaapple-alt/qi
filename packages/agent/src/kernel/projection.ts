@@ -833,6 +833,14 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       view.mode = event.data.to;
       break;
     }
+    case "session.retitled": {
+      const next = event.data.title.trim();
+      if (!next) fail("SESSION_TITLE_EMPTY", "Session title must not be empty");
+      const previous = view.title;
+      if (previous === next) fail("SESSION_TITLE_UNCHANGED", "Session title is already set to that value");
+      view.title = next;
+      break;
+    }
     case "workspace.mount.added": {
       if (view.mounts[event.data.mountId]) {
         fail("MOUNT_ALREADY_PRESENT", `Mount ${event.data.mountId} is already present`);

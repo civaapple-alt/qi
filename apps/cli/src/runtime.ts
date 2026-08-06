@@ -1438,6 +1438,32 @@ export class TuiRuntime {
     return this.#humanControl.changeMode(this.sessionId, to, reason);
   }
 
+  /**
+   * Durable Session title change (`session.retitled`). Replaces bootstrap or auto-derived titles.
+   * Does not require an idle Run boundary (title is observational metadata).
+   */
+  renameSession(title: string, reason = "User renamed Session"): SessionView {
+    const next = title.trim().replace(/\s+/g, " ");
+    if (!next) throw new TypeError("Usage: /rename <title>");
+    if (next.length > 200) throw new TypeError("Session title must be at most 200 characters");
+    this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
+    const previous = this.view()?.title;
+    if (previous === next) throw new TypeError("Session title is already set to that value");
+    const writer = new EventWriter(this.#eventStore, this.sessionId, undefined, this.#onEvent);
+    writer.append(
+      "session.retitled",
+      {
+        title: next,
+        ...(previous === undefined || previous.trim() === "" ? {} : { previousTitle: previous }),
+        reason,
+      },
+      { kind: "user", id: "tui-user" },
+    );
+    const view = this.view();
+    if (!view) throw new Error("Session view missing after retitle");
+    return view;
+  }
+
   acceptPlan(): { runId: RunId; input: string; formal: boolean } {
     if (this.active) throw new Error("Cannot accept a Plan while a Run is active");
     const accepted = this.#humanControl.acceptPlanAndStartFirstRun(this.sessionId);
@@ -2207,34 +2233,49 @@ export class TuiRuntime {
       }
       return supplied.map((part) => ({ ...part }));
     }
+    // Auto-detect is for vision models (MIME-sniff standalone HTTP lines, ingest .png paths).
+    // Text-only models must keep the prompt as plain text: coding tasks often paste doc URLs
+    // on their own line (e.g. kimi.com/.../kimi-acp.html) or mention asset names like icon.png.
+    // Throwing here was surfacing as ACP "Internal error" before the Run even started.
+    if (!capabilities.input.has("image")) {
+      return undefined;
+    }
     const candidates = detectImageInputCandidates(input);
     if (candidates.length === 0) return undefined;
-    if (!capabilities.input.has("image")) {
-      throw new TypeError(
-        "The input contains an image path or URL, but the selected model does not support image input",
-      );
-    }
     const content: RunInputPart[] = [];
     let cursor = 0;
     for (const candidate of candidates) {
       if (candidate.start < cursor) continue;
-      const text = input.slice(cursor, candidate.end);
-      if (text) content.push({ type: "text", text });
+      // Prose before this span (do not include the candidate itself yet).
+      const before = input.slice(cursor, candidate.start);
+      if (before) content.push({ type: "text", text: before });
       if (candidate.kind === "url") {
-        content.push(await this.#imageIngest.ingestUrl(candidate.url, {
-          networkAuthorized: this.#allowNetwork,
-          ...(this.#activeController === undefined ? {} : { signal: this.#activeController.signal }),
-        }));
+        const image = await this.#tryIngestImageUrl(candidate.url);
+        // Doc links / non-image MIME / missing Network stay as text — never abort the Run.
+        if (image) content.push(image);
+        else content.push({ type: "text", text: input.slice(candidate.start, candidate.end) });
       } else {
         const image = await this.#tryIngestImagePath(candidate.path);
         // Ambiguous or missing Workspace paths stay as text; do not fail the Run.
         if (image) content.push(image);
+        else content.push({ type: "text", text: input.slice(candidate.start, candidate.end) });
       }
       cursor = candidate.end;
     }
     const tail = input.slice(cursor);
     if (tail) content.push({ type: "text", text: tail });
     return content;
+  }
+
+  async #tryIngestImageUrl(url: string): Promise<RunImagePart | undefined> {
+    try {
+      return await this.#imageIngest.ingestUrl(url, {
+        networkAuthorized: this.#allowNetwork,
+        ...(this.#activeController === undefined ? {} : { signal: this.#activeController.signal }),
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   async #tryIngestImagePath(requested: string): Promise<RunImagePart | undefined> {

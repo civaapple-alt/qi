@@ -272,6 +272,26 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
   Live `/shell` and `/permissions` are the in-session apply paths for shell profiles and capabilities.
 - Workspace `.qi` declarations never participate in capability precedence and cannot widen project policy.
 
+## ADR-0039: ACP is a local single-writer client surface
+
+- `qi acp` exposes the Agent Client Protocol over stdio for IDE clients (Zed, JetBrains, …).
+- It uses the same composition Runtime as TUI and headless; it is not a second Runtime or remote daemon.
+- stdout is protocol-only; diagnostics go to stderr (no banner).
+- Modes advertised on the wire are `ask` | `plan` | `agent`. Capability grants remain CLI/project policy —
+  ACP must not introduce yolo/auto-approve defaults or grant authority from client MCP metadata.
+- Client `mcpServers` on `session/new` are ignored until an explicit future decision binds them through the
+  existing quarantine + human review path.
+- Parked/failed/indeterminate outcomes must remain observable (`_meta` / stderr), not collapsed into a
+  silent successful `end_turn`.
+
+## ADR-0038: durable Session retitle without rewriting history
+
+- Operators may rename a Session via `/rename <title>` (or equivalent clients).
+- The Kernel records `session.retitled` with the new title and optional previous title.
+- Projection replaces `view.title` only; earlier events and Run inputs remain unchanged.
+- Auto-title from the first user message still applies only while the title is a bootstrap placeholder
+  (`Qi TUI` / empty); an explicit retitle is not overwritten by later messages.
+
 ## ADR-0016: keep execution local and Web read-only
 
 - The `qi` process embeds the Kernel, Loop, providers, tools, policy, store, and human control surface.
@@ -534,6 +554,12 @@ event stream and can leak binary content into logs, redaction, and context accou
   image extension, plus `file://` URIs). The Runtime detects those candidates, resolves a Workspace-root match or a
   unique authorized basename hit, and ingests the file as a Session image attachment before the Run commits. Zero or
   ambiguous hits leave the text unchanged rather than inventing a path or failing the Run.
+- Standalone HTTP(S) lines without an image extension are also image *candidates* so vision models can MIME-sniff
+  bare CDN links. That auto-detect must not abort coding prompts: on **text-only** models, candidates stay plain
+  text (no throw). On image-capable models, failed URL/path ingest (network denied, non-image MIME, missing file)
+  soft-fails to plain text instead of aborting before the Run. Only *supplied* image content parts require vision
+  and still fail closed when the selected profile denies image input (ACP maps that to invalid params, not a
+  silent crash).
 - Tool-result images (including image blocks from a bound MCP call such as a Playwright screenshot) are materialized
   as model `artifact` parts for the current Run so an image-capable model can see them. Those Artifacts do not enter
   the Session attachment set and cannot be passed to `read_image`, which remains limited to original Artifacts from

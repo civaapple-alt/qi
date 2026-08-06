@@ -16,6 +16,23 @@ export type ClipboardPaste =
 
 const imagePathPattern = /\.(?:png|jpe?g|gif|webp)$/i;
 
+/** Best-effort write for Session IDs and short diagnostics. Failures are silent. */
+export async function writeClipboardText(text: string): Promise<boolean> {
+  try {
+    const loaded = await import("@mariozechner/clipboard") as unknown as {
+      clipboard?: { setText?(value: string): void | Promise<void> };
+      default?: { setText?(value: string): void | Promise<void> };
+      setText?(value: string): void | Promise<void>;
+    };
+    const binding = loaded.clipboard ?? loaded.default ?? loaded;
+    if (typeof binding.setText !== "function") return false;
+    await binding.setText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Rich-TTY clipboard read. Native loading is optional and failures degrade to ordinary terminal paste. */
 export async function readClipboardPaste(
   bindingOverride?: ClipboardBinding | null,

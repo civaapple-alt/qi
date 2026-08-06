@@ -27,6 +27,43 @@ test("sessionTitleFromUserInput keeps the first line and truncates long text", (
   assert.equal(isBootstrapSessionTitle("Deployment boundary"), false);
 });
 
+test("session.retitled updates the Session title durably", () => {
+  let view = applySessionEvent(undefined, {
+    schemaVersion: 1,
+    eventId: "evt_title_r001",
+    sessionId: "ses_title_r001",
+    sequence: 1,
+    occurredAt: "2026-07-30T10:00:00.000Z",
+    actor: { kind: "runtime", id: "qi" },
+    type: "session.created",
+    data: { title: "Qi TUI" },
+  });
+  view = applySessionEvent(view, {
+    schemaVersion: 1,
+    eventId: "evt_title_r002",
+    sessionId: "ses_title_r001",
+    sequence: 2,
+    occurredAt: "2026-07-30T10:00:01.000Z",
+    actor: { kind: "user", id: "user" },
+    type: "session.retitled",
+    data: { title: "Auth refactor", previousTitle: "Qi TUI", reason: "User renamed Session" },
+  });
+  assert.equal(view.title, "Auth refactor");
+  assert.throws(
+    () => applySessionEvent(view, {
+      schemaVersion: 1,
+      eventId: "evt_title_r003",
+      sessionId: "ses_title_r001",
+      sequence: 3,
+      occurredAt: "2026-07-30T10:00:02.000Z",
+      actor: { kind: "user", id: "user" },
+      type: "session.retitled",
+      data: { title: "Auth refactor" },
+    }),
+    /already set to that value|SESSION_TITLE_UNCHANGED/,
+  );
+});
+
 test("Kernel replaces bootstrap Session titles from the first user message only", () => {
   let view = applySessionEvent(undefined, {
     schemaVersion: 1,

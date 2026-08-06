@@ -43,6 +43,8 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "help", descriptionKey: "cmd.help", argumentHint: "[command|advanced]", category: "inspect", visibility: "primary", panel: "help", draftPolicy: "preserve" },
   { name: "settings", descriptionKey: "cmd.settings", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
   { name: "status", descriptionKey: "cmd.status", category: "inspect", visibility: "primary", panel: "overview", draftPolicy: "preserve" },
+  { name: "about", descriptionKey: "cmd.about", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
+  { name: "doctor", descriptionKey: "cmd.doctor", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
   {
     name: "memory",
     descriptionKey: "cmd.memory",
@@ -86,6 +88,10 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "verify", descriptionKey: "cmd.verify", category: "inspect", visibility: "primary" },
   { name: "runs", descriptionKey: "cmd.runs", category: "navigate", visibility: "primary", panel: "runs" },
   { name: "sessions", descriptionKey: "cmd.sessions", category: "navigate", visibility: "primary", draftPolicy: "preserve" },
+  { name: "new", descriptionKey: "cmd.new", category: "control", visibility: "primary", draftPolicy: "consume" },
+  { name: "resume", descriptionKey: "cmd.resume", category: "navigate", visibility: "primary", draftPolicy: "preserve" },
+  { name: "rename", descriptionKey: "cmd.rename", argumentHint: "<title>", category: "manage", visibility: "primary" },
+  { name: "copy-session-id", descriptionKey: "cmd.copy-session-id", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
   { name: "model", descriptionKey: "cmd.model", category: "manage", visibility: "primary", draftPolicy: "preserve" },
   { name: "reset-workspace", descriptionKey: "cmd.reset-workspace", category: "control", visibility: "primary", draftPolicy: "consume" },
   { name: "next", descriptionKey: "cmd.next", argumentHint: "[continue|stop|plan]", category: "control", visibility: "primary" },
@@ -226,7 +232,7 @@ function advancedCommandHelp(locale: Locale): string[] {
   for (const visibility of ["alias", "advanced"] as const) {
     const commands = tuiCommands.filter((candidate) => candidate.visibility === visibility);
     if (commands.length === 0) continue;
-    lines.push(`  ${visibility}`);
+    lines.push(`  ${visibility}${visibility === "advanced" ? ` (${t(locale, "help.unimplemented")})` : ""}`);
     for (const command of commands) {
       lines.push(
         `    /${command.name}${command.argumentHint ? ` ${command.argumentHint}` : ""} — ${t(locale, command.descriptionKey)}`,

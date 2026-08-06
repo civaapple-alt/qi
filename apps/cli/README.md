@@ -15,6 +15,32 @@ It uses `@earendil-works/pi-tui` for differential rendering, synchronized update
 slash-command completion, bracketed paste, and CJK IME cursor support. Piped stdin and non-TTY environments retain
 a deterministic line-oriented mode.
 
+### ACP (IDE)
+
+```bash
+qi acp
+qi acp --workspace PATH --mode ask
+```
+
+JSON-RPC over stdio for Zed / JetBrains / custom ACP clients. Modes: `ask` | `plan` | `agent`.
+Credentials: pre-login or env keys (`authenticate` method `qi_login`). Full matrix:
+[docs/acp.md](docs/acp.md). Text-only models keep standalone documentation URLs as plain text (they do not
+abort as image input); streaming/thought env knobs and VS Code notes are in that doc.
+
+### Headless / print mode
+
+For scripts and CI, use one-shot print mode (no TTY required):
+
+```bash
+qi -p "What does this workspace do?"
+qi -p --output-format json --mode ask "Summarize recent changes"
+qi -p --allow-write "Add JSDoc to src/foo.ts"
+```
+
+Formats: `text` (default), `json`, `stream-json` (optional `--stream-partial-output`). Workspace is cwd or
+`--prompt`/`remaining args` for the task; use `--workspace` when needed. There is no `--force`: non-read effects
+require `--allow-*` or project policy. Full contract: [docs/headless.md](docs/headless.md).
+
 ## Interaction model
 
 Selection is observational: `/runs` lists Runs in the current Session (newest first), like `/sessions`;
@@ -72,6 +98,8 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | Command | Purpose |
 | --- | --- |
 | `/help [command\|advanced]` | Shortcuts + common commands; `advanced` lists aliases |
+| `/about` | Version, platform, auth, config/data paths |
+| `/doctor` | Config / auth / capability / discovery diagnostics |
 | `/settings` | Settings hub: mode, **permissions**, **shell**, **Step budget**, **Per-Step Action limit**, **Subagent / delegate**, providers, config, context, theme, language, **timeline density** |
 | `/subagent` | Subagent / `delegate` budget hub (wall, maxSteps/context %, fixed batch/depth); writes `[delegate]` to user config |
 | `/memory [list\|remember\|accept\|correct\|forget\|promote\|pin\|unpin]` | Inspect actual Run injection, pending candidates, Project/User boundaries and provenance; explicitly manage the full Memory lifecycle |
@@ -96,6 +124,10 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
 | `/runs` | Session history hub — choose Runs, then Steps or Agents (Actions via Step; chooser when both exist; Enter selects observation; no separate `/steps` / `/actions` / `/agents` shortcuts) |
 | `/sessions` | Active/Archived Session list (about 3–5 cards visible; ↑↓ scrolls); type-to-search; Enter resumes or restores; `a` archives (with confirm) |
+| `/new` | Start a new Session in-process (does not archive others; unlike `/reset-workspace`) |
+| `/resume` | Opens the Session list (alias of `/sessions`) |
+| `/rename <title>` | Durable Session title (`session.retitled`) |
+| `/copy-session-id` | Copy/show current Session ID |
 | `/status` | Session/Run/Step/Action engineering detail panel |
 | `/model` | Reconfigure without re-login (model, thinking effort, context window, max output tokens, and image input when configurable). Model rows show catalogued image/text capability. Save scope: **User default** writes `~/.qi/config.toml` + sealed credential metadata; **Current Session only** applies without changing config. |
 | `/reset-workspace` | Preflight all active Sessions, archive them, and start a fresh Session |

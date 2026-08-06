@@ -104,7 +104,9 @@ import { eventAffectsTranscript } from "./paint.js";
 import { TuiPresenter, USER_MESSAGE_PREFIX } from "./presenter.js";
 import type { TuiRuntime } from "./runtime.js";
 import { applyTheme, theme, type ThemeName } from "./theme/index.js";
-import { readClipboardPaste } from "./clipboard.js";
+import { readClipboardPaste, writeClipboardText } from "./clipboard.js";
+import { buildConfigReport, formatAboutLines } from "./config-command.js";
+import { qiCliVersion } from "./cli.js";
 import { imagePlaceholder, structuredComposerContent } from "./image-composer.js";
 import {
   validateWorkspaceMentions,
@@ -2877,6 +2879,90 @@ export class InteractiveTui {
     }
     if (name === "settings") {
       openSettingsPanel(this.#panelFlow());
+      return;
+    }
+    if (name === "about") {
+      void this.#startManagementTask(async () => {
+        const auth = this.#auth?.status();
+        const lines = formatAboutLines({
+          version: qiCliVersion(),
+          platform: `${process.platform} ${process.arch}`,
+          node: process.version,
+          workspace: this.#presenter.launch.workspaceRoot,
+          sessionId: this.#runtime.sessionId,
+          mode: this.#runtime.mode(),
+          ...(auth === undefined
+            ? {}
+            : {
+                authStatus: auth.authStatus,
+                provider: auth.provider,
+                model: auth.model,
+              }),
+          ...(this.#presenter.launch.configPath === undefined
+            ? {}
+            : { userConfigPath: this.#presenter.launch.configPath }),
+          ...(this.#presenter.launch.projectConfigPath === undefined
+            ? {}
+            : { projectConfigPath: this.#presenter.launch.projectConfigPath }),
+          dataRoot: this.#presenter.launch.dataRoot,
+        });
+        this.#openScrollPanel("/about", lines);
+      }, "about");
+      return;
+    }
+    if (name === "doctor") {
+      void this.#startManagementTask(async () => {
+        const report = await buildConfigReport({
+          workspaceRoot: this.#presenter.launch.workspaceRoot,
+          ...(this.#presenter.launch.configPath === undefined
+            ? {}
+            : { configPath: this.#presenter.launch.configPath }),
+        });
+        const auth = this.#auth?.status();
+        const lines = [
+          ...report.doctor.lines,
+          ...(auth === undefined ? [] : [`auth ${auth.authStatus} · ${auth.provider}/${auth.model}`]),
+          `session ${this.#runtime.sessionId} · mode ${this.#runtime.mode()}`,
+          `capabilities ${this.#runtime.capabilityLabels().join(", ") || "read-only"}`,
+        ];
+        this.#openScrollPanel("/doctor", lines);
+      }, "doctor");
+      return;
+    }
+    if (name === "new") {
+      if (this.#runtime.active) {
+        this.#presenter.setNotice("Cannot start a new Session while a Run is active.");
+        this.#render();
+        return;
+      }
+      void this.close({ kind: "new-session" });
+      return;
+    }
+    if (name === "resume") {
+      openSessionsPanel(this.#panelFlow());
+      return;
+    }
+    if (name === "rename") {
+      try {
+        const title = argument.trim();
+        if (!title) throw new TypeError("Usage: /rename <title>");
+        this.#runtime.renameSession(title);
+        this.#presenter.update(this.#runtime.events(), this.#runtime.view());
+        this.#presenter.setNotice(`Session title → ${title}`);
+      } catch (error) {
+        this.#presenter.setNotice(message(error));
+      }
+      this.#render();
+      return;
+    }
+    if (name === "copy-session-id") {
+      const sessionId = this.#runtime.sessionId;
+      void writeClipboardText(sessionId).then((copied) => {
+        this.#presenter.setNotice(
+          copied ? `Copied Session ID ${sessionId}` : `Session ID ${sessionId}`,
+        );
+        this.#render();
+      });
       return;
     }
     if (name.startsWith("skill:")) {

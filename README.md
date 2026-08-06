@@ -62,6 +62,37 @@ qi --help
 Modes only narrow authority. Optional write, verification, network, host execution, background, and delegation
 capabilities must be granted separately. `--safe` disables all optional capabilities.
 
+### Headless (print) mode
+
+Scripts and CI can run a single prompt without the TUI:
+
+```bash
+qi -p "Explain this repository"
+qi -p --output-format json --mode ask "List public packages"
+```
+
+See [`apps/cli/docs/headless.md`](apps/cli/docs/headless.md). Non-read effects still need explicit capability
+grants (`--allow-write`, project `policy.toml`, …); Qi does not offer a silent `--force` bypass.
+
+Inspect effective configuration without starting a chat:
+
+```bash
+qi config show
+qi config validate
+qi config doctor
+```
+
+See [`apps/cli/docs/configuration.md`](apps/cli/docs/configuration.md).
+
+### IDE integration (ACP)
+
+```bash
+qi acp
+```
+
+Compatible editors (Zed, JetBrains, …) can launch `qi acp` as an Agent Client Protocol subprocess.
+See [`apps/cli/docs/acp.md`](apps/cli/docs/acp.md).
+
 ## Current product surface
 
 The primary productized relationship today is user-triggered **同行** through Ask, Plan, and Agent Runs. Formal

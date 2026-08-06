@@ -8,7 +8,58 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+### Added
+
+- Headless print mode for scripts and CI: `qi -p|--print [PROMPT]` with
+  `--output-format text|json|stream-json`, optional `--stream-partial-output`, `--mode ask|plan|agent`,
+  and `--prompt`. One Run then exit; codes distinguish `completed` (0), `failed` (1), `parked` (2), and
+  `cancelled` (130). Writes still need explicit `--allow-*` / project policy (no Cursor-style `--force`).
+  See [`apps/cli/docs/headless.md`](apps/cli/docs/headless.md).
+- `qi --help` now lists marketplace / plugin / agent subcommands and print-mode flags.
+- Configuration discovery: `qi config show|validate|doctor` (optional `--json`), TUI `/about` and `/doctor`,
+  and [`apps/cli/docs/configuration.md`](apps/cli/docs/configuration.md).
+- Session slash ops: `/new`, `/resume` (→ sessions), `/rename <title>` (durable `session.retitled`),
+  `/copy-session-id`. Advanced help labels unimplemented commands explicitly.
+- Agent Client Protocol MVP: `qi acp` serves JSON-RPC over stdio via `@agentclientprotocol/sdk`
+  (`initialize`, `authenticate`/`qi_login`, `session/new`, `session/set_mode`, `session/prompt`,
+  `session/cancel`). Modes are `ask`/`plan`/`agent`; client MCP inject is ignored; non-completed turns
+  keep Qi status in `_meta.qi`. See [`apps/cli/docs/acp.md`](apps/cli/docs/acp.md).
+- ACP stream hygiene: cumulative model text is delta-sliced and coalesced before `session/update`;
+  `agent_thought_chunk` is **off by default** (`QI_ACP_STREAM_THOUGHTS=1` to enable) so VS Code ACP
+  Client does not freeze on medium thinking turns.
+- ACP `session/new` now returns a durable Qi `ses_…` id (aligned with Web/TUI). Tool projection is
+  two-shot (skip `action.started`) with bounded raw payloads to cut VS Code `sessionUpdate` volume.
+- ACP flushes coalesced assistant text before tool events and at each `model.completed`, so multi-Step
+  turns keep `message → tools → message → tools` order in IDE clients.
+- ACP default assistant projection is **one message chunk per Step** (not token/75ms fragments). Opt-in
+  live text with `QI_ACP_STREAM_TEXT=1`.
+- `QI_ACP_STREAM_THOUGHTS=1` now means **one thought block per Step** (not live deltas). Live thinking
+  requires `QI_ACP_STREAM_THOUGHTS=live` — avoids VS Code ACP freezes when CoT is enabled.
+- ACP hard-caps each `agent_thought_chunk` (~3500 chars) with an IDE truncation note; full CoT remains
+  in Session/Web so a single multi‑10KB thought notify cannot freeze VS Code.
+- `QI_ACP_STREAM_THOUGHTS=1` is progressive (~5s refresh, newest window ≤3500 chars) so long thinking
+  shows progress without typewriter spam or multi‑minute silence; use `end` for one block at Step end.
+- ACP serializes Session event projection so `agent_message_chunk` always precedes that Step’s
+  `tool_call` updates (fixes VS Code timeline collapsing into one reply + all tools).
+- ACP handshake hardened for VS Code: lenient `session/new` (optional `mcpServers`), optional
+  `authenticate.methodId`, noop `session/set_config_option`, foreign mode ids mapped/ignored, and
+  clearer stderr + JSON-RPC errors instead of opaque Internal error.
+
+### Changed
+
+- Primary slash surface now includes about/doctor and session lifecycle helpers for Cursor-like operability
+  without collapsing Qi's capability model.
+- Text-only models no longer fail a Run when the prompt auto-detects standalone HTTP lines or image-looking
+  paths (common when pasting documentation URLs in ACP/TUI). Those stay plain text; only explicit image
+  content parts still require vision. Remaining image/model mismatches map to ACP invalid params, not
+  opaque Internal error.
+- Auto image URL/path ingest soft-fails to plain text (network denied, non-image MIME, missing file)
+  instead of aborting the Run before the model turns.
+
+### Fixed
+
+- ACP first prompt with documentation URLs (e.g. `https://…/kimi-acp.html` alone on a line) no longer
+  aborts before the Run starts with “image path or URL / does not support image input”.
 
 ## [0.7.4] - 2026-08-06
 

@@ -160,6 +160,24 @@ test("URL detection preserves order for Markdown, standalone, and extension cand
   );
 });
 
+test("standalone documentation HTML URLs are image *candidates* (vision MIME-sniff), not image files", () => {
+  // ACP/TUI regression: a task that pastes kimi/docs HTML links on their own lines used to fail
+  // text-only models with "input contains an image path or URL". Detection may still list them
+  // for vision models; Runtime must keep them as plain text when image input is off.
+  const input = [
+    "kimi3 目录下基于",
+    "https://www.kimi.com/code/docs/kimi-code-cli/reference/kimi-acp.html",
+    "https://www.kimi.com/code/docs/kimi-code-cli/guides/ides.html",
+    "生成一个 kimi acp 的快速使用 html",
+  ].join("\n");
+  const urls = detectImageUrlCandidates(input).map((c) => c.url);
+  assert.deepEqual(urls, [
+    "https://www.kimi.com/code/docs/kimi-code-cli/reference/kimi-acp.html",
+    "https://www.kimi.com/code/docs/kimi-code-cli/guides/ides.html",
+  ]);
+  assert.ok(detectImageInputCandidates(input).every((c) => c.kind === "url"));
+});
+
 test("path detection finds Windows absolute, mount, Markdown local, and standalone relative images", () => {
   const input = [
     String.raw`C:\Users\alwar\Pictures\qi-notebook\ScreenShot_2026-07-31_133242_600.jpg 检查本地启动的页面`,

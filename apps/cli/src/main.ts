@@ -34,6 +34,9 @@ import {
 import { runPackageCliCommand } from "./package-command.js";
 import { runExtensionCliCommand } from "./extension-command.js";
 import { runPluginCliCommand } from "./plugin-command.js";
+import { runConfigCliCommand } from "./config-command.js";
+import { runAcpCliCommand } from "./acp/run.js";
+import { runHeadlessPrint } from "./headless.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -41,12 +44,18 @@ async function main(): Promise<void> {
   if (await runExtensionCliCommand(process.argv.slice(2))) return;
   if (await runPluginCliCommand(process.argv.slice(2))) return;
   if (await runPackageCliCommand(process.argv.slice(2))) return;
+  if (await runConfigCliCommand(process.argv.slice(2))) return;
+  if (await runAcpCliCommand(process.argv.slice(2))) return;
   const parsed = await parseTuiCliArguments(process.argv.slice(2));
   if (parsed.kind === "help" || parsed.kind === "version") {
     process.stdout.write(parsed.text);
     return;
   }
   const options = parsed.options;
+  if (options.print) {
+    process.exitCode = await runHeadlessPrint(options);
+    return;
+  }
   const paths = projectPaths({
     workspaceRoot: options.workspaceRoot,
     dataRoot: options.dataRoot,
@@ -184,6 +193,10 @@ async function main(): Promise<void> {
       presenter = new TuiPresenter(await launchInfo(launchOptions, runtime, authStatus.authStatus));
       presenter.update(runtime.events(), runtime.view());
       presenter.setSkills(runtime.skillCatalog(), runtime.skillCandidates());
+      if (options.sessionMode && runtime.mode() !== options.sessionMode) {
+        runtime.changeMode(options.sessionMode, `CLI --mode ${options.sessionMode}`);
+        presenter.update(runtime.events(), runtime.view());
+      }
       if (pendingNotice) {
         presenter.setNotice(pendingNotice);
         pendingNotice = undefined;

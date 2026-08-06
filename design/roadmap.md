@@ -54,6 +54,9 @@ Live-provider acceptance is opt-in because it consumes credentials and quota.
 3. Publish the coordinated npm package graph in dependency order.
 4. Re-run consumers against the registry rather than local tarballs.
 5. Mark packages experimental until compatibility and migration commitments are reviewed.
+6. Productize headless print mode (`qi -p`) for CI scripts; follow with local ACP (`qi acp`) as a
+   single-writer client surface (not a remote control plane). Slash/session ops and configuration
+   discoverability track the Cursor CLI comparison plan without adopting yolo/`--force` semantics.
 
 ## Product validation
 

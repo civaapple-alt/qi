@@ -319,6 +319,17 @@ export const SessionEventSchema = Type.Union([
     ),
   ),
   event(
+    "session.retitled",
+    Type.Object(
+      {
+        title: Type.String({ minLength: 1, maxLength: 200 }),
+        previousTitle: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+        reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  event(
     "workspace.mount.added",
     Type.Object(
       {
