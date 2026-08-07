@@ -100,7 +100,7 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/help [command\|advanced]` | Shortcuts + common commands; `advanced` lists aliases |
 | `/about` | Version, platform, auth, config/data paths |
 | `/doctor` | Config / auth / capability / discovery diagnostics |
-| `/settings` | Settings hub: mode, **permissions**, **shell**, **Step budget**, **Per-Step Action limit**, **Subagent / delegate**, providers, config, context, theme, language, **timeline density** |
+| `/settings` | Settings hub: mode, **permission** (Manual/YOLO/Auto), expert **permissions**, **shell**, **Step budget**, **Per-Step Action limit**, **Subagent / delegate**, providers, config, context, theme, language, **timeline density** |
 | `/subagent` | Subagent / `delegate` budget hub (wall, maxSteps/context %, fixed batch/depth); writes `[delegate]` to user config |
 | `/memory [list\|remember\|accept\|correct\|forget\|promote\|pin\|unpin]` | Inspect actual Run injection, pending candidates, Project/User boundaries and provenance; explicitly manage the full Memory lifecycle |
 | `/goal [prompt]` | Session-local 追寻: `/goal <objective>` creates and starts; bare `/goal` opens status + actions (Continue starts immediately; Continue with guidance… and Accept notes are optional / Pause / Resume / Accept / Re-evaluate… / Cancel). Status shows Goal progress and **Evidence Ledger** gaps (diagnostics ≠ ledger). Accept/pass may leave gaps open; Re-evaluate requires rationale only for fail/unknown. Default Goal `attempts` equals current `maxSteps`; only Steps with non-read Actions consume attempts. Formal Plan / Work Plan are orthogonal (`/plan` / `update_plan`); neither auto-creates from Goal. Session resume demotes active Goals to paused |

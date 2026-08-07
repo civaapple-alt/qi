@@ -19,6 +19,11 @@ the executor only after durable lifecycle events, validates output, and settles 
 produces an `AuthorizedToolCall`; execution returns a `ToolSettlement`. Registration handles prevent a changed
 tool implementation from impersonating a previously advertised identity.
 
+When the host sets `permissionMode` on the execution context ([ADR-0040](../../../design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode)),
+authorization also runs `evaluateApprovalPolicy` after the lease check: **manual** may ask
+Once/Session/Project; **yolo/auto** auto-accept in-lease tools. Mount grants and MCP bind remain authority
+expansion. Hard path denials stay fail-closed without an “approve danger” prompt.
+
 Built-ins provide bounded directory listing and tree rendering, fd-accelerated file discovery, rg-accelerated
 content search, whole-file or bounded line-range reads, file write/edit, fixed read-only Git inspection
 (`status` / diffs / `log` / `rev-parse` / `show` / `branch` / `remote`), controlled public HTTP(S) text retrieval,
@@ -77,7 +82,9 @@ automatic inference path, so a hand-picked manifest is exactly as trustworthy as
 - Git inspection accepts only fixed read-only operations (status, unstaged/staged diff, log, rev-parse, show,
   branch, remote) and resolves Git outside the Workspace.
 - Verification accepts only frozen profile names, resolves executables outside the Workspace, and strips ambient
-  provider credentials from the child environment.
+  provider credentials from the child environment. Host process tools may receive an optional sandboxed
+  `runProcess` from the composition root ([ADR-0041](../../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host));
+  the agent package never depends on OS sandbox implementations.
 - Network tools (`web_map`, `fetch`) are absent by default, use credential-free GET only, pin validated public DNS
   results through connection, and revalidate every bounded redirect. Local/private targets and binary or oversized
   output fail closed; returned page text and discovered URLs remain explicitly untrusted. `web_map` discovers a

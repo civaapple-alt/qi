@@ -14,7 +14,7 @@ order:
 | `constitution:core` | `system` | yes | Apply cross-Tool safety and evidence rules |
 | `mode:<mode>` | `system` | yes | Choose Ask, Plan, or Agent behavior |
 | `capabilities` | `system` | yes | Stop or choose a feasible action from coarse frozen grants |
-| `host:environment` | `system` | yes | Choose direct argv, a probed script profile, or no host execution |
+| `host:environment` | `system` | yes | Choose direct argv / script profile; discloses sandbox backend/strength and permission mode |
 | `workspace:AGENTS.md` | `user` | Plan / write-capable Agent | Apply repository operating instructions inside Runtime policy |
 | `memory:context` | `user` | no | Reuse relevant accepted claims as reference data |
 | `skills:index` | `user` | no | Preserve progressive discovery while budget remains |

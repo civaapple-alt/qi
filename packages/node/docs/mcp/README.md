@@ -38,6 +38,7 @@ while its server-level instructions remain quarantined.
 ## Behavioral invariants
 
 - Declarations and discovered capabilities are inert until explicitly refreshed and bound.
+- stdio children may be rewritten through the Runtime process sandbox (ADR-0041); YOLO never skips bind.
 - stdio declarations may use `npx` or `uvx` for registry-published servers; exact package versions are
   recommended, while floating selectors are accepted as an explicit operator choice.
 - Discovery enumerates only capability classes advertised by the server; tool-only servers do not fail because

@@ -7,13 +7,21 @@ proposal
   -> catalog identity check
   -> input schema validation
   -> resource/effect inspection
-  -> capability decision
+  -> capability decision (lease ∩ Session mode)
+  -> permission approval (manual Once/Session/Project, or yolo/auto auto-accept)
   -> durable grant and `action.started`
   -> Effect Journal reservation/start when non-read
   -> executor
+       shell/script/verify/skill-script → ProcessSandbox.run (ADR-0041)
+       MCP stdio children → ProcessSandbox.wrapCommand
+       in-process file tools → path/mount guards only
   -> output validation or Artifact storage
   -> durable settlement
 ```
+
+Permission mode and graded process sandbox are product controls composed at the CLI/runtime boundary; see
+[ADR-0040](../../../design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode) and
+[ADR-0041](../../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host).
 
 ## Tool definition requirements
 
@@ -32,7 +40,8 @@ the earlier tool.
 - Unknown effect settlement: `EffectReplayBlockedError` or indeterminate settlement.
 
 Tool results inform the next model Step; they do not directly mark a Goal complete. Tests span
-`tests/tools-capability.test.mjs`, `tests/workspace-safety.test.mjs`, and `tests/turn-loop.test.mjs`.
+`tests/tools-capability.test.mjs`, `tests/workspace-safety.test.mjs`, `tests/permission-approval.test.mjs`,
+`tests/sandbox-resolve.test.mjs`, `tests/process-runner.test.mjs`, and `tests/turn-loop.test.mjs`.
 
 ## Read-only discovery
 
@@ -109,10 +118,11 @@ executable must resolve outside the Workspace. Argument validation failures (`IN
 the full request — for example `git status · ref HEAD` or `git diff · maxCount 5` — not only the error code.
 Mutating Git commands (`add`, `commit`, …) remain behind the explicit `shell` execute capability.
 
-General host execution receives a program name and argument vector rather than a command-line string. It does
-not expand shell globs, variables, pipes, or redirection; use discovery Tools for paths and a declared script
-profile for a real multiline script instead of embedding a long `node -e` program. Bare names resolve through
-PATH outside the Workspace. On Windows, PATHEXT resolution may select a `.cmd`/`.bat` shim such as
+General host execution receives a program name and argument vector rather than a command-line string. When the
+Runtime injects `runProcess`, those children go through the graded process sandbox (ADR-0041) rather than bare
+`runHostProcess` alone. The tool still does not expand shell globs, variables, pipes, or redirection; use discovery
+Tools for paths and a declared script profile for a real multiline script instead of embedding a long `node -e`
+program. Bare names resolve through PATH outside the Workspace. On Windows, PATHEXT resolution may select a `.cmd`/`.bat` shim such as
 `npm.cmd`; Qi invokes it through the trusted system command processor only after rejecting argument shell
 metacharacters. Direct executables retain normal argument-vector spawning on every platform. Direct execution
 requires the `shell-profile:direct` resource in addition to host-process/workspace resources.
@@ -193,9 +203,11 @@ capability is scoped to `verification:<name>:<definition-hash>`, not `host-proce
 
 Executables resolve outside the Workspace, output is bounded, and the child receives a small operational
 environment instead of ambient provider credentials. Exit code, timeout, truncation, duration, and definition
-hash remain explicit evidence. The process still runs repository code as the current OS user and may use the
-network, so `--allow-verify` is an explicit host-execution decision rather than a sandbox claim. Manifest edits do
-not change an active runtime; restart to load a new definition.
+hash remain explicit evidence. Children are launched through the Runtime `ProcessSandbox` when configured
+(ADR-0041: srt preferred, Windows Low IL middle tier, or host with honest disclosure). Network still depends on
+sandbox policy and OS isolation strength—`--allow-verify` is a **capability** decision, not a claim of full OS
+sandboxing when the backend is `host` or `win-low-il` (reduced). Manifest edits do not change an active runtime;
+restart to load a new definition.
 
 A verification timeout or non-zero exit is a failed Action with bounded process details. Only exit code zero can
 produce a completed verification Action.

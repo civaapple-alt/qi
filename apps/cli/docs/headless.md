@@ -36,12 +36,19 @@ Print mode never treats a bare positional path as the Workspace. Pass `--workspa
 
 ### Writes and safety
 
-Qi does **not** implement Cursor’s `--force` / yolo flag. Non-read effects still require capability grants:
+Qi does **not** implement Cursor’s silent `--force`. Permission mode is separate:
 
-- CLI: `--allow-write`, `--allow-execute`, `--allow-network`, …
+- Default **`--permission manual`** (or project/user default): non-read tools need Project approval memory or
+  fail closed without a TTY gate.
+- **`--permission yolo|auto`**: auto-accept **in-lease** tools; path guards and the process sandbox still fail
+  closed (no “approve danger” UI). YOLO never invents mounts or binds MCP.
+
+Capability grants still come from:
+
+- permission mode coding pack and/or CLI `--allow-write`, `--allow-execute`, `--allow-network`, …
 - or project `$QI_HOME/projects/…/policy.toml` / user config
 
-`--safe` disables all optional capabilities. Path grants, Plan review, and `ask_question` **fail closed** in
+`--safe` forces a read-only research baseline. Path grants, Plan review, and `ask_question` **fail closed** in
 print mode (they park or fail the Run); they are not auto-approved.
 
 Indeterminate effects are never retried automatically.

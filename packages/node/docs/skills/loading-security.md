@@ -77,8 +77,10 @@ activation manager. If the Workspace root is the user's home directory, its `.ag
 treated as the global Agent root and still requires lock-backed human activation.
 
 Scripts require the separate `skill.run-script` execute path. Only `scripts/**`, argv arrays, Workspace cwd, a
-bounded timeout, and startup-frozen interpreter profiles are accepted. Host execution remains a full local-code
-trust boundary and settles through the ordinary Action/Effect Journal path; Ask and Plan modes deny it.
+bounded timeout, and startup-frozen interpreter profiles are accepted. Children use the Runtime
+`ProcessSandbox` when present ([ADR-0041](../../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host))
+and still settle through the ordinary Action/Effect Journal path; Ask and Plan modes deny execute. Skill metadata
+never grants leases; permission mode only auto-accepts in-lease script runs under yolo/auto.
 
 Claude-compatible plugin Skills use a separate immutable plugin cache and enablement pin. Human `/skills` names
 stay unmerged with native catalog names. For the **model**, the `skill` Tool `list` operation returns a **combined**

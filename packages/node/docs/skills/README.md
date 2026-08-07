@@ -94,7 +94,8 @@ may provide a different contained subdirectory. This API is never exposed to mod
 `compatibility`, `allowed-tools`, and `metadata["qi.required-*"]` produce readiness diagnostics only. Unknown
 frontmatter is retained as informational extension data. `runSkillScript()` accepts only regular `scripts/**`
 files, bounded argv/cwd/timeout, and frozen interpreter profiles; it never installs dependencies or supplies
-provider/MCP credentials.
+provider/MCP credentials. When the Runtime provides a process sandbox, scripts use the same graded isolation as
+shell/verify ([ADR-0041](../../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)).
 
 Claude-compatible plugin Skills are intentionally a separate catalog. They are available only after the plugin
 and the individual Skill have been enabled, and only when upstream metadata permits model invocation; explicitly

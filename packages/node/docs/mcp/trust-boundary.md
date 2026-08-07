@@ -22,7 +22,9 @@ changed entries become `drifted`, and new calls fail until a human rebinds. An i
 snapshot only to reach an honest settlement.
 
 stdio permits explicitly declared `npx` and `uvx` launchers for registry-published MCP servers, rejects other
-package-manager and shell wrappers, and runs the resolved launcher under a minimal environment. The launcher
+package-manager and shell wrappers, and runs the resolved launcher under a minimal environment. When the Runtime
+supplies a `ProcessSandbox`, stdio children are rewritten through `wrapCommand` ([ADR-0041](../../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host))
+before spawn—same graded stack as shell/script. YOLO/auto never skip human MCP bind. The launcher
 path/hash and full declared argv are fingerprinted as transport identity. Exact package versions are recommended;
 a floating selector such as `@latest` or an unpinned uvx package remains an explicit reproducibility risk because
 it may resolve to new code without changing the declaration.

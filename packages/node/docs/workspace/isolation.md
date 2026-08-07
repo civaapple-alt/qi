@@ -31,3 +31,8 @@ Host process helpers scrub credential-like environment names by default and term
 cancel so Agent-executed commands do not inherit Provider secrets or leave orphaned children. After graceful
 termination, helpers escalate to a forced kill and still settle the host-process Promise if exit/`close` cannot
 be confirmed, so finite Tools cannot hang forever waiting on a non-exiting child.
+
+Agent **shell / script / verify / skill-script / MCP stdio** children are optionally composed through
+`@civaapple/qi-node/sandbox` ([ADR-0041](../../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)):
+srt when available, Windows Low IL as a reduced middle tier, otherwise host with honest disclosure. That OS layer
+is dual to Workspace path guards—not a replacement for them.

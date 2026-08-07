@@ -55,12 +55,27 @@ qi --help
 
 ## Interaction modes
 
+**Session mode** (`ask` | `plan` | `agent`) only **narrows** what a Run may do:
+
 - **Ask** explores with read-oriented tools.
 - **Plan** may create managed Plan revisions and use read-only depth-1 research delegation.
-- **Agent** uses the capabilities granted at launch.
+- **Agent** may use the coding lease pack (or expert `[capabilities]`) under the current permission mode.
 
-Modes only narrow authority. Optional write, verification, network, host execution, background, and delegation
-capabilities must be granted separately. `--safe` disables all optional capabilities.
+**Permission mode** (`manual` | `yolo` | `auto`, [ADR-0040](design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode))
+is orthogonal: it controls **approval rhythm**, not Session mode.
+
+| Permission | Behavior |
+| --- | --- |
+| **manual** (default) | Non-read in-lease tools ask with Once / Session / Project memory |
+| **yolo** | Auto-accept in-lease tools; path guards + OS sandbox fail closed |
+| **auto** | Like yolo, and suppress tool-form `ask_question` |
+
+Daily TUI control is `/permission`; expert multi-select remains `/permissions`. CLI: `--permission manual|yolo|auto`.
+`--safe` forces a read-only research baseline.
+
+**Process sandbox** ([ADR-0041](design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)):
+`shell` / `script` / `verify` / skill scripts / MCP stdio use graded isolation (`srt` → Windows Low IL → host).
+Inspect with `qi sandbox status`. In-process file tools stay on path/capability guards only.
 
 ### Headless (print) mode
 
@@ -69,10 +84,12 @@ Scripts and CI can run a single prompt without the TUI:
 ```bash
 qi -p "Explain this repository"
 qi -p --output-format json --mode ask "List public packages"
+qi -p --permission yolo --allow-write "Apply a one-line fix"
 ```
 
-See [`apps/cli/docs/headless.md`](apps/cli/docs/headless.md). Non-read effects still need explicit capability
-grants (`--allow-write`, project `policy.toml`, …); Qi does not offer a silent `--force` bypass.
+See [`apps/cli/docs/headless.md`](apps/cli/docs/headless.md). Non-read effects still need leases (permission pack,
+`--allow-*`, or project policy); print mode does **not** auto-approve mounts or invent Cursor-style `--force`.
+Default permission remains **manual** without TTY (in-lease writes deny unless Project memory / yolo).
 
 Inspect effective configuration without starting a chat:
 
@@ -80,6 +97,7 @@ Inspect effective configuration without starting a chat:
 qi config show
 qi config validate
 qi config doctor
+qi sandbox status
 ```
 
 See [`apps/cli/docs/configuration.md`](apps/cli/docs/configuration.md).
@@ -120,13 +138,16 @@ context_window_tokens = 128000
 [ui]
 timeline_density = "standard"
 
-[capabilities]
-write = true
-verify = true
-network = false
-execute = false
-background = false
-delegate = false
+[permission]
+default = "manual"    # manual | yolo | auto
+
+[sandbox]
+policy = "auto"       # auto | srt | low-il | never
+
+# Optional expert override. When omitted, permission mode expands the coding lease pack.
+# [capabilities]
+# write = true
+# execute = true
 
 [delegate]
 wall_time_ms = 300000
@@ -137,6 +158,9 @@ context_tokens_percent = 50
 enabled = true
 auto_accept_project = true
 ```
+
+Project policy may set `[permission].mode`, `[sandbox].policy`, `[[mounts]]`, and `[[approvals]]`
+(see [configuration.md](apps/cli/docs/configuration.md)).
 
 `[delegate]` is optional; omitted keys use the defaults above (5-minute wall, 50% of parent maxSteps/context).
 Edit under `/settings` → Subagent or `/subagent`. Batch max 4 and depth 1 stay fixed.
