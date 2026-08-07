@@ -26,10 +26,17 @@ Controlled entrypoints:
 | `./skills` | progressive Agent Skills, immutable source locks, full resource trees, and bounded script execution |
 | `./mcp` | inert declarations, official transports, quarantined fingerprint review, sealed OAuth, and proxy Tools |
 | `./plugins` | Claude-compatible marketplace sync, pinned plugin cache, plugin Skill Tool, `/plugin:` and `/agent:` catalogs (ADR-0037) |
+| `./sandbox` | graded process sandbox port (ADR-0041): srt preferred → Windows Low IL → host; wraps shell/script/verify/skill-script and MCP stdio children |
 | `./codeact` | container-isolated short programs with ordinary nested Tool authority |
 | `./scheduler` | bounded durable timer/event watchers |
 | `./stream` | committed catch-up/live delivery and SSE |
 | `./extensions` | declaration validation and npm/Git/local content-addressed package installation |
+
+Process sandbox selection is `auto` by default. Full srt isolation maps the Workspace to allowWrite and
+Session-authorized **read-only mounts** to allowRead; path guards still deny `.qi` / `.git` / `.artifacts`
+and host secret roots. Successful srt smoke is cached for the Node process lifetime; Windows srt backends
+may `prewarm()` ACL grants for common tool binaries. See
+[ADR-0041](../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host).
 
 ## Private layout
 

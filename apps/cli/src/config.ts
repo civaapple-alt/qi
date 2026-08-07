@@ -39,6 +39,19 @@ export interface QiCapabilityConfig {
   readonly spend?: boolean;
 }
 
+/** ADR-0040: user-facing permission mode (orthogonal to Session ask|plan|agent). */
+export type QiPermissionMode = "manual" | "yolo" | "auto";
+
+export interface QiPermissionConfig {
+  /** Default for new projects / when project omits mode. */
+  readonly default?: QiPermissionMode;
+}
+
+export interface QiSandboxConfig {
+  /** auto | srt | low-il | never (ADR-0041). */
+  readonly policy?: "auto" | "srt" | "low-il" | "never";
+}
+
 export interface QiShellConfig {
   readonly default?: ConfigShellProfileId;
   readonly allowed?: readonly ConfigShellProfileId[];
@@ -144,6 +157,10 @@ export interface QiUserConfig {
   readonly maxSteps?: number;
   /** Max model Action proposals executed per Step (TurnLoop batch envelope). */
   readonly maxActionsPerStep?: number;
+  /** User default permission mode (ADR-0040). */
+  readonly permission?: QiPermissionConfig;
+  /** Process sandbox policy (ADR-0041). */
+  readonly sandbox?: QiSandboxConfig;
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
   readonly memory?: QiMemoryConfig;
@@ -627,6 +644,20 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
       ...(config.maxActionsPerStep === undefined
         ? {}
         : { max_actions_per_step: config.maxActionsPerStep }),
+      ...(config.permission === undefined
+        ? {}
+        : {
+            permission: {
+              ...(config.permission.default === undefined ? {} : { default: config.permission.default }),
+            },
+          }),
+      ...(config.sandbox === undefined
+        ? {}
+        : {
+            sandbox: {
+              ...(config.sandbox.policy === undefined ? {} : { policy: config.sandbox.policy }),
+            },
+          }),
       ...(config.capabilities === undefined ? {} : { capabilities: { ...config.capabilities } }),
       ...(config.shell === undefined
         ? {}
@@ -716,6 +747,20 @@ export async function saveUserConfig(path: string, config: QiUserConfig): Promis
     ...(config.maxActionsPerStep === undefined
       ? {}
       : { max_actions_per_step: config.maxActionsPerStep }),
+    ...(config.permission === undefined
+      ? {}
+      : {
+          permission: {
+            ...(config.permission.default === undefined ? {} : { default: config.permission.default }),
+          },
+        }),
+    ...(config.sandbox === undefined
+      ? {}
+      : {
+          sandbox: {
+            ...(config.sandbox.policy === undefined ? {} : { policy: config.sandbox.policy }),
+          },
+        }),
     ...(config.capabilities === undefined ? {} : { capabilities: { ...config.capabilities } }),
     ...(config.shell === undefined
       ? {}
@@ -837,6 +882,8 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     "image_input",
     "max_steps",
     "max_actions_per_step",
+    "permission",
+    "sandbox",
     "capabilities",
     "shell",
     "memory",
@@ -896,6 +943,34 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
       `${path}: reasoning_effort is not supported for provider "${provider ?? ""}" ` +
         `(needs a catalog provider with thinking / reasoning wire hints)`,
     );
+  }
+  let permission: QiPermissionConfig | undefined;
+  if (root.permission !== undefined) {
+    const table = requireTable(root.permission, `${path}: permission`);
+    assertOnlyKeys(table, ["default"], `${path}: permission`);
+    const def = optionalStringField(table.default, `${path}: permission.default`, 16);
+    if (def !== undefined && def !== "manual" && def !== "yolo" && def !== "auto") {
+      throw new TypeError(`${path}: permission.default must be manual, yolo, or auto`);
+    }
+    permission = def === undefined ? {} : { default: def as QiPermissionMode };
+  }
+  let sandbox: QiSandboxConfig | undefined;
+  if (root.sandbox !== undefined) {
+    const table = requireTable(root.sandbox, `${path}: sandbox`);
+    assertOnlyKeys(table, ["policy"], `${path}: sandbox`);
+    const policy = optionalStringField(table.policy, `${path}: sandbox.policy`, 16);
+    if (
+      policy !== undefined
+      && policy !== "auto"
+      && policy !== "srt"
+      && policy !== "low-il"
+      && policy !== "never"
+    ) {
+      throw new TypeError(`${path}: sandbox.policy must be auto, srt, low-il, or never`);
+    }
+    if (policy !== undefined) {
+      sandbox = { policy: policy as NonNullable<QiSandboxConfig["policy"]> };
+    }
   }
   let capabilities: QiCapabilityConfig | undefined;
   if (root.capabilities !== undefined) {
@@ -1033,6 +1108,8 @@ function validateUserConfig(value: unknown, path: string): QiUserConfig {
     ...(imageInput === undefined ? {} : { imageInput }),
     ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(maxActionsPerStep === undefined ? {} : { maxActionsPerStep }),
+    ...(permission === undefined ? {} : { permission }),
+    ...(sandbox === undefined ? {} : { sandbox }),
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(shell === undefined ? {} : { shell }),
     ...(memory === undefined ? {} : { memory }),

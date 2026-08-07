@@ -18,6 +18,12 @@ particular intent and time. It makes authority visible, expiring, countable, and
 An `ActionIntent` is checked against a `CapabilityLease` covering subject, effects, resources, lifetime, and use
 limits. Optional frozen Run `mode` (`ask` / `plan` / `agent`) may only narrow matches via `mode-policy`
 ([ADR 0011](../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)); it never invents authority beyond leases.
+
+**Permission mode** (`manual` / `yolo` / `auto`, [ADR-0040](../../design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode))
+is orthogonal: it selects the coding lease pack and whether in-lease non-read Actions auto-accept or require
+human Once/Session/Project approval (`approval-policy`). It never widens past leases or Session mode. Host
+children use the graded process sandbox ([ADR-0041](../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)).
+
 Delegation intersects the requested child scope with the parent. `CredentialHandle` binds secret access to
 subject and intent while the secret stays behind the broker.
 
@@ -31,10 +37,12 @@ text for precise edit.
 
 - Deny by default when no current lease matches the complete intent.
 - Mode policy denies Ask/Plan-forbidden tools and effects even when a broader launch lease exists.
+- Permission mode yolo/auto auto-accepts only after Session mode and lease checks; Ask+yolo cannot write.
+- Manual approval memory is pattern-scoped (Once does not persist); mount/MCP bind remain authority expansion.
 - Lease expiry and use limits are enforced independently of tool validation.
 - Delegation only narrows scope and emits an inspectable policy trace.
 - Credential material is not serialized into Session, context, or tool catalogs.
-- Sensitive Workspace paths require an explicit human grant before content-exposing file tools return bodies.
+- Hard path/sandbox denials fail closed without “approve danger” prompts under yolo/auto.
 - Extremely high-confidence credential literals (provider tokens, PEM blocks, URL userinfo) may still be
   redacted before provider reuse or durable persistence; `Authorization: Bearer` values and source-code
   assignment forms are not rewritten.
@@ -77,10 +85,13 @@ to tool and coordinator integration. Never make authorization depend only on a t
 
 ## Verification
 
-Use `tests/tools-capability.test.mjs`, `tests/workspace-safety.test.mjs`, and `tests/coordinator.test.mjs`.
+Use `tests/tools-capability.test.mjs`, `tests/permission-approval.test.mjs`, `tests/workspace-safety.test.mjs`,
+and `tests/coordinator.test.mjs`.
 
 ## Further reading
 
-- [Lease model](docs/lease-model.md)
-- [Credential handles](docs/credential-handles.md)
+- [Lease model](lease-model.md)
+- [Credential handles](credential-handles.md)
 - [Safety design](../../design/system-design.md#4-workspace-authority-and-effects)
+- [ADR-0040](../../design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode)
+- [ADR-0041](../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)

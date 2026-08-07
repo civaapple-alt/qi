@@ -35,6 +35,7 @@ import { runPackageCliCommand } from "./package-command.js";
 import { runExtensionCliCommand } from "./extension-command.js";
 import { runPluginCliCommand } from "./plugin-command.js";
 import { runConfigCliCommand } from "./config-command.js";
+import { runSandboxCliCommand } from "./sandbox-command.js";
 import { runAcpCliCommand } from "./acp/run.js";
 import { runHeadlessPrint } from "./headless.js";
 
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
   if (await runPluginCliCommand(process.argv.slice(2))) return;
   if (await runPackageCliCommand(process.argv.slice(2))) return;
   if (await runConfigCliCommand(process.argv.slice(2))) return;
+  if (await runSandboxCliCommand(process.argv.slice(2))) return;
   if (await runAcpCliCommand(process.argv.slice(2))) return;
   const parsed = await parseTuiCliArguments(process.argv.slice(2));
   if (parsed.kind === "help" || parsed.kind === "version") {
@@ -156,6 +158,7 @@ async function main(): Promise<void> {
         maxActionsPerStep: options.maxActionsPerStep,
         delegateConfig: options.delegateConfig,
         allowWrite: options.allowWrite,
+        ...(options.permissionMode === undefined ? {} : { permissionMode: options.permissionMode }),
         allowVerify: options.allowVerify,
         allowExecute: options.allowExecute,
         allowNetwork: options.allowNetwork,
@@ -271,6 +274,7 @@ async function main(): Promise<void> {
     maxActionsPerStep: options.maxActionsPerStep,
     delegateConfig: options.delegateConfig,
     allowWrite: options.allowWrite,
+    ...(options.permissionMode === undefined ? {} : { permissionMode: options.permissionMode }),
     allowVerify: options.allowVerify,
     allowExecute: options.allowExecute,
     allowNetwork: options.allowNetwork,
@@ -319,7 +323,7 @@ async function main(): Promise<void> {
         ? []
         : [`verify ${runtime.verificationManifest.origin} ${runtime.verificationManifest.path} · ${runtime.verificationManifest.profiles.join(", ")}`]),
       ...(presenter.discoveryTip() === undefined ? [] : [presenter.discoveryTip()!]),
-      "commands /help · /settings · /memory · /goal · /login · /ask · /mode · /plan · /model · /effort · /next · /tasks · /jobs · /subagent · /plugins · /skills · /agents · /mcp · /skill:<name> · /plugin:<id> · /agent:<id> · /mounts · /permissions · /shell · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
+      "commands /help · /settings · /memory · /goal · /login · /ask · /mode · /permission · /plan · /model · /effort · /next · /tasks · /jobs · /subagent · /plugins · /skills · /agents · /mcp · /skill:<name> · /plugin:<id> · /agent:<id> · /mounts · /permissions · /shell · /verify · /runs · /sessions · /reset-workspace · /steer <text> · /cancel · /quit",
       "",
     ].join("\n"),
   );
@@ -985,6 +989,19 @@ async function launchInfo(
     language: options.language,
     theme: options.theme,
     timelineDensity: options.timelineDensity,
+    permissionMode: runtime.permissionMode(),
+    ...(() => {
+      const info = runtime.sandboxInfo();
+      if (!info) return {};
+      return {
+        sandbox: {
+          backend: info.backend,
+          strength: info.strength,
+          status: info.status,
+          reason: info.reason,
+        },
+      };
+    })(),
     contextWindowTokens: options.contextWindowTokens,
     contextBudgetTokens: contextBudgetFromWindow(options.contextWindowTokens, options.outputReserveTokens),
     outputReserveTokens: options.outputReserveTokens,

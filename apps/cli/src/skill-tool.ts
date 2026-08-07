@@ -222,6 +222,7 @@ export function createTuiSkillTool(
               },
               ...(context.signal === undefined ? {} : { signal: context.signal }),
               ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
+              ...(context.runProcess === undefined ? {} : { runProcess: context.runProcess }),
             });
             const { stdoutFull: _stdoutFull, stderrFull: _stderrFull, ...bounded } = result;
             return { origin: "plugin" as const, name: pluginTarget.name, pluginKey: pluginTarget.pluginKey, path, ...bounded };
@@ -238,6 +239,7 @@ export function createTuiSkillTool(
             },
             ...(context.signal === undefined ? {} : { signal: context.signal }),
             ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
+            ...(context.runProcess === undefined ? {} : { runProcess: context.runProcess }),
           });
           const { stdoutFull, stderrFull, ...bounded } = result;
           if (!result.truncated) return { origin: "qi" as const, name, path, ...bounded };

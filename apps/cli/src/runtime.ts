@@ -194,7 +194,18 @@ export interface RuntimeMount {
   readonly path: string;
   readonly mode: "read";
   readonly source: "project_config" | "cli" | "grant" | "command";
+  /**
+   * When true, the mount is stored in project policy.toml for future Sessions.
+   * Session-only grants (Kimi-style "this Session") keep remember=false.
+   * Launch specs may omit this; Runtime normalizes it at construction.
+   */
+  readonly remember: boolean;
 }
+
+/** Launch / CLI mount specs may omit `remember` (defaults: project_config → true, else false). */
+export type LaunchMountSpec = Omit<RuntimeMount, "remember"> & {
+  readonly remember?: boolean;
+};
 
 export interface TuiRuntimeOptions {
   workspaceRoot: string;
@@ -233,6 +244,13 @@ export interface TuiRuntimeOptions {
   allowDelegate?: boolean;
   allowPublish?: boolean;
   allowSpend?: boolean;
+  /** ADR-0040 permission mode from CLI/project/user resolve. */
+  permissionMode?: import("@civaapple/qi-agent/capability").PermissionMode;
+  /**
+   * ADR-0041 sandbox policy override (CLI/tests). Wins over project `[sandbox].policy`.
+   * Use `"never"` in focused unit tests that should not depend on OS isolation.
+   */
+  sandboxPolicy?: "auto" | "srt" | "low-il" | "never";
   shell?: QiShellConfig;
   subject?: string;
   sessionId?: SessionId;
@@ -244,7 +262,7 @@ export interface TuiRuntimeOptions {
   skillAgentSkillsEnabled?: boolean;
   skillCompatibilityRoots?: readonly string[];
   projectConfigPath?: string;
-  mounts?: readonly RuntimeMount[];
+  mounts?: readonly LaunchMountSpec[];
   sensitivePathGrants?: readonly string[];
   sensitivePathPolicy?: SensitivePathPolicy;
   onEvent?: (event: SessionEvent) => void;
@@ -383,6 +401,15 @@ export class TuiRuntime {
   #allowDelegate = false;
   #allowPublish = false;
   #allowSpend = false;
+  #permissionMode: import("@civaapple/qi-agent/capability").PermissionMode = "manual";
+  #sessionApprovals: import("@civaapple/qi-agent/capability").StoredApproval[] = [];
+  #projectApprovals: import("@civaapple/qi-agent/capability").StoredApproval[] = [];
+  #requestApproval:
+    | import("@civaapple/qi-agent/tools").ToolExecutionContext["requestApproval"]
+    | undefined;
+  #processSandbox: import("@civaapple/qi-node/sandbox").ProcessSandbox | undefined;
+  /** Completes when optional srt ACL prewarm finishes (first tool may await this). */
+  #sandboxPrewarm: Promise<void> = Promise.resolve();
   readonly   #optionalTools = new Map<string, RegistrationHandle>();
   readonly #onEvent: ((event: SessionEvent) => void) | undefined;
   #lastGoalContinuation: GoalContinuationDecision | undefined;
@@ -487,6 +514,8 @@ export class TuiRuntime {
       path: resolve(mount.path),
       mode: "read" as const,
       source: mount.source,
+      // Project policy mounts are durable; CLI --add-dir and mid-session grants default to Session-only.
+      remember: mount.remember ?? mount.source === "project_config",
     }));
     this.#sensitivePathGrants = [...(options.sensitivePathGrants ?? [])].map((path) =>
       normalizeWorkspaceRelativePath(path),
@@ -669,6 +698,10 @@ export class TuiRuntime {
       redirectToAuthorization(server, url) { mcpAuthorizationUrls.set(server, url.toString()); },
       confirmAdditionalScopes() { return false; },
     });
+    // processSandbox is resolved after construct; wrapStdio closes over this holder.
+    const processSandboxHolder: {
+      current: import("@civaapple/qi-node/sandbox").ProcessSandbox | undefined;
+    } = { current: undefined };
     const mcp = new McpConnectionManager({
       catalog: mcpDeclarations,
       reviews: mcpReviews,
@@ -680,6 +713,30 @@ export class TuiRuntime {
         },
       },
       oauth: mcpOAuth,
+      wrapStdio: async (request) => {
+        const sandbox = processSandboxHolder.current;
+        if (!sandbox) {
+          return {
+            command: request.command,
+            args: request.args,
+            env: request.env,
+            cwd: request.cwd,
+          };
+        }
+        const wrapped = await sandbox.wrapCommand({
+          command: request.command,
+          args: request.args,
+          workspaceRoot: options.workspaceRoot,
+          cwd: request.cwd,
+          env: request.env,
+        });
+        return {
+          command: wrapped.command,
+          args: wrapped.args,
+          ...(wrapped.env === undefined ? { env: request.env } : { env: wrapped.env }),
+          cwd: request.cwd,
+        };
+      },
     });
     const mcpDeclarationSnapshot = await mcpDeclarations.discover();
     const mcpReviewSnapshot = await mcpReviews.read();
@@ -792,6 +849,23 @@ export class TuiRuntime {
     );
     // Incremental catch-up runs after create returns so first TUI paint is not blocked.
     runtime.#projectMemoryWarm = runtime.#catchUpProjectMemory();
+    runtime.#permissionMode = options.permissionMode ?? "manual";
+    try {
+      const projectLoaded = await loadProjectConfig(projectConfigPath);
+      const { storedApprovalsFromProject } = await import("./project-config.js");
+      runtime.#projectApprovals = storedApprovalsFromProject(projectLoaded.config.approvals);
+      const { resolveSandboxBackend } = await import("@civaapple/qi-node/sandbox");
+      const policy = options.sandboxPolicy ?? projectLoaded.config.sandbox?.policy;
+      runtime.#processSandbox = await resolveSandboxBackend({
+        ...(policy === undefined ? {} : { policy }),
+        workspaceRoot: options.workspaceRoot,
+      });
+      processSandboxHolder.current = runtime.#processSandbox;
+      runtime.#startSandboxPrewarm();
+    } catch {
+      runtime.#processSandbox = undefined;
+      processSandboxHolder.current = undefined;
+    }
     await runtime.applyCapabilities({
       write: options.allowWrite ?? false,
       verify: options.allowVerify ?? false,
@@ -845,6 +919,132 @@ export class TuiRuntime {
       ...(this.#allowPublish ? ["publish"] : []),
       ...(this.#allowSpend ? ["spend"] : []),
     ];
+  }
+
+  permissionMode(): import("@civaapple/qi-agent/capability").PermissionMode {
+    return this.#permissionMode;
+  }
+
+  sandboxInfo(): import("@civaapple/qi-node/sandbox").SandboxBackendInfo | undefined {
+    return this.#processSandbox?.info;
+  }
+
+  /**
+   * Background ACL warm-up for common binaries (Windows srt). Does not block TUI paint;
+   * the first sandboxed tool awaits this promise so grant work is not duplicated mid-Action.
+   */
+  #startSandboxPrewarm(): void {
+    const sandbox = this.#processSandbox;
+    if (!sandbox?.prewarm) {
+      this.#sandboxPrewarm = Promise.resolve();
+      return;
+    }
+    this.#sandboxPrewarm = sandbox
+      .prewarm({
+        commands: [process.execPath],
+        workspaceRoot: this.#workspaceRoot,
+        readOnlyRoots: this.#mounts.map((mount) => mount.path),
+      })
+      .catch(() => undefined);
+  }
+
+  /** Bound sandboxed runner for ToolExecutionContext (ADR-0041). */
+  runProcess = async (
+    command: string,
+    args: readonly string[],
+    options?: Parameters<NonNullable<import("@civaapple/qi-agent/tools").ToolExecutionContext["runProcess"]>>[2],
+  ) => {
+    if (!this.#processSandbox) {
+      const { runHostProcess } = await import("@civaapple/qi-node/workspace");
+      return runHostProcess(command, args, options);
+    }
+    // Finish any in-flight ACL prewarm so first shell/verify is not double-granted.
+    await this.#sandboxPrewarm;
+    return this.#processSandbox.run({
+      command,
+      args,
+      ...(options === undefined ? {} : { options }),
+      workspaceRoot: this.#workspaceRoot,
+      readOnlyRoots: this.#mounts.map((mount) => mount.path),
+    });
+  };
+
+  /**
+   * Apply permission mode: expand coding lease pack, persist `[permission].mode`, keep expert
+   * capability table only when the caller later uses applyCapabilities with explicit caps.
+   */
+  async applyPermissionMode(
+    mode: import("@civaapple/qi-agent/capability").PermissionMode,
+    options?: { persist?: boolean },
+  ): Promise<{
+    mode: import("@civaapple/qi-agent/capability").PermissionMode;
+    labels: readonly string[];
+  }> {
+    if (this.active) throw new Error("Cannot change permission mode while a Run is active");
+    this.#permissionMode = mode;
+    const { capabilityConfigFromPermissionMode } = await import("./project-config.js");
+    const pack = capabilityConfigFromPermissionMode(mode);
+    const applied = await this.applyCapabilities(pack, { persist: false });
+    if (options?.persist !== false) {
+      await this.#saveProjectPermissionMode(mode);
+    }
+    return { mode, labels: applied.labels };
+  }
+
+  setApprovalGate(
+    requestApproval: import("@civaapple/qi-agent/tools").ToolExecutionContext["requestApproval"],
+  ): void {
+    this.#requestApproval = requestApproval;
+  }
+
+  getSessionApprovals = (): readonly import("@civaapple/qi-agent/capability").StoredApproval[] =>
+    this.#sessionApprovals;
+
+  getProjectApprovals = (): readonly import("@civaapple/qi-agent/capability").StoredApproval[] =>
+    this.#projectApprovals;
+
+  async rememberApproval(
+    entry: import("@civaapple/qi-agent/capability").StoredApproval,
+  ): Promise<void> {
+    if (entry.scope === "session") {
+      this.#sessionApprovals = [...this.#sessionApprovals, entry];
+      return;
+    }
+    this.#projectApprovals = [...this.#projectApprovals, entry];
+    // Project persistence is optional until [[approvals]] load/save is fully wired; memory still works in-process.
+    try {
+      await this.#appendProjectApproval(entry);
+    } catch {
+      // Keep in-memory project memory even if policy write fails.
+    }
+  }
+
+  async #saveProjectPermissionMode(
+    mode: import("@civaapple/qi-agent/capability").PermissionMode,
+  ): Promise<void> {
+    const loaded = await loadProjectConfig(this.#projectConfigPath);
+    await saveProjectConfig(this.#projectConfigPath, {
+      ...loaded.config,
+      permission: { mode },
+    });
+  }
+
+  async #appendProjectApproval(
+    entry: import("@civaapple/qi-agent/capability").StoredApproval,
+  ): Promise<void> {
+    const { projectApprovalFromStored } = await import("./project-config.js");
+    const record = projectApprovalFromStored(entry);
+    const loaded = await loadProjectConfig(this.#projectConfigPath);
+    const existing = loaded.config.approvals ?? [];
+    // Replace same pattern if present; append otherwise.
+    const next = [
+      ...existing.filter((candidate) => candidate.pattern !== record.pattern),
+      record,
+    ].slice(-200);
+    await saveProjectConfig(this.#projectConfigPath, {
+      ...loaded.config,
+      approvals: next,
+    });
   }
 
   async applyCapabilities(
@@ -1526,7 +1726,7 @@ export class TuiRuntime {
   async addMount(
     absolutePath: string,
     source: RuntimeMount["source"] = "command",
-    mountId?: string,
+    options?: { mountId?: string; remember?: boolean },
   ): Promise<RuntimeMount> {
     const path = resolve(absolutePath);
     assertMountPathAllowed(path);
@@ -1535,12 +1735,28 @@ export class TuiRuntime {
       throw new TypeError(`Mount path must be a regular directory: ${path}`);
     }
     const existing = this.#mounts.find((mount) => resolve(mount.path) === path);
-    if (existing) return existing;
+    if (existing) {
+      // Promote Session-only → project when the user later chooses remember.
+      if (options?.remember === true && !existing.remember) {
+        const promoted: RuntimeMount = { ...existing, remember: true };
+        const nextMounts = this.#mounts.map((mount) =>
+          mount.id === existing.id ? promoted : mount,
+        );
+        await this.#persistProjectMounts(nextMounts);
+        this.#mounts = nextMounts;
+        return promoted;
+      }
+      return existing;
+    }
     const used = new Set(this.#mounts.map((mount) => mount.id));
+    const mountId = options?.mountId;
     const id = mountId && !used.has(mountId) ? mountId : suggestMountId(path, used);
-    const mount: RuntimeMount = { id, path, mode: "read", source };
+    const remember = options?.remember === true;
+    const mount: RuntimeMount = { id, path, mode: "read", source, remember };
     const nextMounts = [...this.#mounts, mount];
-    await this.#persistProjectMounts(nextMounts);
+    if (remember) {
+      await this.#persistProjectMounts(nextMounts);
+    }
     this.#mounts = nextMounts;
     this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
     this.#humanControl.addMount(this.sessionId, {
@@ -1553,11 +1769,15 @@ export class TuiRuntime {
   }
 
   async removeMount(mountId: string, reason = "User unmounted"): Promise<void> {
-    if (!this.#mounts.some((mount) => mount.id === mountId)) {
+    const removed = this.#mounts.find((mount) => mount.id === mountId);
+    if (!removed) {
       throw new TypeError(`Unknown mount id: ${mountId}`);
     }
     const nextMounts = this.#mounts.filter((mount) => mount.id !== mountId);
-    await this.#persistProjectMounts(nextMounts);
+    // Only rewrite project policy when a remembered mount is leaving (or remaining set of remembered mounts).
+    if (removed.remember) {
+      await this.#persistProjectMounts(nextMounts);
+    }
     this.#mounts = nextMounts;
     this.#humanControl.ensureSession(this.sessionId, "Qi TUI");
     this.#humanControl.removeMount(this.sessionId, mountId, reason);
@@ -2092,6 +2312,7 @@ export class TuiRuntime {
       const workspaceInstructions = await loadRootWorkspaceInstructions(this.#workspaceRoot, {
         required: mode === "plan" || (mode === "agent" && this.#allowWrite),
       });
+      const sandbox = this.#processSandbox?.info;
       const contextBlocks = buildTuiContextBlocks({
         verificationProfiles: this.#verificationProfiles,
         shellProfiles: this.shellProfiles,
@@ -2101,6 +2322,17 @@ export class TuiRuntime {
         mode,
         mounts: this.#mounts,
         ...(workspaceInstructions === undefined ? {} : { workspaceInstructions }),
+        permissionMode: this.#permissionMode,
+        ...(sandbox === undefined
+          ? {}
+          : {
+              sandbox: {
+                backend: sandbox.backend,
+                strength: sandbox.strength,
+                status: sandbox.status,
+                wraps: sandbox.wraps,
+              },
+            }),
       });
       const superpowers = await this.#superpowersBootstrap();
       if (superpowers) {
@@ -2163,6 +2395,12 @@ export class TuiRuntime {
         getMounts: this.getMounts,
         getSensitivePathGrants: this.getSensitivePathGrants,
         sensitivePathPolicy: this.#sensitivePathPolicy,
+        permissionMode: this.#permissionMode,
+        getSessionApprovals: this.getSessionApprovals,
+        getProjectApprovals: this.getProjectApprovals,
+        ...(this.#requestApproval === undefined ? {} : { requestApproval: this.#requestApproval }),
+        rememberApproval: (entry) => this.rememberApproval(entry),
+        runProcess: this.runProcess,
       }));
       if (result.view.runs[result.runId]?.goalBinding) {
         this.settleGoalContinuation(result.runId);
@@ -2566,49 +2804,83 @@ export class TuiRuntime {
 
   async saveProjectCapabilities(capabilities: QiProjectConfig["capabilities"]): Promise<void> {
     const loaded = await loadProjectConfig(this.#projectConfigPath);
-    const next: QiProjectConfig = {
+    await saveProjectConfig(
+      this.#projectConfigPath,
+      this.#projectConfigWithMounts(loaded.config, this.#mounts, { capabilities }),
+    );
+  }
+
+  /** Project policy only stores remembered mounts; Session-only grants stay in-memory + Session events. */
+  #rememberedMounts(mounts: readonly RuntimeMount[]): readonly RuntimeMount[] {
+    return mounts.filter((mount) => mount.remember);
+  }
+
+  /**
+   * Merge a partial project policy write while preserving permission/sandbox/approvals.
+   * Optional fields are omitted (never set to `undefined`) for exactOptionalPropertyTypes.
+   */
+  #projectConfigWithMounts(
+    base: QiProjectConfig,
+    mounts: readonly RuntimeMount[],
+    patch: { capabilities?: QiProjectConfig["capabilities"] } = {},
+  ): QiProjectConfig {
+    const {
+      mounts: _dropMounts,
+      sensitivePathGrants: _dropGrants,
+      sensitivePaths: _dropPaths,
+      capabilities: baseCapabilities,
+      ...rest
+    } = base;
+    const remembered = this.#rememberedMounts(mounts);
+    const sensitive = this.#sensitivePathConfigFields();
+    const capabilities = "capabilities" in patch ? patch.capabilities : baseCapabilities;
+    return {
+      ...rest,
       version: 1,
-      ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
       ...(capabilities === undefined ? {} : { capabilities }),
-      ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
-      ...(this.#mounts.length === 0
+      ...(remembered.length === 0
         ? {}
         : {
-          mounts: this.#mounts.map((mount) => ({
+          mounts: remembered.map((mount) => ({
             id: mount.id,
             path: mount.path,
             mode: "read" as const,
           })),
         }),
-      ...this.#sensitivePathConfigFields(),
+      ...(sensitive.sensitivePathGrants === undefined
+        ? {}
+        : { sensitivePathGrants: sensitive.sensitivePathGrants }),
+      ...(sensitive.sensitivePaths === undefined
+        ? {}
+        : { sensitivePaths: sensitive.sensitivePaths }),
     };
-    await saveProjectConfig(this.#projectConfigPath, next);
   }
 
   async #persistProjectMounts(mounts: readonly RuntimeMount[] = this.#mounts): Promise<void> {
     const loaded = await loadProjectConfig(this.#projectConfigPath);
-    const next: QiProjectConfig = {
-      version: 1,
-      ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
-      ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
-      ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
-      mounts: mounts.map((mount) => ({ id: mount.id, path: mount.path, mode: "read" as const })),
-      ...this.#sensitivePathConfigFields(),
-    };
-    await saveProjectConfig(this.#projectConfigPath, next);
+    await saveProjectConfig(
+      this.#projectConfigPath,
+      this.#projectConfigWithMounts(loaded.config, mounts),
+    );
   }
 
   async #persistSensitivePathGrants(grants: readonly string[] = this.#sensitivePathGrants): Promise<void> {
     const loaded = await loadProjectConfig(this.#projectConfigPath);
+    // Rebuild sensitive fields from the grant list argument; keep other policy keys.
+    const remembered = this.#rememberedMounts(this.#mounts);
+    const {
+      mounts: _m,
+      sensitivePathGrants: _g,
+      sensitivePaths: _p,
+      ...rest
+    } = loaded.config;
     const next: QiProjectConfig = {
+      ...rest,
       version: 1,
-      ...(loaded.config.maxSteps === undefined ? {} : { maxSteps: loaded.config.maxSteps }),
-      ...(loaded.config.capabilities === undefined ? {} : { capabilities: loaded.config.capabilities }),
-      ...(loaded.config.shell === undefined ? {} : { shell: loaded.config.shell }),
-      ...(this.#mounts.length === 0
+      ...(remembered.length === 0
         ? {}
         : {
-          mounts: this.#mounts.map((mount) => ({
+          mounts: remembered.map((mount) => ({
             id: mount.id,
             path: mount.path,
             mode: "read" as const,

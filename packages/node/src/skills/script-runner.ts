@@ -30,6 +30,12 @@ export async function runSkillScript(input: {
   request: SkillScriptRequest;
   signal?: AbortSignal;
   reportActivity?: (activity: { type: "output"; stream: "stdout" | "stderr"; text: string; truncated: boolean }) => void;
+  /** ADR-0041 optional sandboxed runner (same shape as ToolExecutionContext.runProcess). */
+  runProcess?: (
+    command: string,
+    args: readonly string[],
+    options?: Parameters<typeof runHostProcess>[2],
+  ) => ReturnType<typeof runHostProcess>;
 }): Promise<SkillScriptResult> {
   const normalized = input.request.path.replaceAll("\\", "/").replace(/^\.\//, "");
   if (!normalized.startsWith("scripts/") || normalized.split("/").some((part) => part === ".." || !part)) {
@@ -49,7 +55,8 @@ export async function runSkillScript(input: {
     throw new ToolFailure("SKILL_SCRIPT_ARGUMENTS", "Skill script arguments exceed the bounded argv contract");
   }
   const invocation = await scriptInvocation(scriptReal, extname(normalized).toLowerCase(), input.workspaceRoot, args);
-  const result = await runHostProcess(invocation.command, invocation.args, {
+  const spawn = input.runProcess ?? runHostProcess;
+  const result = await spawn(invocation.command, invocation.args, {
     cwd: workdir,
     timeoutMs: input.request.timeoutMs ?? 30_000,
     ...(input.signal === undefined ? {} : { signal: input.signal }),

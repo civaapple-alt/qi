@@ -217,6 +217,7 @@ export async function runHeadlessPrint(
       maxActionsPerStep: policy.maxActionsPerStep,
       delegateConfig: policy.delegateConfig,
       allowWrite: policy.allowWrite,
+      ...(options.permissionMode === undefined ? {} : { permissionMode: options.permissionMode }),
       allowVerify: policy.allowVerify,
       allowExecute: policy.allowExecute,
       allowNetwork: policy.allowNetwork,
@@ -253,7 +254,7 @@ export async function runHeadlessPrint(
         model: auth.config.model,
         provider: auth.config.provider,
         mode: runtime.mode(),
-        permissionMode: "capability",
+        permissionMode: runtime.permissionMode(),
         context_budget: contextBudgetFromWindow(contextWindowTokens, outputReserveTokens),
       }));
       io.writeStdout(formatStreamJsonLine({

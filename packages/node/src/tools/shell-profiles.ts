@@ -8,9 +8,11 @@ import {
 } from "@civaapple/qi-node/workspace";
 import { ToolFailure } from "@civaapple/qi-agent/tools";
 import { storeTruncatedOutputArtifact, truncatedOutputCaptureLimitBytes } from "./output-artifact.js";
+import { runToolProcess } from "./process-runner.js";
 import { defineTool, type AnyToolDefinition } from "@civaapple/qi-agent/tools";
 import { resolveWorkspacePath } from "./workspace.js";
 import {
+  isProcessStartError,
   resolveShellExecutable,
   windowsCommandInvocation,
 } from "./builtins.js";
@@ -190,20 +192,36 @@ export function createScriptTool(profiles: readonly AvailableScriptProfile[]): A
       }
       const invocation = await buildScriptInvocation(profile, request.script, context.workspaceRoot);
       try {
-        const { stdoutFull, stderrFull, ...result } = await runHostProcess(invocation.command, invocation.args, {
-          cwd,
-          timeoutMs: request.timeoutMs ?? 30_000,
-          ...(context.signal === undefined ? {} : { signal: context.signal }),
-          env: scrubCredentialEnvironment(process.env, {
-            QI_SHELL_PROFILE: profile.id,
-            NO_COLOR: "1",
-          }),
-          outputLimitBytes: 64 * 1024,
-          captureLimitBytes: truncatedOutputCaptureLimitBytes,
-          ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-          ...(invocation.stdin === undefined ? {} : { stdin: invocation.stdin }),
-          ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
-        });
+        let processResult: Awaited<ReturnType<typeof runToolProcess>>;
+        try {
+          processResult = await runToolProcess(context, invocation.command, invocation.args, {
+            cwd,
+            timeoutMs: request.timeoutMs ?? 30_000,
+            ...(context.signal === undefined ? {} : { signal: context.signal }),
+            env: scrubCredentialEnvironment(process.env, {
+              QI_SHELL_PROFILE: profile.id,
+              NO_COLOR: "1",
+            }),
+            outputLimitBytes: 64 * 1024,
+            captureLimitBytes: truncatedOutputCaptureLimitBytes,
+            ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+            ...(invocation.stdin === undefined ? {} : { stdin: invocation.stdin }),
+            ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
+          });
+        } catch (error) {
+          if (isProcessStartError(error)) {
+            throw new ToolFailure(
+              "SHELL_PROFILE_START_FAILED",
+              `Could not start shell profile ${profile.id}: ${error.message}` +
+                (error.code === "EINVAL" && process.platform === "win32"
+                  ? " (Windows often returns EINVAL when spawning .cmd shims without cmd.exe — check sandbox/srt wrap)"
+                  : ""),
+              { profile: profile.id, code: error.code, syscall: error.syscall },
+            );
+          }
+          throw error;
+        }
+        const { stdoutFull, stderrFull, ...result } = processResult;
         const artifactRef = await storeTruncatedOutputArtifact(context, { truncated: result.truncated, stdoutFull, stderrFull });
         const output = {
           profile: profile.id,

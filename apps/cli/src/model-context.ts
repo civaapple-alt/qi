@@ -33,6 +33,13 @@ export interface WorkspaceInstructions {
   readonly sha256: string;
 }
 
+export interface ModelContextSandbox {
+  readonly backend: string;
+  readonly strength: "full" | "reduced" | "none";
+  readonly status: string;
+  readonly wraps: readonly string[];
+}
+
 export interface TuiContextInput {
   readonly verificationProfiles: readonly VerificationProfile[];
   readonly shellProfiles: ShellProfileSnapshot;
@@ -43,6 +50,10 @@ export interface TuiContextInput {
   readonly mounts?: readonly ModelContextMount[];
   readonly workspaceInstructions?: WorkspaceInstructions;
   readonly platform?: NodeJS.Platform;
+  /** ADR-0041 process sandbox disclosure (least-info). */
+  readonly sandbox?: ModelContextSandbox;
+  /** ADR-0040 permission mode for operator/model awareness. */
+  readonly permissionMode?: "manual" | "yolo" | "auto";
 }
 
 const MAX_WORKSPACE_INSTRUCTIONS_BYTES = 64 * 1024;
@@ -109,6 +120,17 @@ export function buildTuiContextBlocks(input: TuiContextInput): TuiContextBlock[]
   >)
     .map(([name, enabled]) => `${name}=${enabled ? "enabled" : "disabled"}`)
     .join(", ");
+  const sandboxFacts = input.sandbox
+    ? `Process sandbox: backend=${input.sandbox.backend} strength=${input.sandbox.strength} status=${input.sandbox.status} wraps=${input.sandbox.wraps.join(",")}. ` +
+      (input.sandbox.strength === "reduced"
+        ? "Reduced isolation (e.g. Windows Low IL) does not block reading user secrets; path guards still apply. "
+        : input.sandbox.strength === "none"
+          ? "No OS sandbox; path guards and capability leases still apply. "
+          : "OS sandbox enforces filesystem/network policy for wrapped child processes. ")
+    : "";
+  const permissionFacts = input.permissionMode
+    ? `Permission mode=${input.permissionMode} (manual asks Once/Session/Project; yolo/auto auto-accept in-lease tools). `
+    : "";
 
   const blocks: TuiContextBlock[] = [
     {
@@ -159,6 +181,8 @@ export function buildTuiContextBlocks(input: TuiContextInput): TuiContextBlock[]
       role: "system",
       content:
         `Host execution facts: platform=${hostPlatform}. Shell profiles: ${profileFacts}. ` +
+        `${sandboxFacts}` +
+        `${permissionFacts}` +
         "The shell Tool is direct executable plus argv only; it does not interpret pipes, redirection, chaining, expansion, or builtins. " +
         `The script Tool accepts only these probed profiles (${scriptProfileList}) and is the path for shell syntax. ` +
         `${input.codeactRuntime

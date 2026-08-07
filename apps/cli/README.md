@@ -118,7 +118,8 @@ Frequently used commands (default `/help` and autocomplete; aliases remain calla
 | `/mcp` | Single MCP management panel: server status, refresh, OAuth, capability inspection, bind, and unbind; use `qi mcp …` for non-interactive management |
 | `/tasks` | List depth-1 Subagent research Tasks for the selected Run; Enter opens tracking |
 | `/jobs [stop …]` | Interactive background Job list; select a running Job and press Enter to stop it |
-| `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path form) / unmount (picker); slash args still work |
+| `/mounts [add\|unmount …]` | Read-only mounts hub: list / add (path → Session-only or Remember) / unmount; slash args still work |
+| `/permission` | Daily Manual / YOLO / Auto approval rhythm (ADR-0040); expert multi-select remains under `/permissions` |
 | `/permissions` | Select capability grants (Space multi-select; applies to this Session and writes project `policy.toml`) |
 | `/shell` | Select global shell profiles (`direct` / `pwsh` / `cmd` / `bash`; applies immediately and writes `$QI_HOME/config.toml`) |
 | `/verify` | Guided verification setup: scans `package.json`/`pom.xml`/`AGENTS.md`/`README.md` for command candidates, then writes `.qi/qi.verify.json` after you confirm the selection |
@@ -284,8 +285,9 @@ names the exact Qi project-private data directory; when omitted it defaults to
 
 Per-Workspace policy lives in `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`
 (`max_steps`, `[capabilities]`, `[shell]`,
-`[[mounts]]`, `sensitive_path_grants`, `[sensitive_paths]`), overlaying global `~/.qi/config.toml`; CLI flags still win. `--add-dir PATH` and
-`/mounts add` authorize **read-only** mounts (`mount:<id>/…`); mutations stay in the primary Workspace.
+`[permission]`, `[sandbox]`, `[[mounts]]`, `[[approvals]]`, `sensitive_path_grants`, `[sensitive_paths]`), overlaying global `~/.qi/config.toml`; CLI flags still win. `--add-dir PATH` is Session-launch authority;
+`/mounts add` and PATH_GRANT panels choose **This Session only** vs **Remember for project** before authorizing
+**read-only** mounts (`mount:<id>/…`); mutations stay in the primary Workspace.
 Outside-root reads fail with `PATH_GRANT_REQUIRED` and open an allow/deny panel
 ([ADR 0015](../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts)). Sensitive Workspace
 files (for example `.env`) fail with `SENSITIVE_PATH_GRANT_REQUIRED` before any file body reaches the model and open a

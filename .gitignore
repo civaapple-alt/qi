@@ -8,6 +8,8 @@ coverage/
 .cli-package/
 .release/
 .artifacts/
+# Local sandbox staging / scratch (never commit machine-private sandbox state).
+.qi-sandbox/
 .qi/*
 !.qi/packages.toml
 !.qi/packages.lock.json

@@ -39,12 +39,32 @@ interface LiveConnection {
 
 const jsonSchemaValidator = new AjvJsonSchemaValidator();
 
+export type McpStdioWrap = (request: {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd: string;
+  readonly env: Readonly<Record<string, string>>;
+}) =>
+  | {
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly env?: Readonly<Record<string, string>>;
+      readonly cwd?: string;
+    }
+  | Promise<{
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly env?: Readonly<Record<string, string>>;
+      readonly cwd?: string;
+    }>;
+
 export class McpConnectionManager {
   readonly #catalog: McpDeclarationCatalog;
   readonly #reviews: McpReviewStore;
   readonly #credentials: McpCredentialResolver | undefined;
   readonly #oauth: McpOAuthProviderFactory | undefined;
   readonly #workspaceRoot: string;
+  readonly #wrapStdio: McpStdioWrap | undefined;
   readonly #connections = new Map<string, LiveConnection>();
   readonly #pendingAuth = new Map<string, Transport>();
   readonly #statuses = new Map<string, McpServerStatus>();
@@ -55,12 +75,15 @@ export class McpConnectionManager {
     workspaceRoot: string;
     credentials?: McpCredentialResolver;
     oauth?: McpOAuthProviderFactory;
+    /** ADR-0041: rewrite stdio spawn through process sandbox (e.g. srt). */
+    wrapStdio?: McpStdioWrap;
   }) {
     this.#catalog = options.catalog;
     this.#reviews = options.reviews;
     this.#workspaceRoot = options.workspaceRoot;
     this.#credentials = options.credentials;
     this.#oauth = options.oauth;
+    this.#wrapStdio = options.wrapStdio;
   }
 
   async statuses(): Promise<readonly McpServerStatus[]> {
@@ -259,15 +282,29 @@ export class McpConnectionManager {
         ...await resolveReferenceMap(declaration.env, this.#credentials),
         NO_COLOR: "1",
         QI_MCP_SERVER: declaration.name,
+      }) as Record<string, string>;
+      const cwd = declaration.cwd ?? this.#workspaceRoot;
+      const baseArgs = [...declaration.args];
+      const wrapped = this.#wrapStdio
+        ? await this.#wrapStdio({ command, args: baseArgs, cwd, env })
+        : { command, args: baseArgs, env, cwd };
+      const transport = new StdioClientTransport({
+        command: wrapped.command,
+        args: [...wrapped.args],
+        env: (wrapped.env ?? env) as Record<string, string>,
+        cwd: wrapped.cwd ?? cwd,
+        stderr: "pipe",
+        maxBufferSize: 8 * 1024 * 1024,
       });
-      const transport = new StdioClientTransport({ command, args: [...declaration.args], env: env as Record<string, string>, cwd: declaration.cwd ?? this.#workspaceRoot, stderr: "pipe", maxBufferSize: 8 * 1024 * 1024 });
       return {
         transport,
         ...(transport.stderr === null ? {} : { stderr: transport.stderr }),
         identity: {
           transport: "stdio",
           command: canonicalCommand,
-          args: [...declaration.args],
+          args: baseArgs,
+          spawnCommand: wrapped.command,
+          spawnArgs: [...wrapped.args],
           size: commandInfo.size,
           sha256: await sha256File(canonicalCommand),
         },

@@ -23,6 +23,7 @@ const bundledPackages = [
 ];
 
 const publicDependencies = {
+  "@agentclientprotocol/sdk": "^1.3.0",
   "@modelcontextprotocol/client": "2.0.0",
   "@earendil-works/pi-tui": "0.81.1",
   "@sinclair/typebox": "0.34.52",

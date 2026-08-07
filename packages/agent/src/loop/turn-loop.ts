@@ -119,6 +119,14 @@ export interface TurnRequest {
     readonly extra?: readonly string[];
     readonly exclude?: readonly string[];
   };
+  /** ADR-0040 permission mode for approval policy. */
+  permissionMode?: import("@civaapple/qi-agent/capability").PermissionMode;
+  getSessionApprovals?: () => readonly import("@civaapple/qi-agent/capability").StoredApproval[];
+  getProjectApprovals?: () => readonly import("@civaapple/qi-agent/capability").StoredApproval[];
+  requestApproval?: import("@civaapple/qi-agent/tools").ToolExecutionContext["requestApproval"];
+  rememberApproval?: import("@civaapple/qi-agent/tools").ToolExecutionContext["rememberApproval"];
+  /** ADR-0041 sandboxed child process runner for shell/script/verify. */
+  runProcess?: import("@civaapple/qi-agent/tools").ToolExecutionContext["runProcess"];
 }
 
 export interface TurnResult {
@@ -840,6 +848,16 @@ export class TurnLoop {
             workspaceRoot: request.workspaceRoot,
             artifactStore: request.artifactStore,
             mode: frozenMode,
+            ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
+            ...(request.getSessionApprovals === undefined
+              ? {}
+              : { getSessionApprovals: request.getSessionApprovals }),
+            ...(request.getProjectApprovals === undefined
+              ? {}
+              : { getProjectApprovals: request.getProjectApprovals }),
+            ...(request.requestApproval === undefined ? {} : { requestApproval: request.requestApproval }),
+            ...(request.rememberApproval === undefined ? {} : { rememberApproval: request.rememberApproval }),
+            ...(request.runProcess === undefined ? {} : { runProcess: request.runProcess }),
             mounts: request.getMounts?.() ?? [],
             ...(request.getMounts === undefined ? {} : { getMounts: request.getMounts }),
             sensitivePathGrants: request.getSensitivePathGrants?.() ?? [],

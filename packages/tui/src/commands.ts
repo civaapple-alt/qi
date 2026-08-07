@@ -83,6 +83,7 @@ export const tuiCommands: readonly TuiCommandDefinition[] = Object.freeze([
   { name: "tasks", descriptionKey: "cmd.tasks", category: "inspect", visibility: "primary", panel: "tasks" },
   { name: "jobs", descriptionKey: "cmd.jobs", argumentHint: "[stop <N|ID>]", category: "inspect", visibility: "primary", panel: "jobs" },
   { name: "mounts", descriptionKey: "cmd.mounts", argumentHint: "[add <path>|unmount <id>]", category: "inspect", visibility: "primary" },
+  { name: "permission", descriptionKey: "cmd.permission", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
   { name: "permissions", descriptionKey: "cmd.permissions", category: "inspect", visibility: "primary", draftPolicy: "preserve" },
   { name: "shell", descriptionKey: "cmd.shell", category: "manage", visibility: "primary", draftPolicy: "preserve" },
   { name: "verify", descriptionKey: "cmd.verify", category: "inspect", visibility: "primary" },

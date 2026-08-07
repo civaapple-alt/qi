@@ -141,7 +141,16 @@ paste, or Markdown code block. A final response that is truncated by rendered li
 a non-empty composer or follow-up editor; they leave a persistent attention notice. Focus and expansion are
 observational; they do not hide committed history.
 
-Session mode is durable (`ask` / `plan` / `agent`). Plan mode records managed Formal Markdown
+Session mode is durable (`ask` / `plan` / `agent`). **Permission mode** is a separate durable control
+(`manual` / `yolo` / `auto`, [ADR-0040](../../../design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode)):
+it sets the coding lease pack and whether in-lease tools auto-accept or require Once/Session/Project approval.
+It is not a Session mode and not Goal-based 追寻. CLI `--permission`, project `[permission].mode`, and user
+`[permission].default` resolve with the usual precedence; default remains **manual**. YOLO/auto auto-accept
+in-lease work while path guards and the graded process sandbox
+([ADR-0041](../../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)) fail closed
+without “approve danger” prompts. Mount grants and MCP bind remain human authority expansion.
+
+Plan mode records managed Formal Markdown
 `plan_document` revisions; a Formal Plan is not a Todo. Review offers `开始实现` / `修改计划` / `拒绝计划`.
 Accept settles review, switches to Agent, and starts one whole-plan Run
 ([ADR 0011](../../../design/decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)). The
@@ -301,21 +310,27 @@ ContextBlocks.
 
 Cross-directory reads use human-gated mounts, not model-owned authority. Project policy lives at
 `$QI_HOME/projects/<workspace-name>-<path-hash>/policy.toml`
-(`[capabilities]`, `[[mounts]]`); capability merge order is
+(`[permission]`, `[sandbox]`, `[capabilities]`, `[[mounts]]`, `[[approvals]]`); capability merge order is
 CLI flags > project TOML > global `$QI_HOME/config.toml`. **Shell profiles** live only in
 `$QI_HOME/config.toml` (project `[shell]` is ignored); first launch without `[shell]` probes and writes
 installed defaults. `/mounts add <path>`, `/mounts`, and
-`/mounts unmount <id>` manage mounts in-session. `/permissions` (also under `/settings`) lists effective Session
+`/mounts unmount <id>` manage mounts in-session. Authority expansion is always human-gated
+([ADR-0040](../../../design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode)):
+after choosing a path, the TUI asks **This Session only** vs **Remember for project**. Session-only mounts
+apply immediately (including sandbox `readOnlyRoots` for child processes) and are recorded as Session
+mount events, but are **not** written to project policy. Remember writes `[[mounts]]` so future Sessions
+reload them. `/permissions` (also under `/settings`) lists effective Session
 capabilities with Space multi-select, applies the selection to the current Session (tool catalog + leases)
-immediately when no Run is active, and writes `[capabilities]` into the project config. `/shell` multi-selects
+immediately when no Run is active, and writes `[capabilities]` into the project config. Daily rhythm is
+`/permission` (Manual / YOLO / Auto). `/shell` multi-selects
 `direct` / `pwsh` / `cmd` / `bash`, hot-applies tools and leases, and writes `[shell]` into `$QI_HOME/config.toml`.
 In-process New Session / resume re-reads project capabilities (CLI `--allow-*` / `--safe` from the original
 launch still win) and re-ensures user shell config.
 External project-TOML edits during a live Runtime still wait for relaunch; `/shell` and `/permissions` are the
 in-session apply paths.
 When a read/discovery tool hits a path outside the primary Workspace and
-mounts, the Action fails with `PATH_GRANT_REQUIRED` and the TUI offers allow (persist read mount) or deny.
-Authorized paths use `mount:<id>/…`; write/edit/move/remove remain confined to the primary Workspace. See
+mounts, the Action fails with `PATH_GRANT_REQUIRED` and the TUI offers Session-only / Remember / Deny
+(YOLO never invents mounts). Authorized paths use `mount:<id>/…`; write/edit/move/remove remain confined to the primary Workspace. See
 [ADR 0015](../../../design/decisions.md#adr-0015-separate-project-policy-from-session-mount-facts).
 
 ## Skill discovery and installation

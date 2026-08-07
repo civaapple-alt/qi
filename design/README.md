@@ -43,9 +43,11 @@ the six coordinated public packages.
 
 1. [system-design §4](system-design.md#4-workspace-authority-and-effects)
 2. [decisions: precise mutation](decisions.md#adr-0003-use-freshness-checked-precise-file-mutation)
-3. `packages/agent/docs/capability/README.md`
-4. `packages/agent/docs/tools/execution-contract.md`
-5. `packages/node/docs/workspace/effect-journal.md`
+3. [ADR-0040: permission mode](decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode) (manual/yolo/auto)
+4. [ADR-0041: graded process sandbox](decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host) (srt → low-il → host)
+5. `packages/agent/docs/capability/README.md`
+6. `packages/agent/docs/tools/execution-contract.md`
+7. `packages/node/README.md` (`./sandbox`) and `packages/node/docs/workspace/effect-journal.md`
 
 ### Models, context, or memory
 
@@ -66,16 +68,18 @@ then `packages/node/README.md` (`./media`) and the provider adapter tests.
 3. `packages/agent/docs/eval/evidence-completion.md`
 4. goal/evaluator tests
 
-### Session modes or UI
+### Session modes, permission mode, or UI
 
 1. [product vision: 同行、追寻、守望](product-vision.md#5-同行追寻守望)
 2. [system-design §7](system-design.md#7-human-control-and-application-surfaces)
 3. [decisions: human control](decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)
-4. [decisions: bounded interaction timeline](decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention)
-5. [ADR-0031: drafts, `@` mentions, model reconfigure, permission display](decisions.md#adr-0031-preserve-composer-drafts-across-local-slash-controls)
-6. [ADR-0032: consecutive Session Run disclosure](decisions.md#adr-0032-bound-automatic-disclosure-for-consecutive-session-runs)
-7. `packages/tui/README.md`
-8. `apps/cli/README.md`
+4. [ADR-0040: permission mode manual/yolo/auto](decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode)
+5. [ADR-0041: graded process sandbox](decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)
+6. [decisions: bounded interaction timeline](decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention)
+7. [ADR-0031: drafts, `@` mentions, model reconfigure, permission display](decisions.md#adr-0031-preserve-composer-drafts-across-local-slash-controls)
+8. [ADR-0032: consecutive Session Run disclosure](decisions.md#adr-0032-bound-automatic-disclosure-for-consecutive-session-runs)
+9. `packages/tui/README.md`
+10. `apps/cli/README.md`
 
 ### Extensions
 

@@ -10,6 +10,7 @@ import {
 } from "@civaapple/qi-node/workspace";
 import { ToolFailure } from "@civaapple/qi-agent/tools";
 import { storeTruncatedOutputArtifact, truncatedOutputCaptureLimitBytes } from "./output-artifact.js";
+import { runToolProcess } from "./process-runner.js";
 import { defineTool, type AnyToolDefinition, type ToolExecutionContext } from "@civaapple/qi-agent/tools";
 import {
   assertSensitiveContentAllowed,
@@ -730,9 +731,9 @@ export const shellTool = defineTool({
       "UNSAFE_SHELL_ARGUMENT",
     );
     const before = await observeGitWorkspace(context.workspaceRoot, context.signal);
-    let processResult: Awaited<ReturnType<typeof runHostProcess>>;
+    let processResult: Awaited<ReturnType<typeof runToolProcess>>;
     try {
-      processResult = await runHostProcess(invocation.command, invocation.args, {
+      processResult = await runToolProcess(context, invocation.command, invocation.args, {
         cwd,
         timeoutMs: request.timeoutMs ?? 30_000,
         ...(context.signal === undefined ? {} : { signal: context.signal }),
@@ -953,7 +954,8 @@ export function createVerifyTool(profiles: readonly VerificationProfile[]): AnyT
         "UNSAFE_VERIFY_ARGUMENT",
       );
       const startedAt = Date.now();
-      const { stdoutFull, stderrFull, ...result } = await runProcess(
+      const { stdoutFull, stderrFull, ...result } = await runProcessWithContext(
+        context,
         invocation.command,
         invocation.args,
         cwd,
@@ -1865,6 +1867,40 @@ function runProcess(
   });
 }
 
+/** Verify / internal helper that prefers sandboxed context.runProcess when provided. */
+function runProcessWithContext(
+  context: ToolExecutionContext,
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+  environment?: NodeJS.ProcessEnv,
+  outputLimitBytes = 64 * 1024,
+  windowsVerbatimArguments = false,
+  reportActivity?: (activity: { type: "output"; stream: "stdout" | "stderr"; text: string; truncated: boolean }) => void,
+  captureLimitBytes?: number,
+): Promise<{
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  truncated: boolean;
+  stdoutFull?: string;
+  stderrFull?: string;
+}> {
+  return runToolProcess(context, command, args, {
+    cwd,
+    timeoutMs,
+    ...(signal === undefined ? {} : { signal }),
+    env: environment ?? scrubCredentialEnvironment(),
+    outputLimitBytes,
+    ...(windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+    ...(reportActivity === undefined ? {} : { reportActivity }),
+    ...(captureLimitBytes === undefined ? {} : { captureLimitBytes }),
+  });
+}
+
 interface GitWorkspaceSnapshot {
   sha256: string;
   status: string;
@@ -2030,13 +2066,14 @@ function isMissingFileError(error: unknown): boolean {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
-function isProcessStartError(error: unknown): error is NodeJS.ErrnoException & { syscall: string } {
-  return error instanceof Error
-    && "code" in error
-    && "syscall" in error
-    && typeof (error as NodeJS.ErrnoException).code === "string"
-    && typeof (error as NodeJS.ErrnoException).syscall === "string"
-    && (error as NodeJS.ErrnoException).syscall!.startsWith("spawn ");
+/** True when Node failed before the child process started (spawn EINVAL, ENOENT, …). */
+export function isProcessStartError(error: unknown): error is NodeJS.ErrnoException & { syscall: string } {
+  if (!(error instanceof Error) || !("code" in error) || !("syscall" in error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  const syscall = (error as NodeJS.ErrnoException).syscall;
+  if (typeof code !== "string" || typeof syscall !== "string") return false;
+  // Node reports `spawn` / `spawnSync` (no trailing space). Older checks used `spawn ` and missed EINVAL.
+  return syscall === "spawn" || syscall.startsWith("spawn");
 }
 
 async function resolveTrustedExecutable(command: string, workspaceRoot: string): Promise<string> {

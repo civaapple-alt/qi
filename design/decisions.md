@@ -257,28 +257,34 @@ Multi-Agent execution remains opt-in and the parent remains responsible for inte
 ## ADR-0015: separate project policy from Session mount facts
 
 - Effective launch authority resolves as CLI flags over `$QI_HOME/projects/<project-id>/policy.toml` over
-  `$QI_HOME/config.toml` over built-ins for **capabilities**, mounts, and related project policy.
+  `$QI_HOME/config.toml` over built-ins for **permission mode**, legacy capabilities, mounts, and related
+  project policy. Primary user control is `[permission].mode` (`manual|yolo|auto`); see
+  [ADR-0040](#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode).
 - **Shell profiles** (`direct` / `pwsh` / `cmd` / `bash`) are user-global under `$QI_HOME/config.toml` only.
   Project `policy.toml` `[shell]` is ignored for effective authority. `/shell` (and Settings → Shell) hot-applies
-  allowed profiles without restarting the CLI, mirroring `/permissions` for capabilities.
+  allowed profiles without restarting the CLI, mirroring `/permission` for permission mode.
 - On first launch without `[shell]`, Qi probes platform-installed script profiles, writes
   `direct` plus each installed candidate into `$QI_HOME/config.toml`, and treats that file as source of truth.
 - Extra directories are read-only mounts addressed as `mount:<id>/...`; writes stay in the primary Workspace.
 - Mounts are human-granted, reject filesystem roots and unsafe aliases, and never imply shell authority.
-- Project policy determines future access for capabilities/mounts. Session mount events record what a Session
-  could see; they do not grant access when replayed.
+- Project policy determines future access for permission/capabilities/mounts. Session mount events record what a
+  Session could see; they do not grant access when replayed. Project-level `[[approvals]]` (manual memory) are
+  policy, not Session facts.
 - Persistent changes settle policy first and audit events second; startup reconciles any interrupted settlement.
 - External TOML edits to project policy take effect on launch/relaunch, not silently during an active Runtime.
-  Live `/shell` and `/permissions` are the in-session apply paths for shell profiles and capabilities.
+  Live `/shell`, `/permission`, and expert `/permissions` are the in-session apply paths.
 - Workspace `.qi` declarations never participate in capability precedence and cannot widen project policy.
+- Process sandbox policy (`[sandbox]`, ADR-0041) is user/project configuration; Session events do not grant a
+  stronger backend on replay.
 
 ## ADR-0039: ACP is a local single-writer client surface
 
 - `qi acp` exposes the Agent Client Protocol over stdio for IDE clients (Zed, JetBrains, …).
 - It uses the same composition Runtime as TUI and headless; it is not a second Runtime or remote daemon.
 - stdout is protocol-only; diagnostics go to stderr (no banner).
-- Modes advertised on the wire are `ask` | `plan` | `agent`. Capability grants remain CLI/project policy —
-  ACP must not introduce yolo/auto-approve defaults or grant authority from client MCP metadata.
+- Modes advertised on the wire are `ask` | `plan` | `agent` only. **Permission mode** (`manual|yolo|auto`,
+  ADR-0040) is not an ACP Session mode id. ACP must not default the process to yolo/auto; permission comes from
+  the same CLI/project/user policy as TUI/headless. Client MCP metadata never grants authority or bindings.
 - Client `mcpServers` on `session/new` are ignored until an explicit future decision binds them through the
   existing quarantine + human review path.
 - Parked/failed/indeterminate outcomes must remain observable (`_meta` / stderr), not collapsed into a
@@ -899,6 +905,79 @@ Rejected: treating marketplace install as trust, auto-binding plugin MCP tools, 
 
 Required evidence: marketplace.json parse and search; vendored install+enable; `/plugin:` requires a task;
 MCP conversion does not bind; `/agent:` cannot widen child lease; unsupported hooks/LSP plugins are labeled.
+
+Cross-reference: [ADR-0040](#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode) and
+[ADR-0041](#adr-0041-graded-process-sandbox-srt--windows-low-il--host) govern how plugin Skills, commands,
+agents, and MCP stdio children behave under permission mode and process sandboxing. Enable still never grants
+leases; yolo/auto never skips MCP human bind.
+
+## ADR-0040: Permission mode (manual | yolo | auto) orthogonal to Session mode
+
+Pressure: users face eight capability toggles while coding agents elsewhere expose a single Manual/YOLO/Auto
+control. Fine-grained switches made sense when every host process was unsandboxed; with graded OS isolation
+(ADR-0041), safety should not require the user to manage `background` / `delegate` / `publish` / `spend` daily.
+
+- **Session mode** remains durable `ask | plan | agent` and only **narrows** tool surface and effects (ADR-0011).
+- **Permission mode** is a separate durable product control: `manual | yolo | auto`. It is **not** a Session
+  mode, not an ACP mode id, and not Goal-based activation (ADR-0013 / ADR-0033).
+- User-facing daily control is **only** `/permission` (and `--permission`). Internal capability leases still
+  implement authority; the product maps permission mode → a coding lease pack under Agent mode.
+- **manual**: non-read Actions require human approval with explicit scope **Once / Session / Project**;
+  patterns are remembered (`ApprovalPattern` = tool + effect + resource class). Default focus is Once.
+- **yolo**: auto-accept every Action already allowed by launch lease ∩ session mode ∩ path/mount/sandbox.
+  User focuses on the task; security is system-enforced. Agent may still use `ask_question` for task clarity.
+- **auto**: same auto-accept as yolo, plus suppress tool-form `ask_question` (freeform end-of-turn remains valid).
+- Hard boundaries **fail closed without prompting** when enforceable by path guard or process sandbox
+  (e.g. `~/.ssh`, writes outside Workspace, `.qi`/`.git`/`.artifacts`). Approval UI is not a second security
+  questionnaire for those cases.
+- **Authority expansion** still requires a human: new read-only mounts, MCP bind (ADR-0036), optional
+  workspace trust for project MCP declarations. YOLO never skips bind or invents mounts.
+- **`--safe`** forces a read-only research baseline and overrides a loose permission mode for that launch.
+- Goal-based 追寻 (ADR-0033) is orthogonal: recommend Agent + yolo/auto for unattended loops; Goal completion
+  still requires Evidence Ledger, never Work Plan status or model "done".
+- Skills, plugin commands/agents, and MCP (ADR-0036/0037): metadata never grants leases. Under yolo/auto,
+  in-lease skill `run-script`, bound MCP calls, and depth-1 plugin agents auto-accept; child leases still only
+  narrow; stdio/script children use ADR-0041 sandboxes.
+- Precedence for effective policy: CLI flags > project `policy.toml` > user `$QI_HOME/config.toml` > defaults.
+  Primary project field is `[permission].mode`. Legacy `[capabilities]` remains a compatibility/expert override.
+- Headless/ACP default remains **manual** without TTY unless `--permission yolo|auto` (or project mode) is set.
+  ACP continues to advertise only `ask|plan|agent` as Session modes (ADR-0039).
+
+Rejected: renaming Session mode to include yolo; making yolo the install default; treating yolo as unbounded
+root; reintroducing per-capability nanny prompts for background/delegate under yolo; auto-binding MCP on
+plugin enable; completing Goals without ledger evidence.
+
+Required evidence: mode×permission matrix tests; Once/Session/Project memory; Ask+yolo cannot write;
+yolo does not skip MCP bind; Goal-bound Runs are not blocked by tool approval under yolo; headless manual deny.
+
+## ADR-0041: Graded process sandbox (srt → Windows Low IL → host)
+
+Pressure: shell/script/verify/skill-script/MCP stdio currently run as honest host processes. That forces either
+constant human approval or unsafe autonomy. Anthropic sandbox-runtime (`srt`) provides cross-platform OS
+isolation; Windows without srt still needs a reduced tier better than bare Medium IL.
+
+- Introduce a `ProcessSandbox` port in `@civaapple/qi-node` (no dependency from `@civaapple/qi-agent`).
+- **Backend selection** (`sandbox.policy = auto` default):
+  1. **srt** when dependencies are available (macOS seatbelt, Linux bubblewrap, Windows srt-win ACE+WFP);
+  2. else on **Windows**, **win-low-il** (Low Integrity token / MIC No-Write-Up);
+  3. else **host** with explicit disclosure.
+- Wrap at minimum: `shell`, `script`, `verify`, `skill.run-script`, and MCP **stdio** children. Node-in-process
+  file tools stay on path/capability guards only (Pi-style dual layer).
+- srt maps Workspace to allowWrite, mounts to allowRead, denyRead for host secret paths, and network allowlists
+  when outbound is enabled. win-low-il must be labeled `strength: reduced` — it does **not** prevent reading
+  user secrets; path guard remains mandatory.
+- `host:environment` discloses `sandbox.status`, `sandbox.backend`, `sandbox.strength`, and which tool classes
+  are wrapped. Never advertise host execution as a full sandbox.
+- CodeAct remains container-first (separate stronger isolation). Unavailable container still fails closed for
+  CodeAct; it does not silently become unsandboxed host CodeAct.
+- Failure of a sandbox policy (EPERM, blocked connect) is a deterministic tool/Action failure for the model,
+  not a human "approve danger" prompt (ADR-0040).
+
+Rejected: Docker-as-default for every shell; claiming Low IL equals srt; automatic MicroVM; wrapping the entire
+Qi Node process in srt (tools and provider IO must remain on the host Runtime).
+
+Required evidence: backend resolution tests; mock wrap for shell and MCP stdio; Windows low-il path without
+admin; disclosure fields; fail-closed path for `sandbox.policy = srt` when srt is missing (optional strict mode).
 
 ## Changing a decision
 

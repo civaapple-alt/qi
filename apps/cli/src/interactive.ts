@@ -80,6 +80,7 @@ import {
   openMaxActionsPerStepPanel,
   openMaxStepsPanel,
   openModePanel,
+  openPermissionModePanel,
   openSubagentSettingsPanel,
   openModelConfigurationPanel,
   openMountsPanel,
@@ -178,6 +179,7 @@ export class InteractiveTui {
     this.#presenter = presenter;
     this.#auth = options.auth;
     this.#terminal = terminal;
+    // Installed after #panels exists — see end of constructor.
     // Hide the terminal caret: Editor already paints a reverse-video caret, and a visible
     // hardware cursor blinks as a second vertical bar (especially on Windows Terminal).
     // CURSOR_MARKER still positions the (hidden) caret for CJK IME candidate windows.
@@ -199,6 +201,7 @@ export class InteractiveTui {
       () => this.#panels.open,
     );
     this.#followUpsPanel = new FollowUpsComponent(this.#followUps, () => this.#presenter.locale());
+    this.#installApprovalGate();
     this.#syncAutocomplete();
     this.#editor.onSubmit = (input) => { void this.#handleInput(input); };
     // Composer keystrokes must not rebuild the chat transcript (grows with Runs/Steps).
@@ -339,6 +342,23 @@ export class InteractiveTui {
     } else if (event.type === "action.failed" && event.data.errorCode === "PATH_GRANT_REQUIRED") {
       const path = extractGrantPath(event.data.modelOutput);
       if (path && !isSensitiveGrantFailure(event.data.modelOutput)) this.#queuePathGrant(path);
+    } else if (
+      event.type === "action.failed"
+      && (
+        event.data.errorCode === "SHELL_START_FAILED"
+        || event.data.errorCode === "SHELL_PROFILE_START_FAILED"
+        || /EINVAL|spawn/i.test(String(event.data.modelOutput ?? event.data.errorCode ?? ""))
+      )
+    ) {
+      this.#announceSandboxSpawnFailure(event.data.errorCode);
+    } else if (
+      event.type === "run.parked"
+      && (
+        event.data.reason === "indeterminate-effect"
+        || /EINVAL|spawn/i.test(String(event.data.detail ?? ""))
+      )
+    ) {
+      this.#announceSandboxSpawnFailure(event.data.reason);
     }
     const view = this.#runtime.view();
     if (!this.#presenter.applyCommitted(event, view)) {
@@ -377,10 +397,50 @@ export class InteractiveTui {
 
   async run(): Promise<InteractiveExit> {
     this.#terminal.setTitle(`Qi · ${this.#presenter.launch.workspaceRoot}`);
+    this.#maybeAnnounceSandbox();
     this.#syncNoticeTimer();
     this.#tui.start();
     this.#maybeOfferPendingGates();
     return await new Promise<InteractiveExit>((resolve) => { this.#resolveClosed = resolve; });
+  }
+
+  /** Surface sandbox tier at startup so reduced/fallback is never silent. */
+  #maybeAnnounceSandbox(): void {
+    const sandbox = this.#presenter.launch.sandbox ?? this.#runtime.sandboxInfo();
+    if (!sandbox) return;
+    // Don't clobber an explicit pending notice (session resume, etc.).
+    if (this.#presenter.notice()) return;
+    const locale = this.#presenter.locale();
+    const reason = sandbox.reason.length > 120 ? `${sandbox.reason.slice(0, 117)}…` : sandbox.reason;
+    if (sandbox.strength === "full" && !sandbox.reason.includes("smoke failed")) {
+      // Quiet on healthy full isolation — only mention when operator would otherwise miss reduced/host.
+      return;
+    }
+    const key =
+      sandbox.strength === "reduced"
+        ? "sandbox.notice.reduced"
+        : "sandbox.notice.none";
+    this.#presenter.setNotice(
+      t(locale, key, {
+        backend: sandbox.backend,
+        reason,
+      }),
+      "run",
+    );
+  }
+
+  #announceSandboxSpawnFailure(errorCode: string | undefined): void {
+    const sandbox = this.#runtime.sandboxInfo();
+    if (!sandbox) return;
+    const locale = this.#presenter.locale();
+    this.#presenter.setNotice(
+      t(locale, "sandbox.notice.spawn_failed", {
+        code: errorCode ?? "spawn",
+        backend: sandbox.backend,
+        strength: sandbox.strength,
+      }),
+      "run",
+    );
   }
 
   async close(exit: InteractiveExit = { kind: "quit" }): Promise<void> {
@@ -889,50 +949,71 @@ export class InteractiveTui {
 
   #openPathGrantPanel(path: string): void {
     if (this.#panels.open) this.#panels.closeAll();
+    const locale = this.#presenter.locale();
     this.#panels.push(new ListPanel({
-      title: "Authorize directory",
-      hints: `↑↓ select · Enter confirm · Esc deny · ${oneLineHint(path)}`,
+      title: t(locale, "mounts.grant.title"),
+      hints: `${t(locale, "mounts.hints")} · ${oneLineHint(path)}`,
       items: [
         {
-          id: "allow",
-          label: "允许只读挂载",
-          description: "写入 project config.toml，路径用 mount:<id>/…",
+          id: "session",
+          label: t(locale, "mounts.grant.session"),
+          description: t(locale, "mounts.grant.session.desc"),
+        },
+        {
+          id: "remember",
+          label: t(locale, "mounts.grant.remember"),
+          description: t(locale, "mounts.grant.remember.desc"),
         },
         {
           id: "deny",
-          label: "拒绝",
-          description: "不挂载；Agent 继续看到 PATH_GRANT_REQUIRED",
+          label: t(locale, "mounts.grant.deny"),
+          description: t(locale, "mounts.grant.deny.desc"),
         },
       ],
       onClose: () => {
         this.#pendingPathGrants = this.#pendingPathGrants.filter((candidate) => candidate !== path);
         this.#pathGrantKey = undefined;
-        this.#presenter.setNotice(`Denied mount for ${path}`);
+        this.#presenter.setNotice(t(locale, "mounts.grant.denied", { path }));
         this.#panels.dismiss();
         this.#maybeOfferPathGrant();
         this.#render();
       },
       onSelect: (item) => {
         this.#panels.closeAll();
-        void this.#settlePathGrant(path, item.id === "allow");
+        if (item.id === "deny") {
+          void this.#settlePathGrant(path, "deny");
+          return;
+        }
+        void this.#settlePathGrant(path, item.id === "remember" ? "remember" : "session");
       },
     }));
     this.#render();
   }
 
-  async #settlePathGrant(path: string, allow: boolean): Promise<void> {
+  async #settlePathGrant(
+    path: string,
+    decision: "session" | "remember" | "deny",
+  ): Promise<void> {
     this.#pendingPathGrants = this.#pendingPathGrants.filter((candidate) => candidate !== path);
     this.#pathGrantKey = undefined;
-    if (!allow) {
-      this.#presenter.setNotice(`Denied mount for ${path}`);
+    const locale = this.#presenter.locale();
+    if (decision === "deny") {
+      this.#presenter.setNotice(t(locale, "mounts.grant.denied", { path }));
       this.#maybeOfferPathGrant();
       this.#maybeDrainFollowUps();
       this.#render();
       return;
     }
     try {
-      const mount = await this.#runtime.addMount(path, "grant");
-      this.#presenter.setNotice(`Mounted read-only ${mount.id} → ${mount.path}`);
+      const mount = await this.#runtime.addMount(path, "grant", {
+        remember: decision === "remember",
+      });
+      this.#presenter.setNotice(
+        t(locale, decision === "remember" ? "mounts.mounted.remember" : "mounts.mounted.session", {
+          id: mount.id,
+          path: mount.path,
+        }),
+      );
       this.#presenter.update(this.#runtime.events(), this.#runtime.view());
     } catch (error) {
       this.#presenter.setNotice(message(error));
@@ -1722,6 +1803,85 @@ export class InteractiveTui {
     }, "Permissions");
   }
 
+  #savePermissionMode(mode: "manual" | "yolo" | "auto"): void {
+    if (this.#runtime.active) {
+      this.#presenter.setNotice(t(this.#presenter.locale(), "permission.active"));
+      this.#render();
+      return;
+    }
+    this.#startManagementTask(async () => {
+      const applied = await this.#runtime.applyPermissionMode(mode);
+      const { verification: _previousVerification, ...launchRest } = this.#presenter.launch;
+      this.#presenter.launch = {
+        ...launchRest,
+        permissionMode: applied.mode,
+        capabilities: [...applied.labels],
+        disabledCapabilities: ["write", "verify", "network", "execute", "background", "delegate"]
+          .filter((capability) => !applied.labels.includes(capability)),
+        shell: this.#runtime.shellProfiles,
+        ...(this.#runtime.verificationManifest === undefined
+          ? {}
+          : { verification: this.#runtime.verificationManifest }),
+      };
+      this.#presenter.setNotice(
+        t(this.#presenter.locale(), "permission.saved", { mode: applied.mode }),
+      );
+    }, "Permission mode");
+  }
+
+  #installApprovalGate(): void {
+    this.#runtime.setApprovalGate(async (request) => {
+      const locale = this.#presenter.locale();
+      return await new Promise((resolve) => {
+        if (this.#panels.open) this.#panels.closeAll();
+        this.#panels.push(new ListPanel({
+          title: t(locale, "approval.title"),
+          hints: `${t(locale, "approval.hints")} · ${request.tool} (${request.effect})`,
+          items: [
+            {
+              id: "once",
+              label: t(locale, "approval.once"),
+              description: t(locale, "approval.once.desc"),
+            },
+            {
+              id: "session",
+              label: t(locale, "approval.session"),
+              description: t(locale, "approval.session.desc"),
+            },
+            {
+              id: "project",
+              label: t(locale, "approval.project"),
+              description: t(locale, "approval.project.desc"),
+            },
+            {
+              id: "deny",
+              label: t(locale, "approval.deny"),
+              description: t(locale, "approval.deny.desc"),
+            },
+          ],
+          onClose: () => {
+            this.#panels.dismiss();
+            resolve({ decision: "deny", scope: "once" });
+            this.#render();
+          },
+          onSelect: (item) => {
+            this.#panels.closeAll();
+            if (item.id === "deny") {
+              resolve({ decision: "deny", scope: "once" });
+            } else {
+              resolve({
+                decision: "allow",
+                scope: item.id as "once" | "session" | "project",
+              });
+            }
+            this.#render();
+          },
+        }));
+        this.#render();
+      });
+    });
+  }
+
   #saveShell(shell: import("./config.js").QiShellConfig): void {
     if (this.#runtime.active) {
       this.#presenter.setNotice("Cannot change shell profiles while a Run is active.");
@@ -1988,12 +2148,57 @@ export class InteractiveTui {
     }
   }
 
-  #addMountFromPath(pathArgument: string): void {
+  /**
+   * Add a read-only mount. When remember is omitted, open Session vs Remember chooser
+   * (PATH_GRANT and /mounts share the same durable-expansion policy).
+   */
+  #addMountFromPath(pathArgument: string, remember?: boolean): void {
+    const absolute = resolve(pathArgument.trim());
+    if (remember === undefined) {
+      this.#openMountRememberPanel(absolute);
+      return;
+    }
     this.#startManagementTask(async () => {
-      const mount = await this.#runtime.addMount(resolve(pathArgument.trim()), "command");
-      this.#presenter.setNotice(`Mounted read-only ${mount.id} → ${mount.path}`);
+      const locale = this.#presenter.locale();
+      const mount = await this.#runtime.addMount(absolute, "command", { remember });
+      this.#presenter.setNotice(
+        t(locale, remember ? "mounts.mounted.remember" : "mounts.mounted.session", {
+          id: mount.id,
+          path: mount.path,
+        }),
+      );
       this.#presenter.update(this.#runtime.events(), this.#runtime.view());
     }, "Mount");
+  }
+
+  #openMountRememberPanel(path: string): void {
+    if (this.#panels.open) this.#panels.closeAll();
+    const locale = this.#presenter.locale();
+    this.#panels.push(new ListPanel({
+      title: t(locale, "mounts.remember.title"),
+      hints: `${t(locale, "mounts.hints")} · ${oneLineHint(path)}`,
+      items: [
+        {
+          id: "session",
+          label: t(locale, "mounts.grant.session"),
+          description: t(locale, "mounts.grant.session.desc"),
+        },
+        {
+          id: "remember",
+          label: t(locale, "mounts.grant.remember"),
+          description: t(locale, "mounts.grant.remember.desc"),
+        },
+      ],
+      onClose: () => {
+        this.#panels.dismiss();
+        this.#render();
+      },
+      onSelect: (item) => {
+        this.#panels.closeAll();
+        this.#addMountFromPath(path, item.id === "remember");
+      },
+    }));
+    this.#render();
   }
 
   #openVerifySetupPanel(): void {
@@ -2142,10 +2347,12 @@ export class InteractiveTui {
       openHistoryList: (kind) => {
         openHistoryListPanel(this.#panelFlow(), kind);
       },
-      addMount: (path) => this.#addMountFromPath(path),
+      addMount: (path, remember) => this.#addMountFromPath(path, remember),
       removeMount: (mountId) => this.#removeMountById(mountId),
       effectiveCapabilities: () => capabilityIdsFromLaunchLabels(this.#runtime.capabilityLabels()),
       saveCapabilities: (capabilities) => this.#saveCapabilities(capabilities),
+      permissionMode: () => this.#runtime.permissionMode(),
+      savePermissionMode: (mode) => this.#savePermissionMode(mode),
       saveShell: (shell) => this.#saveShell(shell),
       currentMaxSteps: () => this.#runtime.maxSteps(),
       saveMaxSteps: (maxSteps) => this.#saveMaxSteps(maxSteps),
@@ -3482,6 +3689,10 @@ export class InteractiveTui {
         } catch (error) {
           this.#presenter.setNotice(message(error));
         }
+        return;
+      }
+      case "permission": {
+        openPermissionModePanel(this.#panelFlow());
         return;
       }
       case "permissions": {

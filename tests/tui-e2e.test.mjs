@@ -328,6 +328,7 @@ test("TUI Skill tool installs a named compatible Skill into the Workspace under 
     modelPort: model,
     model: { provider: "fake", model: "skill-install-v1" },
     allowWrite: true,
+    permissionMode: "yolo",
   });
   try {
     const result = await runtime.run("Install skill-creator for this Workspace.");
@@ -382,6 +383,7 @@ test("basic TUI completes a code task with durable action and diff evidence", as
     modelPort: model,
     model: { provider: "fake", model: "code-task-v1" },
     allowWrite: true,
+    permissionMode: "yolo",
     onEvent: (event) => committed.push(event),
   });
   const sessionId = runtime.sessionId;
@@ -534,6 +536,8 @@ test("TUI repairs existing code under AGENTS instructions and verifies it with a
     model: { provider: "fake", model: "coding-agent-v1" },
     allowWrite: true,
     allowVerify: true,
+    permissionMode: "yolo",
+    sandboxPolicy: "never",
     onEvent: (event) => committed.push(event),
   });
 

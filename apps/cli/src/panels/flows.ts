@@ -108,6 +108,8 @@ export interface PanelFlowContext {
   readonly changeDensity: (density: TimelineDensity, persist: boolean) => void;
   readonly mode: () => string;
   readonly changeMode: (mode: "ask" | "plan" | "agent") => void;
+  readonly permissionMode: () => "manual" | "yolo" | "auto";
+  readonly savePermissionMode: (mode: "manual" | "yolo" | "auto") => void;
   readonly mcpStatuses: () => Promise<readonly McpServerStatus[]>;
   readonly mcpReview: () => Promise<McpReviewDocument>;
   readonly refreshMcp: (server: string) => Promise<{ drifted: readonly string[] }>;
@@ -173,7 +175,8 @@ export interface PanelFlowContext {
   readonly togglePluginSkillSelection?: (id: string, selected: boolean, onSuccess?: () => void) => void;
   readonly saveAgentSkillActivation: (names: readonly string[]) => void;
   readonly openHistoryList: (kind: "runs" | "steps" | "actions" | "agents") => void;
-  readonly addMount: (path: string) => void;
+  /** remember omitted → TUI prompts Session vs project; true/false skips the chooser. */
+  readonly addMount: (path: string, remember?: boolean) => void;
   readonly removeMount: (mountId: string) => void;
   readonly effectiveCapabilities: () => readonly CapabilityId[];
   readonly saveCapabilities: (capabilities: QiCapabilityConfig) => void;
@@ -236,6 +239,11 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
     maxVisible: maxVisible(ctx.terminalRows),
     items: [
       { id: "mode", label: t(locale, "settings.mode"), description: t(locale, "settings.mode.desc") },
+      {
+        id: "permission",
+        label: t(locale, "settings.permission"),
+        description: t(locale, "settings.permission.desc"),
+      },
       { id: "permissions", label: t(locale, "settings.permissions"), description: t(locale, "settings.permissions.desc") },
       { id: "shell", label: t(locale, "settings.shell"), description: t(locale, "settings.shell.desc") },
       { id: "max-steps", label: t(locale, "settings.max-steps"), description: t(locale, "settings.max-steps.desc") },
@@ -264,6 +272,10 @@ export function openSettingsPanel(ctx: PanelFlowContext): void {
     onSelect: (item) => {
       if (item.id === "mode") {
         openModePanel(ctx);
+        return;
+      }
+      if (item.id === "permission") {
+        openPermissionModePanel(ctx);
         return;
       }
       if (item.id === "permissions") {
@@ -349,6 +361,41 @@ export function openModePanel(ctx: PanelFlowContext): void {
     onSelect: (item) => {
       ctx.panels.closeAll();
       ctx.changeMode(item.id as "ask" | "plan" | "agent");
+    },
+  }));
+}
+
+/** ADR-0040: primary user control Manual / YOLO / Auto. */
+export function openPermissionModePanel(ctx: PanelFlowContext): void {
+  const locale = ctx.locale();
+  const current = ctx.permissionMode();
+  ctx.panels.push(new ListPanel({
+    title: t(locale, "permission.title"),
+    hints: t(locale, "permission.hints"),
+    items: [
+      {
+        id: "manual",
+        label: t(locale, "permission.manual"),
+        description: t(locale, "permission.manual.desc"),
+        current: current === "manual",
+      },
+      {
+        id: "yolo",
+        label: t(locale, "permission.yolo"),
+        description: t(locale, "permission.yolo.desc"),
+        current: current === "yolo",
+      },
+      {
+        id: "auto",
+        label: t(locale, "permission.auto"),
+        description: t(locale, "permission.auto.desc"),
+        current: current === "auto",
+      },
+    ],
+    onClose: ctx.panels.dismiss,
+    onSelect: (item) => {
+      ctx.panels.closeAll();
+      ctx.savePermissionMode(item.id as "manual" | "yolo" | "auto");
     },
   }));
 }
@@ -803,12 +850,19 @@ async function openCompatibleEndpointPanel(
 
 export function openMountsPanel(
   ctx: PanelFlowContext,
-  mounts: readonly { id: string; path: string; source: string }[],
+  mounts: readonly { id: string; path: string; source: string; remember?: boolean }[],
 ): void {
   const locale = ctx.locale();
   const mountLines = mounts.length === 0
     ? [t(locale, "mounts.list.empty"), t(locale, "mounts.empty.hint")]
-    : mounts.map((mount) => `mount:${mount.id}/ → ${mount.path} (${mount.source})`);
+    : mounts.map((mount) => {
+      const scope = mount.remember === false
+        ? (locale === "zh" ? "仅 Session" : "session")
+        : mount.remember === true || mount.source === "project_config"
+          ? (locale === "zh" ? "项目" : "project")
+          : mount.source;
+      return `mount:${mount.id}/ → ${mount.path} (${scope})`;
+    });
   ctx.panels.push(new ListPanel({
     title: t(locale, "mounts.title"),
     hints: t(locale, "mounts.hints"),
@@ -860,6 +914,7 @@ function openMountAddForm(ctx: PanelFlowContext): void {
     onSubmit: (values) => {
       const path = (values.path ?? "").trim();
       if (!path) return;
+      // Close form then let addMount open Session vs Remember (authority expansion).
       ctx.panels.closeAll();
       ctx.addMount(path);
     },

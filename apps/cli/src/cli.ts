@@ -21,6 +21,7 @@ import {
   loadProjectConfig,
   mergeCapabilities,
   projectConfigPathForWorkspace,
+  resolvePermissionMode,
   suggestMountId,
   type ProjectMountConfig,
 } from "./project-config.js";
@@ -49,6 +50,7 @@ export interface CliMountSpec {
 export type HeadlessOutputFormat = "text" | "json" | "stream-json";
 
 export type SessionModeFlag = "ask" | "plan" | "agent";
+export type PermissionModeFlag = "manual" | "yolo" | "auto";
 
 export interface TuiCliOptions {
   workspaceRoot: string;
@@ -103,6 +105,8 @@ export interface TuiCliOptions {
   streamPartialOutput?: boolean;
   /** Optional Session mode applied before the print Run. */
   sessionMode?: SessionModeFlag;
+  /** ADR-0040 permission mode (manual|yolo|auto); CLI wins over project/user. */
+  permissionMode?: PermissionModeFlag;
 }
 
 export type ParsedTuiCli =
@@ -122,17 +126,20 @@ const HELP_TEXT =
   "qi plugin list|commands|install|enable|disable|inspect …\n" +
   "qi agent list [query]\n" +
   "qi config show|validate|doctor [--workspace PATH] [--config PATH] [--json]\n" +
+  "qi sandbox status [--workspace PATH] [--json]\n" +
   "qi acp [options]   Agent Client Protocol server over stdio (IDE integration)\n" +
   "  WORKSPACE defaults to the current directory (same as `qi --workspace .`).\n" +
   "  Options: [--workspace PATH] [--data PATH] [--provider ID] [--model ID] [--effort LEVEL] [--base-url URL]\n" +
   "           [--session ID] [--max-steps 8..1000] [--config PATH|--no-config] [--add-dir PATH]…\n" +
-  "           [--mode ask|plan|agent] [-p|--print] [--prompt TEXT] [--output-format text|json|stream-json]\n" +
+  "           [--mode ask|plan|agent] [--permission manual|yolo|auto]\n" +
+  "           [-p|--print] [--prompt TEXT] [--output-format text|json|stream-json]\n" +
   "           [--stream-partial-output]\n" +
   "           [--allow-write|--no-write] [--allow-verify|--no-verify] [--allow-network|--no-network]\n" +
   "           [--allow-execute|--no-execute] [--allow-background|--no-background]\n" +
   "           [--allow-delegate|--no-delegate] [--allow-publish|--no-publish] [--allow-spend|--no-spend] [--safe]\n" +
   "  Print mode: workspace is cwd or --workspace only; PROMPT is --prompt or remaining args.\n" +
-  "  Writes need explicit --allow-write (or project policy), not a silent --force.\n";
+  "  Permission mode (ADR-0040) expands the coding lease pack; --safe forces read-only.\n" +
+  "  Expert --allow-* still override; default without policy is manual (no silent yolo).\n";
 
 const BOOLEAN_FLAGS = [
   "--allow-write", "--allow-verify", "--allow-network", "--allow-execute", "--allow-background", "--allow-delegate", "--allow-publish", "--allow-spend",
@@ -142,7 +149,7 @@ const BOOLEAN_FLAGS = [
 
 const VALUE_FLAGS = [
   "--workspace", "--data", "--provider", "--model", "--effort", "--base-url", "--session", "--config", "--add-dir", "--max-steps",
-  "--output-format", "--prompt", "--mode",
+  "--output-format", "--prompt", "--mode", "--permission",
 ] as const;
 
 export function qiCliVersion(packageVersion = process.env.npm_package_version ?? "0.7.4"): string {
@@ -275,6 +282,16 @@ export async function parseTuiCliArguments(
     throw new TypeError("--mode must be ask, plan, or agent");
   }
   const sessionMode = modeRaw as SessionModeFlag | undefined;
+  const permissionRaw = values.get("--permission")?.toLowerCase();
+  if (
+    permissionRaw !== undefined
+    && permissionRaw !== "manual"
+    && permissionRaw !== "yolo"
+    && permissionRaw !== "auto"
+  ) {
+    throw new TypeError("--permission must be manual, yolo, or auto");
+  }
+  const permissionMode = permissionRaw as PermissionModeFlag | undefined;
   // Initialize $QI_HOME layout before first-run shell probing writes config.toml.
   // Otherwise a config-only home is misclassified as unsupported pre-0.6 layout.
   // Skip workspaceRoot here: containment is enforced later in ensureProjectLayout;
@@ -287,7 +304,17 @@ export async function parseTuiCliArguments(
   const project = flags.has("--no-config")
     ? { path: projectConfigPath, exists: false, config: { version: 1 as const } }
     : await loadProjectConfig(projectConfigPath);
-  const capabilities = mergeCapabilities(loaded.config.capabilities, project.config.capabilities, overrides);
+  const resolvedPermissionMode = resolvePermissionMode({
+    ...(permissionMode === undefined ? {} : { cli: permissionMode }),
+    project: project.config,
+    user: loaded.config,
+  });
+  const capabilities = mergeCapabilities(
+    loaded.config.capabilities,
+    project.config.capabilities,
+    overrides,
+    { permissionMode: resolvedPermissionMode },
+  );
   // Shell profiles are user-global only ($QI_HOME/config.toml); project policy.toml [shell] is ignored.
   const shell = loaded.config.shell;
   const dataRoot = values.has("--data")
@@ -369,6 +396,7 @@ export async function parseTuiCliArguments(
       ...(outputFormat === undefined ? {} : { outputFormat }),
       ...(flags.has("--stream-partial-output") ? { streamPartialOutput: true } : {}),
       ...(sessionMode === undefined ? {} : { sessionMode }),
+      permissionMode: resolvedPermissionMode,
     },
   };
 }

@@ -227,6 +227,10 @@ async function runReplay(replay) {
       model: { provider: "fake", model: "coding-replay-v1" },
       allowWrite: true,
       allowVerify: true,
+      // Non-interactive replay: auto-accept in-lease writes (manual needs a TUI gate).
+      permissionMode: "yolo",
+      // Avoid OS sandbox in this focused regression (nvm/AppData + srt can hang or EPERM).
+      sandboxPolicy: "never",
       onEvent: (event) => committed.push(event),
     });
     try {

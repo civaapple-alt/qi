@@ -5,10 +5,19 @@ import {
   resolveCapabilities,
   type CapabilityOverrides,
   type QiCapabilityConfig,
+  type QiPermissionMode,
+  type QiSandboxConfig,
   type QiShellConfig,
   type QiUserConfig,
   type ResolvedCapabilities,
 } from "./config.js";
+import {
+  leasePackForPermissionMode,
+  parseApprovalPattern,
+  serializeApprovalPattern,
+  type PermissionMode,
+  type StoredApproval,
+} from "@civaapple/qi-agent/capability";
 import { defaultProjectConfigPath } from "./paths.js";
 
 const projectConfigLimitBytes = 64 * 1024;
@@ -25,12 +34,28 @@ export interface ProjectSensitivePathPolicy {
   readonly exclude?: readonly string[];
 }
 
+export interface QiProjectPermissionConfig {
+  readonly mode?: QiPermissionMode;
+}
+
+export interface QiProjectApprovalRecord {
+  readonly pattern: string;
+  readonly decision: "allow" | "deny";
+  readonly createdAt: string;
+  readonly source?: string;
+}
+
 export interface QiProjectConfig {
   readonly version: 1;
   readonly maxSteps?: number;
+  /** ADR-0040 primary control. */
+  readonly permission?: QiProjectPermissionConfig;
+  readonly sandbox?: QiSandboxConfig;
   readonly capabilities?: QiCapabilityConfig;
   readonly shell?: QiShellConfig;
   readonly mounts?: readonly ProjectMountConfig[];
+  /** Manual approval memory (ADR-0040 [[approvals]]). */
+  readonly approvals?: readonly QiProjectApprovalRecord[];
   /** Workspace-relative paths whose file bodies may reach the model. */
   readonly sensitivePathGrants?: readonly string[];
   /** Optional overlays for default sensitive-path classification. */
@@ -68,11 +93,35 @@ export async function saveProjectConfig(path: string, config: QiProjectConfig): 
   const body = stringify({
     version: 1,
     ...(config.maxSteps === undefined ? {} : { max_steps: config.maxSteps }),
+    ...(config.permission === undefined
+      ? {}
+      : {
+          permission: {
+            ...(config.permission.mode === undefined ? {} : { mode: config.permission.mode }),
+          },
+        }),
+    ...(config.sandbox === undefined
+      ? {}
+      : {
+          sandbox: {
+            ...(config.sandbox.policy === undefined ? {} : { policy: config.sandbox.policy }),
+          },
+        }),
     ...(config.capabilities === undefined ? {} : { capabilities: { ...config.capabilities } }),
     ...(config.shell === undefined ? {} : { shell: { ...config.shell, ...(config.shell.allowed ? { allowed: [...config.shell.allowed] } : {}) } }),
     ...(config.mounts === undefined || config.mounts.length === 0
       ? {}
       : { mounts: config.mounts.map((mount) => ({ id: mount.id, path: mount.path, mode: mount.mode })) }),
+    ...(config.approvals === undefined || config.approvals.length === 0
+      ? {}
+      : {
+          approvals: config.approvals.map((entry) => ({
+            pattern: entry.pattern,
+            decision: entry.decision,
+            created_at: entry.createdAt,
+            ...(entry.source === undefined ? {} : { source: entry.source }),
+          })),
+        }),
     ...(config.sensitivePathGrants === undefined || config.sensitivePathGrants.length === 0
       ? {}
       : { sensitive_path_grants: [...config.sensitivePathGrants] }),
@@ -99,18 +148,45 @@ export function mergeCapabilities(
   globalCaps: QiCapabilityConfig | undefined,
   projectCaps: QiCapabilityConfig | undefined,
   overrides: CapabilityOverrides = {},
+  options: {
+    readonly permissionMode?: PermissionMode;
+  } = {},
 ): ResolvedCapabilities {
+  // When permission mode is set and neither layer has explicit capability keys, expand the coding pack.
+  const hasExplicitCaps = hasAnyCapabilityKey(globalCaps) || hasAnyCapabilityKey(projectCaps);
+  const fromPermission =
+    !hasExplicitCaps && options.permissionMode !== undefined
+      ? capabilityConfigFromPermissionMode(
+        options.permissionMode,
+        overrides.safe === true ? { safe: true } : {},
+      )
+      : undefined;
+  const base = fromPermission ?? {};
   const configured: QiCapabilityConfig = {
-    ...(pickBoolean(projectCaps?.write ?? globalCaps?.write, "write")),
-    ...(pickBoolean(projectCaps?.verify ?? globalCaps?.verify, "verify")),
-    ...(pickBoolean(projectCaps?.network ?? globalCaps?.network, "network")),
-    ...(pickBoolean(projectCaps?.execute ?? globalCaps?.execute, "execute")),
-    ...(pickBoolean(projectCaps?.background ?? globalCaps?.background, "background")),
-    ...(pickBoolean(projectCaps?.delegate ?? globalCaps?.delegate, "delegate")),
-    ...(pickBoolean(projectCaps?.publish ?? globalCaps?.publish, "publish")),
-    ...(pickBoolean(projectCaps?.spend ?? globalCaps?.spend, "spend")),
+    ...(pickBoolean(projectCaps?.write ?? globalCaps?.write ?? base.write, "write")),
+    ...(pickBoolean(projectCaps?.verify ?? globalCaps?.verify ?? base.verify, "verify")),
+    ...(pickBoolean(projectCaps?.network ?? globalCaps?.network ?? base.network, "network")),
+    ...(pickBoolean(projectCaps?.execute ?? globalCaps?.execute ?? base.execute, "execute")),
+    ...(pickBoolean(projectCaps?.background ?? globalCaps?.background ?? base.background, "background")),
+    ...(pickBoolean(projectCaps?.delegate ?? globalCaps?.delegate ?? base.delegate, "delegate")),
+    ...(pickBoolean(projectCaps?.publish ?? globalCaps?.publish ?? base.publish, "publish")),
+    ...(pickBoolean(projectCaps?.spend ?? globalCaps?.spend ?? base.spend, "spend")),
   };
   return resolveCapabilities(configured, overrides);
+}
+
+function hasAnyCapabilityKey(caps: QiCapabilityConfig | undefined): boolean {
+  if (!caps) return false;
+  return (
+    caps.write !== undefined
+    || caps.verify !== undefined
+    || caps.network !== undefined
+    || caps.execute !== undefined
+    || caps.background !== undefined
+    || caps.delegate !== undefined
+    || caps.publish !== undefined
+    || caps.spend !== undefined
+  );
 }
 
 /**
@@ -171,11 +247,16 @@ function validateProjectConfig(value: unknown, path: string): QiProjectConfig {
   const root = value as Record<string, unknown>;
   if (root.version !== 1) throw new TypeError(`${path}: version must be 1`);
   const maxSteps = validateMaxSteps(root.max_steps, path);
+  const permission = root.permission === undefined
+    ? undefined
+    : validateProjectPermission(root.permission, path);
+  const sandbox = root.sandbox === undefined ? undefined : validateProjectSandbox(root.sandbox, path);
   const capabilities = root.capabilities === undefined
     ? undefined
     : validateCapabilities(root.capabilities, path);
   const shell = root.shell === undefined ? undefined : validateShell(root.shell, path);
   const mounts = root.mounts === undefined ? undefined : validateMounts(root.mounts, path);
+  const approvals = root.approvals === undefined ? undefined : validateApprovals(root.approvals, path);
   const sensitivePathGrants = root.sensitive_path_grants === undefined
     ? undefined
     : validateSensitivePathGrants(root.sensitive_path_grants, path);
@@ -185,11 +266,134 @@ function validateProjectConfig(value: unknown, path: string): QiProjectConfig {
   return {
     version: 1,
     ...(maxSteps === undefined ? {} : { maxSteps }),
+    ...(permission === undefined ? {} : { permission }),
+    ...(sandbox === undefined ? {} : { sandbox }),
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(shell === undefined ? {} : { shell }),
     ...(mounts === undefined ? {} : { mounts }),
+    ...(approvals === undefined ? {} : { approvals }),
     ...(sensitivePathGrants === undefined ? {} : { sensitivePathGrants }),
     ...(sensitivePaths === undefined ? {} : { sensitivePaths }),
+  };
+}
+
+function validateApprovals(value: unknown, path: string): readonly QiProjectApprovalRecord[] {
+  if (!Array.isArray(value)) throw new TypeError(`${path}: approvals must be an array`);
+  return value.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new TypeError(`${path}: approvals[${index}] must be a table`);
+    }
+    const table = entry as Record<string, unknown>;
+    if (typeof table.pattern !== "string" || !table.pattern.trim()) {
+      throw new TypeError(`${path}: approvals[${index}].pattern is required`);
+    }
+    if (table.decision !== "allow" && table.decision !== "deny") {
+      throw new TypeError(`${path}: approvals[${index}].decision must be allow or deny`);
+    }
+    if (parseApprovalPattern(table.pattern) === undefined) {
+      throw new TypeError(`${path}: approvals[${index}].pattern is not a valid approval pattern`);
+    }
+    const createdAt =
+      typeof table.created_at === "string" && table.created_at
+        ? table.created_at
+        : new Date(0).toISOString();
+    const source = typeof table.source === "string" ? table.source : undefined;
+    return {
+      pattern: table.pattern,
+      decision: table.decision,
+      createdAt,
+      ...(source === undefined ? {} : { source }),
+    };
+  });
+}
+
+/** Convert project TOML approvals into runtime StoredApproval entries. */
+export function storedApprovalsFromProject(
+  records: readonly QiProjectApprovalRecord[] | undefined,
+): StoredApproval[] {
+  if (!records?.length) return [];
+  const out: StoredApproval[] = [];
+  for (const record of records) {
+    const pattern = parseApprovalPattern(record.pattern);
+    if (!pattern) continue;
+    out.push({
+      pattern,
+      decision: record.decision,
+      scope: "project",
+      createdAt: record.createdAt,
+      ...(record.source === undefined ? {} : { source: record.source }),
+    });
+  }
+  return out;
+}
+
+export function projectApprovalFromStored(entry: StoredApproval): QiProjectApprovalRecord {
+  return {
+    pattern: serializeApprovalPattern(entry.pattern),
+    decision: entry.decision,
+    createdAt: entry.createdAt,
+    ...(entry.source === undefined ? {} : { source: entry.source }),
+  };
+}
+
+function validateProjectPermission(value: unknown, path: string): QiProjectPermissionConfig {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${path}: permission must be a table`);
+  }
+  const table = value as Record<string, unknown>;
+  if (table.mode === undefined) return {};
+  if (table.mode !== "manual" && table.mode !== "yolo" && table.mode !== "auto") {
+    throw new TypeError(`${path}: permission.mode must be manual, yolo, or auto`);
+  }
+  return { mode: table.mode };
+}
+
+function validateProjectSandbox(value: unknown, path: string): QiSandboxConfig {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${path}: sandbox must be a table`);
+  }
+  const table = value as Record<string, unknown>;
+  if (table.policy === undefined) return {};
+  if (
+    table.policy !== "auto"
+    && table.policy !== "srt"
+    && table.policy !== "low-il"
+    && table.policy !== "never"
+  ) {
+    throw new TypeError(`${path}: sandbox.policy must be auto, srt, low-il, or never`);
+  }
+  return { policy: table.policy };
+}
+
+/**
+ * Resolve effective permission mode: CLI override > project > user default > manual.
+ */
+export function resolvePermissionMode(options: {
+  readonly cli?: QiPermissionMode;
+  readonly project?: QiProjectConfig;
+  readonly user?: QiUserConfig;
+}): PermissionMode {
+  if (options.cli) return options.cli;
+  if (options.project?.permission?.mode) return options.project.permission.mode;
+  if (options.user?.permission?.default) return options.user.permission.default;
+  return "manual";
+}
+
+/** Expand permission mode into QiCapabilityConfig when no explicit capability table is set. */
+export function capabilityConfigFromPermissionMode(
+  mode: PermissionMode,
+  options: { readonly safe?: boolean } = {},
+): QiCapabilityConfig {
+  const pack = leasePackForPermissionMode(mode, options);
+  return {
+    write: pack.write,
+    verify: pack.verify,
+    network: pack.network,
+    execute: pack.execute,
+    background: pack.background,
+    delegate: pack.delegate,
+    publish: pack.publish,
+    spend: pack.spend,
   };
 }
 

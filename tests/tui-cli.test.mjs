@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { ensureQiLayout } from "@civaapple/qi-node/paths";
 import { parseTuiCliArguments, qiCliVersion, refreshLaunchCapabilities } from "../apps/cli/dist/cli.js";
 import { defaultSessionDataRoot, workspaceProjectId } from "../apps/cli/dist/paths.js";
 
@@ -126,6 +127,9 @@ test("CLI max_steps precedence is flag over project over user over default and e
     const qiHome = join(root, "qi-home");
     const userConfig = join(root, "user.toml");
     await mkdir(workspace);
+    await mkdir(qiHome, { recursive: true });
+    // ensureQiLayout before seeding projects/ — non-empty home without layout.json is legacy-rejected.
+    await ensureQiLayout(qiHome);
     await writeFile(userConfig, "version = 1\nmax_steps = 16\n");
     const projectDir = join(qiHome, "projects", workspaceProjectId(workspace));
     await mkdir(projectDir, { recursive: true });
@@ -203,6 +207,8 @@ test("CLI loads project mounts and --add-dir; project capabilities overlay globa
     const qiHome = join(root, "home");
     await mkdir(workspace);
     await mkdir(other);
+    await mkdir(qiHome, { recursive: true });
+    await ensureQiLayout(qiHome);
     const projectId = workspaceProjectId(workspace);
     const projectDir = join(qiHome, "projects", projectId);
     await mkdir(projectDir, { recursive: true });
@@ -289,6 +295,7 @@ test("refreshLaunchCapabilities picks up project TOML written after the initial 
     const workspace = join(root, "ws");
     await mkdir(workspace);
     await mkdir(qiHome, { recursive: true });
+    await ensureQiLayout(qiHome);
     const globalConfig = join(root, "global.toml");
     await writeFile(globalConfig, "version = 1\n");
     const parsed = await parseTuiCliArguments(
@@ -299,19 +306,25 @@ test("refreshLaunchCapabilities picks up project TOML written after the initial 
       },
     );
     assert.equal(parsed.kind, "run");
-    assert.equal(parsed.options.allowWrite, false);
-    assert.equal(parsed.options.allowNetwork, false);
+    // ADR-0040: default permission is manual, which expands the coding lease pack
+    // (write/network/execute true). Manual only changes approval rhythm, not the pack.
+    assert.equal(parsed.options.permissionMode, "manual");
+    assert.equal(parsed.options.allowWrite, true);
+    assert.equal(parsed.options.allowNetwork, true);
+    assert.equal(parsed.options.allowExecute, true);
 
     const projectConfig = parsed.options.projectConfigPath;
     assert.ok(projectConfig);
     await mkdir(dirname(projectConfig), { recursive: true });
+    // Expert override: keep write/network, turn execute off explicitly.
     await writeFile(projectConfig, [
       "version = 1",
       "",
       "[capabilities]",
       "write = true",
       "network = true",
-      "execute = true",
+      "execute = false",
+      "verify = true",
       "",
     ].join("\n"));
 
@@ -321,8 +334,8 @@ test("refreshLaunchCapabilities picks up project TOML written after the initial 
     });
     assert.equal(refreshed.allowWrite, true);
     assert.equal(refreshed.allowNetwork, true);
-    assert.equal(refreshed.allowExecute, true);
-    assert.equal(refreshed.allowVerify, false);
+    assert.equal(refreshed.allowExecute, false);
+    assert.equal(refreshed.allowVerify, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -10,6 +10,31 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- **Permission mode (ADR-0040)**: user-facing `manual | yolo | auto` orthogonal to Session
+  `ask|plan|agent`. CLI `--permission`, project `[permission].mode`, user
+  `[permission].default`. YOLO/auto expand the coding lease pack and auto-accept in-lease
+  tools; Manual uses Once/Session/Project approval memory (agent package
+  `evaluateApprovalPolicy`). Ask+yolo still cannot write. See
+  [`design/decisions.md`](design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode).
+- **Graded process sandbox (ADR-0041)**: `@civaapple/qi-node/sandbox` port with
+  `resolveSandboxBackend` (srt preferred → Windows Low IL middle tier → host),
+  `HostProcessSandbox`, and `WinLowIntegritySandbox` (reduced disclosure; full Low IL token
+  launch phased). Config `[sandbox].policy` (`auto|srt|low-il|never`).
+  Runtime injects sandboxed `runProcess` into Tool context: **shell**, **script**, **verify**, and
+  **skill run-script** use it. MCP **stdio** spawns go through `ProcessSandbox.wrapCommand` (srt CLI when
+  on PATH). `host:environment` discloses sandbox backend/strength and permission mode.
+  `qi sandbox status [--json]` reports backend, srt probe, and install hints.
+- Windows: wrap `srt.cmd` through `cmd.exe` (Node cannot spawn `.cmd` directly — was `spawn EINVAL`).
+  Process-start failures (`spawn` / EINVAL) settle as deterministic ToolFailure, not indeterminate.
+  Sandbox resolve smoke-tests srt; on Windows WFP/logon failure falls back to win-low-il with install hints.
+- TUI announces reduced/host sandbox at startup and after shell/script spawn failures, pointing to
+  `qi sandbox status` (full srt stays quiet).
+- Windows srt: prefer machine-readable `%ProgramData%\\qi\\srt-win\\srt-win.exe` via `srt-win exec`,
+  with `acl grant` on nvm/user-profile tool paths (AppData-hosted srt-win/node caused ACCESS_DENIED for
+  srt-sandbox). Smoke uses System32\\cmd.exe so selection is not blocked by nvm node path ACLs.
+- TUI `/permission` (and Settings) switches Manual / YOLO / Auto; expert `/permissions` multi-select remains.
+  Manual mode can block on Once / Session / Project approval via the Tool Registry approval policy.
+  Project-scope approvals persist as `[[approvals]]` in project `policy.toml`.
 - Headless print mode for scripts and CI: `qi -p|--print [PROMPT]` with
   `--output-format text|json|stream-json`, optional `--stream-partial-output`, `--mode ask|plan|agent`,
   and `--prompt`. One Run then exit; codes distinguish `completed` (0), `failed` (1), `parked` (2), and
@@ -47,6 +72,16 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Changed
 
+- **Mount authority expansion**: PATH_GRANT and `/mounts add` now offer **This Session only** vs
+  **Remember for project** (project `[[mounts]]`). Session-only mounts still feed sandbox
+  `readOnlyRoots` and Session mount events; YOLO never invents mounts.
+- TUI statusline shows Session mode · permission mode · sandbox backend/strength together.
+- Project policy writers (mounts / capabilities / sensitive paths) preserve `[permission]`,
+  `[sandbox]`, and `[[approvals]]` instead of dropping them on partial saves.
+- Effective capabilities may derive from permission mode when no explicit `[capabilities]` table is
+  set (legacy expert overrides and `--allow-*` still win). Default without policy remains **manual**:
+  coding lease pack is open (write/execute/…), but non-read Actions require Once/Session/Project
+  approval. YOLO/auto only change the approval rhythm (auto-accept in-lease tools).
 - Primary slash surface now includes about/doctor and session lifecycle helpers for Cursor-like operability
   without collapsing Qi's capability model.
 - Text-only models no longer fail a Run when the prompt auto-detects standalone HTTP lines or image-looking
@@ -60,6 +95,15 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Fixed
 
+- Manual approval denials now emit a valid `lea_approval_policy` policyTrace id (was
+  `approval_policy`, which failed `LeaseIdSchema` and crashed Session event append).
+- Windows srt: ACL grants cover a short tool-path ancestor chain (nvm/AppData), cache
+  grants per process, and time out hung `srt-win acl grant` (12s) so tools cannot block
+  forever. Runtime accepts optional `sandboxPolicy` override (tests / advanced hosts).
+- Sandbox resolve **caches successful smoke** for the process lifetime (repeat
+  `TuiRuntime.create` no longer re-pays ~10s Windows logon smoke). After resolve, Runtime
+  **prewarms ACL** for `process.execPath` + Workspace in the background; the first
+  sandboxed tool awaits that prewarm so grant work is not duplicated mid-Action.
 - First launch no longer treats a `$QI_HOME` that only has auto-written `config.toml` (shell defaults)
   as an unsupported pre-0.6 layout. Layout is initialized before shell probing, and a config-only home
   can receive `layout.json` without backup/clear.

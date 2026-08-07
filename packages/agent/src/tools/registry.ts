@@ -1,8 +1,14 @@
 import {
+  evaluateApprovalPolicy,
   redactSensitiveValue,
+  rememberApproval,
+  type ApprovalPattern,
+  type ApprovalScope,
   type CapabilityBroker,
   type Effect,
+  type PermissionMode,
   type RedactionSummary,
+  type StoredApproval,
 } from "@civaapple/qi-agent/capability";
 import type { ModelContentPart, PortableTool } from "@civaapple/qi-ai";
 import { effectIdempotencyKey, effectIntentHash, type EffectJournal } from "../effects/index.js";
@@ -33,6 +39,26 @@ export interface ToolExecutionContext {
   artifactStore: ArtifactStore;
   /** Frozen Run mode for capability narrowing; never widens leases. */
   mode?: "ask" | "plan" | "agent";
+  /** ADR-0040 permission mode; defaults to manual when omitted. */
+  permissionMode?: PermissionMode;
+  /** Session-scoped approval memory for manual mode. */
+  getSessionApprovals?: () => readonly StoredApproval[];
+  /** Project-scoped approval memory (policy.toml). */
+  getProjectApprovals?: () => readonly StoredApproval[];
+  /**
+   * When approval policy returns ask, Runtime may block for Once/Session/Project.
+   * Headless without this callback denies (fail closed).
+   */
+  requestApproval?: (request: {
+    readonly tool: string;
+    readonly effect: Effect;
+    readonly resources: readonly string[];
+    readonly pattern: ApprovalPattern;
+    readonly allowedScopes: readonly ApprovalScope[];
+    readonly reason: string;
+  }) => Promise<{ readonly decision: "allow" | "deny"; readonly scope: ApprovalScope }>;
+  /** Persist Session/Project memories after human choice. */
+  rememberApproval?: (entry: StoredApproval) => void | Promise<void>;
   /** Read-only mounts available to discovery tools; prefer getMounts for mid-Run grants. */
   mounts?: readonly WorkspaceMount[];
   /** Live mount snapshot so a mid-Run human grant applies to the next Action. */
@@ -53,6 +79,33 @@ export interface ToolExecutionContext {
   effectJournal?: EffectJournal;
   idempotencyScope?: string;
   reportActivity?: (activity: ToolExecutionActivity) => void;
+  /**
+   * Optional host-child runner (ADR-0041 ProcessSandbox). When set, shell/script/verify and similar
+   * tools should prefer this over raw host spawn. Omitted in unit tests and embedding defaults.
+   */
+  runProcess?: (
+    command: string,
+    args: readonly string[],
+    options?: {
+      cwd?: string;
+      env?: NodeJS.ProcessEnv;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      outputLimitBytes?: number;
+      captureLimitBytes?: number;
+      windowsVerbatimArguments?: boolean;
+      stdin?: string | Buffer;
+      reportActivity?: (activity: ToolExecutionActivity) => void;
+    },
+  ) => Promise<{
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    timedOut: boolean;
+    truncated: boolean;
+    stdoutFull?: string;
+    stderrFull?: string;
+  }>;
   /** Runtime-only audit metadata for a same-Step edit freshness rebase. */
   freshnessRebase?: {
     readonly priorActionId: string;
@@ -256,6 +309,58 @@ export class ToolRegistry {
     resources: readonly string[],
     context: ToolExecutionContext,
   ): Promise<AuthorizedToolCall> {
+    // ADR-0040: only when the host explicitly sets permissionMode (CLI/TUI/Runtime).
+    // Omitted mode preserves lease-only authorization for embedding and focused tool tests.
+    if (context.permissionMode !== undefined) {
+      const approval = evaluateApprovalPolicy({
+        permissionMode: context.permissionMode,
+        ...(context.mode === undefined ? {} : { sessionMode: context.mode }),
+        tool: name,
+        effect,
+        resources,
+        sessionMemory: context.getSessionApprovals?.() ?? [],
+        projectMemory: context.getProjectApprovals?.() ?? [],
+      });
+      // Synthetic lea_* id so authority.* Session events satisfy LeaseIdSchema.
+      const approvalLeaseId = "lea_approval_policy";
+      if (approval.kind === "deny") {
+        throw new AuthorityDeniedError(approval.reason, [
+          { leaseId: approvalLeaseId, matched: false, reason: `${approval.policy}: ${approval.reason}` },
+        ]);
+      }
+      if (approval.kind === "ask") {
+        if (!context.requestApproval) {
+          throw new AuthorityDeniedError(
+            `Manual approval required for ${name} (${effect}); no interactive gate available`,
+            [{ leaseId: approvalLeaseId, matched: false, reason: approval.policy }],
+          );
+        }
+        const response = await context.requestApproval({
+          tool: name,
+          effect,
+          resources: [...resources],
+          pattern: approval.pattern,
+          allowedScopes: approval.allowedScopes,
+          reason: approval.reason,
+        });
+        if (response.decision === "deny") {
+          throw new AuthorityDeniedError(
+            `User denied ${name} (${effect})`,
+            [{ leaseId: approvalLeaseId, matched: false, reason: "user_deny" }],
+          );
+        }
+        if (response.scope !== "once") {
+          const entry = rememberApproval({
+            pattern: approval.pattern,
+            decision: "allow",
+            scope: response.scope,
+            source: "manual",
+          });
+          await context.rememberApproval?.(entry);
+        }
+      }
+    }
+
     const decision = await this.#capability.authorize({
       actionId: context.actionId,
       subject: context.subject,

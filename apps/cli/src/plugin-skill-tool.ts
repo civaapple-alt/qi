@@ -74,6 +74,7 @@ export function createTuiPluginSkillTool(catalog: PluginCatalog, workspaceRoot: 
         },
         ...(context.signal === undefined ? {} : { signal: context.signal }),
         ...(context.reportActivity === undefined ? {} : { reportActivity: context.reportActivity }),
+        ...(context.runProcess === undefined ? {} : { runProcess: context.runProcess }),
       });
       const { stdoutFull: _stdoutFull, stderrFull: _stderrFull, ...bounded } = result;
       return { pluginKey, skill, path, ...bounded };

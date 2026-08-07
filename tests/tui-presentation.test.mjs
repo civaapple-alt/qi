@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -337,14 +337,16 @@ test("TUI reconciles effective mounts into Session audit events across restart",
   }
 });
 
-test("persistent mount changes retain explicit CLI and command grants in project policy", async () => {
+test("session-only mounts stay out of project policy; remember writes only durable mounts", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-mount-policy-"));
   const workspace = join(root, "workspace");
   const cliPath = join(root, "cli-reference");
+  const sessionPath = join(root, "session-reference");
   const persistentPath = join(root, "persistent-reference");
   const projectConfigPath = join(root, "project-config.toml");
   await mkdir(workspace);
   await mkdir(cliPath);
+  await mkdir(sessionPath);
   await mkdir(persistentPath);
   let runtime;
   try {
@@ -356,12 +358,71 @@ test("persistent mount changes retain explicit CLI and command grants in project
       model: { provider: "fake", model: "mount-policy-v1" },
       mounts: [{ id: "cli", path: cliPath, mode: "read", source: "cli" }],
     });
-    await runtime.addMount(persistentPath, "command", "docs");
+    // CLI launch mounts are Session-only by default and do not seed policy.
+    assert.equal((await loadProjectConfig(projectConfigPath)).config.mounts, undefined);
+
+    const sessionMount = await runtime.addMount(sessionPath, "command", {
+      mountId: "session-docs",
+      remember: false,
+    });
+    assert.equal(sessionMount.remember, false);
+    assert.equal((await loadProjectConfig(projectConfigPath)).config.mounts, undefined);
+    assert.ok(runtime.mounts().some((mount) => mount.id === "session-docs"));
+
+    await runtime.addMount(persistentPath, "command", { mountId: "docs", remember: true });
     const loaded = await loadProjectConfig(projectConfigPath);
+    // Remember does not auto-promote CLI or Session-only mounts into project policy.
     assert.deepEqual(loaded.config.mounts, [
-      { id: "cli", path: cliPath, mode: "read" },
       { id: "docs", path: persistentPath, mode: "read" },
     ]);
+    assert.equal(runtime.mounts().length, 3);
+
+    // Promoting an existing Session-only mount to remember appends it to policy.
+    await runtime.addMount(sessionPath, "command", { remember: true });
+    const promoted = await loadProjectConfig(projectConfigPath);
+    assert.deepEqual(
+      promoted.config.mounts?.map((mount) => mount.id).sort(),
+      ["docs", "session-docs"],
+    );
+  } finally {
+    runtime?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("project policy mount writes preserve permission mode and sandbox policy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-mount-policy-preserve-"));
+  const workspace = join(root, "workspace");
+  const extra = join(root, "extra");
+  const projectConfigPath = join(root, "project-config.toml");
+  await mkdir(workspace);
+  await mkdir(extra);
+  await writeFile(
+    projectConfigPath,
+    [
+      "version = 1",
+      "[permission]",
+      'mode = "yolo"',
+      "[sandbox]",
+      'policy = "auto"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  let runtime;
+  try {
+    runtime = await TuiRuntime.create({
+      workspaceRoot: workspace,
+      dataRoot: join(root, "data"),
+      projectConfigPath,
+      modelPort: new ScriptedModelPort([]),
+      model: { provider: "fake", model: "mount-preserve-v1" },
+    });
+    await runtime.addMount(extra, "grant", { mountId: "extra", remember: true });
+    const loaded = await loadProjectConfig(projectConfigPath);
+    assert.equal(loaded.config.permission?.mode, "yolo");
+    assert.equal(loaded.config.sandbox?.policy, "auto");
+    assert.deepEqual(loaded.config.mounts, [{ id: "extra", path: extra, mode: "read" }]);
   } finally {
     runtime?.close();
     await rm(root, { recursive: true, force: true });
@@ -554,6 +615,8 @@ test("TUI presenter reconstructs context, shell, diff, and durable Plan progress
     outputReserveTokens: 16_000,
     allowWrite: true,
     allowExecute: true,
+    // Non-interactive: yolo auto-accepts in-lease tools (manual needs approval gate).
+    permissionMode: "yolo",
   });
   try {
     runtime.changeMode("plan", "test setup");
@@ -2199,6 +2262,33 @@ test("follow-ups panel renders queued items and edit hints", () => {
   assert.match(editing, /›/);
 });
 
+test("statusline shows permission mode and sandbox strength", () => {
+  const presenter = new TuiPresenter({
+    workspaceRoot: "D:/workspace/demo",
+    dataRoot: "D:/workspace/demo/.qi",
+    provider: "fake",
+    model: "status-v1",
+    capabilities: ["write"],
+    contextWindowTokens: 80_000,
+    contextBudgetTokens: 64_000,
+    outputReserveTokens: 16_000,
+    historyBudgetTokens: 16_000,
+    maxSteps: 20,
+    maxActionsPerStep: 6,
+    permissionMode: "yolo",
+    sandbox: {
+      backend: "srt-windows",
+      strength: "full",
+      status: "active",
+      reason: "ok",
+    },
+  });
+  const status = presenter.formatStatusline(false, 120).join("\n");
+  assert.match(status, /Agent/);
+  assert.match(status, /yolo/);
+  assert.match(status, /srt-windows/);
+});
+
 test("statusline keeps mode on narrow terminals", () => {
   const presenter = new TuiPresenter({
     workspaceRoot: "/very/long/path/to/workspace/project",
@@ -3014,6 +3104,7 @@ test("background ProcessTasks remain visible after their Run and can be stopped 
     modelPort: model,
     model: { provider: "fake", model: "task-v1" },
     allowBackground: true,
+    permissionMode: "yolo",
     onActivity: (activity) => activities.push(activity),
   });
   try {

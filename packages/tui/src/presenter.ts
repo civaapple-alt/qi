@@ -95,6 +95,15 @@ export interface TuiLaunchInfo {
   readonly version?: string;
   /** Startup Tip when trusted rg/fd are missing from PATH (Node fallback still works). */
   readonly discoveryTip?: string;
+  /** ADR-0041 process sandbox snapshot for statusline / startup notice. */
+  readonly sandbox?: {
+    readonly backend: string;
+    readonly strength: "full" | "reduced" | "none";
+    readonly status: string;
+    readonly reason: string;
+  };
+  /** ADR-0040 permission mode for launch chrome. */
+  readonly permissionMode?: "manual" | "yolo" | "auto";
 }
 
 export type TuiPhase = "Thinking" | "Reading" | "Editing" | "Running" | "Waiting";
@@ -145,6 +154,11 @@ export interface StatuslineModel {
   readonly activeTasks: number;
   readonly cancelHint: string;
   readonly mode: string;
+  /** ADR-0040 permission mode shown next to Session mode. */
+  readonly permissionMode?: "manual" | "yolo" | "auto";
+  /** ADR-0041 sandbox strength label for the footer. */
+  readonly sandboxStrength?: "full" | "reduced" | "none";
+  readonly sandboxBackend?: string;
 }
 
 interface ActionEvents {
@@ -717,6 +731,15 @@ export class TuiPresenter {
       activeTasks: runningTasks,
       cancelHint: activeRun ? "ctrl+c to stop" : "ctrl+c to quit",
       mode: formatMode(this.#view?.mode ?? "agent"),
+      ...(this.launch.permissionMode === undefined
+        ? {}
+        : { permissionMode: this.launch.permissionMode }),
+      ...(this.launch.sandbox === undefined
+        ? {}
+        : {
+          sandboxStrength: this.launch.sandbox.strength,
+          sandboxBackend: this.launch.sandbox.backend,
+        }),
     };
   }
 
@@ -732,8 +755,18 @@ export class TuiPresenter {
       model.filesChanged > 0 ? `${model.filesChanged} files` : undefined,
       model.activeTasks > 0 ? `jobs ${model.activeTasks}` : undefined,
     ].filter((field): field is string => Boolean(field)).join(" · ");
-    // Mode is a safety boundary — always keep it on the right.
-    const top = splitKeepRight(left, model.mode, usable);
+    // Session mode · permission · sandbox are safety boundaries — keep them on the right.
+    const rightParts = [
+      model.mode,
+      model.permissionMode,
+      model.sandboxStrength === undefined
+        ? undefined
+        : model.sandboxStrength === "full"
+          ? (model.sandboxBackend ?? "sandbox")
+          : `sandbox:${model.sandboxStrength}`,
+    ].filter((field): field is string => Boolean(field));
+    const right = rightParts.join(" · ");
+    const top = splitKeepRight(left, right, usable);
     const path = model.branch
       ? `${shortenPath(model.workspace)} · ${model.branch}`
       : shortenPath(model.workspace);

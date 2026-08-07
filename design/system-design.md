@@ -97,17 +97,36 @@ Tool processing is split into separate phases:
 Capability checks deny by default. Leases are scoped, expiring, and use-bounded. Delegation can only narrow a
 parent lease. Session mode and product policy may narrow authority further but never widen it.
 
+**Permission mode** (`manual | yolo | auto`) is orthogonal to Session mode (`ask | plan | agent`). It controls
+whether in-lease non-read Actions auto-accept or require human Once/Session/Project approval; it does not invent
+authority. Goal-based 追寻 is a third axis (activation/continuation), not a Session mode. See
+[ADR-0040](decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode).
+
+Effective authority is always:
+
+```text
+launch lease (from permission mode + CLI/project policy)
+  ∩ session mode
+  ∩ path / mount guards
+  ∩ process sandbox policy
+```
+
 The primary Workspace is the only writable root. Human-approved extra directories are read-only mounts using
 `mount:<id>/...`. `.qi`, `.git`, and `.artifacts` are protected paths and never enter ordinary Agent file
-authority.
+authority. Host secret paths are denied by path guards and, when available, OS sandbox deny-read rules — they
+fail closed without turning into “approve danger” prompts under yolo/auto.
 
 Non-read effects use the Effect Journal with stable idempotency keys. A completed effect may replay its recorded
 result. An indeterminate effect is not automatically retried because doing so could duplicate an external
 action.
 
-File edits require fresh observations and precise multi-hunk targets matched against the original snapshot. Host process execution is advertised honestly as
-host execution, not a sandbox. Long-lived servers use bounded ProcessTasks with ownership, expiry, logs, stop,
-and recovery semantics.
+File edits require fresh observations and precise multi-hunk targets matched against the original snapshot.
+Host child processes (`shell`, `script`, `verify`, skill scripts, MCP stdio) use a **graded process sandbox**
+when available: Anthropic sandbox-runtime (srt) preferred, Windows Low Integrity as a reduced middle tier, else
+honest host execution with disclosure ([ADR-0041](decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)).
+Long-lived servers use bounded ProcessTasks with ownership, expiry, logs, stop, and recovery semantics. Skills,
+MCP, and plugin marketplace components never grant leases from metadata; bound MCP and plugin agents still pass
+through the same authority and sandbox stack.
 
 ## 5. Context, models, and memory
 
@@ -166,8 +185,10 @@ Session interaction mode is durable:
 - **Plan**: read-oriented exploration, managed Plan revisions, and read-only depth-1 research delegation;
 - **Agent**: the full granted launch upper bound.
 
-Plan acceptance starts exactly one Plan-bound Run. Later items require an explicit durable choice. Questions and
-approvals survive restart and cannot grant authority merely because a UI control was clicked.
+Permission mode (`manual | yolo | auto`) is a separate durable control for in-lease approval rhythm and the
+coding lease pack; it is not a fourth Session mode. Plan acceptance starts exactly one Plan-bound Run. Later
+items require an explicit durable choice. Questions and approvals survive restart and cannot grant authority
+merely because a UI control was clicked.
 
 面向人的产品入口是**同行、追寻、守望**；它们分别主要投影 Turn、Goal 和 Time/Event 关系。
 它们不是 Session mode，也不直接授予 Action authority。四种激活与延续方式
