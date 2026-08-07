@@ -348,8 +348,9 @@ With a separate `delegate` capability (`--allow-delegate` or `capabilities.deleg
 `delegate` for a depth-1 isolated Subagent (Plan may fan out `tasks[]` 1–4). The child Session receives a
 Cursor-style brief (objective + Focus / Return / Constraints) plus allowlisted Artifact `contextRefs`, never the
 parent transcript, and cannot delegate further. Defaults: child `maxSteps` / context at 50% of the parent Run,
-5-minute wall (`maxUses = childMaxSteps × maxActionsPerStep`). Override via `/settings` → **Subagent** or
-`/subagent` (persists `[delegate]` in `~/.qi/config.toml`):
+5-minute wall by default, hard-capped at 30 minutes (`maxUses = childMaxSteps × maxActionsPerStep`). Override
+via `/settings` → **Subagent** or `/subagent` (persists `[delegate]` in `~/.qi/config.toml`; wall presets
+1/2/3/5/10/15/20/30m):
 
 ```toml
 [delegate]

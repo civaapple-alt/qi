@@ -352,6 +352,14 @@ export async function assertSafePrivateRoot(
   await rejectSymlinkChain(root);
 }
 
+/**
+ * Files Qi may write under $QI_HOME before layout.json exists (first-run bootstrap).
+ * A home containing only these is not treated as a pre-0.6 install.
+ */
+const QI_HOME_BOOTSTRAP_ONLY_ENTRIES = new Set([
+  "config.toml",
+]);
+
 async function assertLayoutGeneration(root: string): Promise<void> {
   const layoutPath = resolve(root, "layout.json");
   try {
@@ -367,7 +375,8 @@ async function assertLayoutGeneration(root: string): Promise<void> {
   }
   if (!existsSync(root)) return;
   const entries = await readdir(root);
-  if (entries.length > 0) throw legacyLayoutError(root, "layout.json is missing");
+  const foreign = entries.filter((entry) => !QI_HOME_BOOTSTRAP_ONLY_ENTRIES.has(entry));
+  if (foreign.length > 0) throw legacyLayoutError(root, "layout.json is missing");
 }
 
 function legacyLayoutError(root: string, detail: string): Error {

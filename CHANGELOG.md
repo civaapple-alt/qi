@@ -55,9 +55,14 @@ backup plus reset or a new data root rather than an automatic migration.
   opaque Internal error.
 - Auto image URL/path ingest soft-fails to plain text (network denied, non-image MIME, missing file)
   instead of aborting the Run before the model turns.
+- `/settings` → Subagent wall-clock presets now include 10 / 15 / 20 / 30 minutes (still default 5m).
+  User `[delegate].wall_time_ms` and model `delegate.wallTimeMs` hard max is 30 minutes (was 5m).
 
 ### Fixed
 
+- First launch no longer treats a `$QI_HOME` that only has auto-written `config.toml` (shell defaults)
+  as an unsupported pre-0.6 layout. Layout is initialized before shell probing, and a config-only home
+  can receive `layout.json` without backup/clear.
 - ACP first prompt with documentation URLs (e.g. `https://…/kimi-acp.html` alone on a line) no longer
   aborts before the Run starts with “image path or URL / does not support image input”.
 

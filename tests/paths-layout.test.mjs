@@ -70,6 +70,22 @@ test("pre-0.6 QI_HOME is rejected without migration or deletion", async () => {
   }
 });
 
+test("QI_HOME with only bootstrap config.toml can initialize layout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qi-layout-bootstrap-"));
+  try {
+    await writeFile(join(root, "config.toml"), "version = 1\n\n[shell]\ndefault = \"direct\"\nallowed = [ \"direct\" ]\n");
+    await ensureQiLayout(root);
+    const layout = JSON.parse(await readFile(join(root, "layout.json"), "utf8"));
+    assert.equal(layout.generation, QI_LAYOUT_GENERATION);
+    assert.equal(
+      await readFile(join(root, "config.toml"), "utf8"),
+      "version = 1\n\n[shell]\ndefault = \"direct\"\nallowed = [ \"direct\" ]\n",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("legacy shared-Session project layout is rejected without deleting it", async () => {
   const root = await mkdtemp(join(tmpdir(), "qi-project-layout-legacy-"));
   try {

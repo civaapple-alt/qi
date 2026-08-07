@@ -12,6 +12,10 @@ import type { TurnLoop } from "@civaapple/qi-agent/loop";
 import type { SessionEvent } from "@civaapple/qi-protocol";
 import { ToolFailure, defineTool, type ArtifactStore, type ToolRegistry } from "@civaapple/qi-node/tools";
 import { Type, type Static } from "@sinclair/typebox";
+import {
+  DEFAULT_DELEGATE_WALL_TIME_MS,
+  DELEGATE_WALL_TIME_MS_MAX,
+} from "./config.js";
 import { buildDelegatedTaskBrief, delegatedTaskTitle } from "./delegated-task-brief.js";
 
 const ArtifactRefSchema = Type.String({ pattern: "^artifact://[a-f0-9]{64}$" });
@@ -44,7 +48,7 @@ const DelegateInputSchema = Type.Object(
     tasks: Type.Optional(Type.Array(TaskItemSchema, { minItems: 1, maxItems: 4 })),
     maxSteps: Type.Optional(Type.Integer({ minimum: 1, maximum: 64 })),
     contextTokens: Type.Optional(Type.Integer({ minimum: 512, maximum: 200_000 })),
-    wallTimeMs: Type.Optional(Type.Integer({ minimum: 1_000, maximum: 300_000 })),
+    wallTimeMs: Type.Optional(Type.Integer({ minimum: 1_000, maximum: DELEGATE_WALL_TIME_MS_MAX })),
   },
   { additionalProperties: false },
 );
@@ -109,7 +113,7 @@ export function createDelegateTool(deps: DelegateToolDeps) {
       "optional focus[] / returns[] / constraints[]; Qi always expands these into a Focus/Return/Constraints child " +
       "prompt (defaults fill gaps). Pass allowlisted context or contextRefs, or tasks[] (1–4) for parallel fan-out. " +
       "Default child envelope is half the parent maxSteps/contextTokens with a 5-minute wall " +
-      "(override via maxSteps/wallTimeMs/contextTokens; wall still capped at 5m). " +
+      "(override via maxSteps/wallTimeMs/contextTokens or user [delegate]; wall hard-capped at 30m). " +
       "Size each task to fit that envelope: one document surface or theme per child — split large comparisons " +
       "across tasks[] instead of one exhaustive crawl. The child brief Constraints include the actual budget. " +
       "Children cannot delegate. You receive a short summary preview plus summaryRef/resultRef — never child " +
@@ -413,7 +417,7 @@ export function childDelegateBudgetDefaults(
 ): DelegateBudgetDefaults {
   const maxStepsPercent = options?.maxStepsPercent ?? 50;
   const contextTokensPercent = options?.contextTokensPercent ?? 50;
-  const wallTimeMs = options?.wallTimeMs ?? 300_000;
+  const wallTimeMs = options?.wallTimeMs ?? DEFAULT_DELEGATE_WALL_TIME_MS;
   const maxSteps = Math.max(1, Math.floor(parent.maxSteps * (maxStepsPercent / 100)));
   return {
     contextTokens: Math.max(512, Math.floor(parent.contextBudgetTokens * (contextTokensPercent / 100))),

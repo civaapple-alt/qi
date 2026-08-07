@@ -60,7 +60,7 @@ export interface QiImageConfig {
 
 /** User-tunable depth-1 Subagent / `delegate` envelope (ADR-0035). */
 export interface QiDelegateConfig {
-  /** Child wall clock in ms (default 300_000; hard max 300_000). */
+  /** Child wall clock in ms (default 300_000 / 5m; hard max 1_800_000 / 30m). */
   readonly wallTimeMs?: number;
   /** Percent of parent Run maxSteps (1–100; default 50). */
   readonly maxStepsPercent?: number;
@@ -84,8 +84,19 @@ export const DEFAULT_DELEGATE_WALL_TIME_MS = 300_000;
 export const DEFAULT_DELEGATE_MAX_STEPS_PERCENT = 50;
 export const DEFAULT_DELEGATE_CONTEXT_TOKENS_PERCENT = 50;
 export const DELEGATE_WALL_TIME_MS_MIN = 60_000;
-export const DELEGATE_WALL_TIME_MS_MAX = 300_000;
-export const DELEGATE_WALL_TIME_PRESETS_MS = [60_000, 120_000, 180_000, 300_000] as const;
+/** Hard ceiling for user config and model `wallTimeMs` overrides (30 minutes). */
+export const DELEGATE_WALL_TIME_MS_MAX = 1_800_000;
+/** `/settings` → Subagent wall presets: 1 / 2 / 3 / 5 / 10 / 15 / 20 / 30 minutes. */
+export const DELEGATE_WALL_TIME_PRESETS_MS = [
+  60_000,
+  120_000,
+  180_000,
+  300_000,
+  600_000,
+  900_000,
+  1_200_000,
+  1_800_000,
+] as const;
 export const DELEGATE_PERCENT_PRESETS = [25, 50, 75, 100] as const;
 /** Protocol / product fixed: batch fan-out ceiling and depth-1 only. */
 export const DELEGATE_BATCH_MAX = 4;

@@ -78,9 +78,9 @@ Subagent / delegate, Providers, Config, Context, Theme, Language, Timeline densi
 presentation state; only an explicit “save user default” choice writes `[ui].timeline_density` to user config.
 Step budget persists `max_steps` to user config and hot-applies on the next Run; `/max-steps` opens the same
 panel. Per-Step Action limit persists `max_actions_per_step` (1–32, default 6); `/max-actions-per-step` opens
-the same panel. Subagent / delegate persists `[delegate]` (`wall_time_ms` default 5m, `max_steps_percent` /
-`context_tokens_percent` default 50%); `/subagent` (alias `/delegate`) opens the same hub and shows fixed batch
-max 4 and depth 1.
+the same panel. Subagent / delegate persists `[delegate]` (`wall_time_ms` default 5m, hard max 30m, presets
+1/2/3/5/10/15/20/30m; `max_steps_percent` / `context_tokens_percent` default 50%); `/subagent` (alias
+`/delegate`) opens the same hub and shows fixed batch max 4 and depth 1.
 `/providers` and empty `/login` open the provider list; selecting a provider offers API-key form or Kimi device
 login without writing secrets into Session events or TOML. Esc pops one panel level; an empty stack restores the
 composer.

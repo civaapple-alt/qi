@@ -708,8 +708,10 @@ model = "grok-config"
     });
     await assert.rejects(
       () => persistUserDelegateConfig({ wallTimeMs: 30_000 }, path),
-      /wall_time_ms must be an integer from 60000 to 300000/,
+      /wall_time_ms must be an integer from 60000 to 1800000/,
     );
+    const longWall = await persistUserDelegateConfig({ wallTimeMs: 1_800_000 }, path);
+    assert.equal(longWall.config.delegate?.wallTimeMs, 1_800_000);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

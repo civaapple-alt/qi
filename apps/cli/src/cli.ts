@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { providerModelContextTokens, providerModelOutputReserveTokens } from "@civaapple/qi-ai";
+import { defaultQiHome, ensureQiLayout } from "@civaapple/qi-node/paths";
 import { SessionIdSchema, assertSchema, type SessionId } from "@civaapple/qi-protocol";
 import {
   defaultUserConfigPath,
@@ -274,6 +275,11 @@ export async function parseTuiCliArguments(
     throw new TypeError("--mode must be ask, plan, or agent");
   }
   const sessionMode = modeRaw as SessionModeFlag | undefined;
+  // Initialize $QI_HOME layout before first-run shell probing writes config.toml.
+  // Otherwise a config-only home is misclassified as unsupported pre-0.6 layout.
+  // Skip workspaceRoot here: containment is enforced later in ensureProjectLayout;
+  // parse-time tests often place a temporary QI_HOME under the workspace.
+  await ensureQiLayout(defaultQiHome(environment));
   const loaded = flags.has("--no-config")
     ? { path: configuredPath, exists: false, config: { version: 1 as const } }
     : await ensureUserShellConfig(workspaceRoot, configuredPath);

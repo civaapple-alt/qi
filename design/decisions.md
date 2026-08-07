@@ -785,9 +785,9 @@ Decision:
   **`/tasks`**. Protocol events stay `task.*` / `delegation.*`; the model tool name for ProcessTasks remains `task`.
 - CLI child scope uses a synthetic parent lease (`lea_tui_delegate_scope`): explore tools always; `fetch` /
   `web_map` only when the parent already has network. Defaults: `contextTokens` and `maxSteps` at 50% of the
-  parent Run budget, `wallTimeMs` 5 minutes, `maxUses = childMaxSteps × parentMaxActionsPerStep`. User config
+  parent Run budget, `wallTimeMs` default 5 minutes (hard max 30 minutes), `maxUses = childMaxSteps × parentMaxActionsPerStep`. User config
   `[delegate]` (`wall_time_ms`, `max_steps_percent`, `context_tokens_percent`) may override those ratios/wall
-  via `/settings` → Subagent or `/subagent`; batch max 4 and depth 1 remain fixed.
+  via `/settings` → Subagent or `/subagent` (wall presets 1–30 minutes); batch max 4 and depth 1 remain fixed.
 - Return path: `summaryRef` / inline `summary` stay short previews; `resultRef` stores the full child deliverable
   text (hard-capped). Parents read Artifact store content with read-effect `artifact_get`, never workspace `read`
   on `artifact://`. When enabled, `qi_session_inspect` projects Subagent Task refs (`operation=delegations`, Run/recovery
