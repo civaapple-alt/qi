@@ -23,6 +23,10 @@ limits. Optional frozen Run `mode` (`ask` / `plan` / `agent`) may only narrow ma
 is orthogonal: it selects the coding lease pack and whether in-lease non-read Actions auto-accept or require
 human Once/Session/Project approval (`approval-policy`). It never widens past leases or Session mode. Host
 children use the graded process sandbox ([ADR-0041](../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)).
+Approval outcomes that affect an Action may be recorded as `authority.approval.decided`, and each Run may
+disclose effective permission/sandbox via `run.environment.disclosed`
+([ADR-0042](../../design/decisions.md#adr-0042-durable-environment-and-approval-audit-facts-read-only-surfaces));
+those facts are audit-only and do not grant authority on replay.
 
 Delegation intersects the requested child scope with the parent. `CredentialHandle` binds secret access to
 subject and intent while the secret stays behind the broker.
@@ -94,4 +98,5 @@ and `tests/coordinator.test.mjs`.
 - [Credential handles](credential-handles.md)
 - [Safety design](../../design/system-design.md#4-workspace-authority-and-effects)
 - [ADR-0040](../../design/decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode)
+- [ADR-0042](../../design/decisions.md#adr-0042-durable-environment-and-approval-audit-facts-read-only-surfaces)
 - [ADR-0041](../../design/decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)

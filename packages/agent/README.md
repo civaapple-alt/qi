@@ -7,6 +7,7 @@ The package owns:
 - `./kernel`: Session transition validation, replay, projections, and EventStore port;
 - `./loop`: TurnLoop, EventWriter, Goal continuation helpers, safe boundaries, human control, and recovery;
 - `./capability`: default-deny leases, permission mode + approval policy (ADR-0040), delegation narrowing, credential handles, and redaction;
+  approval decisions may be audited as `authority.approval.decided` (ADR-0042) without becoming lease grants;
 - `./tools`: typed Tool registry, phase separation, errors, and execution context ports;
 - `./effects`: EffectJournal port and deterministic intent/idempotency identities;
 - `./eval`: evidence-backed goals, evaluator calibration, and convergence;

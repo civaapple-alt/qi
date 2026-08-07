@@ -10,6 +10,24 @@ backup plus reset or a new data root rather than an automatic migration.
 
 ### Added
 
+- **qi:web Session authority (read-only)**: Continuity and Contract show Session mode, read mounts, and
+  sensitive-path grants from durable Kernel facts. Action cards surface `leaseId`, denial reason,
+  heuristic `denialCategory`, and `policyTrace` for `authority.granted` / `authority.denied`. Audit details
+  and live SSE cover `session.mode.changed`, `workspace.mount.*`, and `workspace.sensitive_path.*`.
+  Permission mode and sandbox backend remain non-Session facts and are not fabricated in Web
+  ([ADR-0016](design/decisions.md#adr-0016-keep-execution-local-and-web-read-only)).
+- **qi:web failure / guard-layer labels (P1)**: failed Actions classify isolation vs spawn/timeout/path/etc.;
+  process cards highlight OS/sandbox policy signals; tool cards show expected dual-layer guards
+  (capability + path-guard [+ process-sandbox eligibility for host children]). Run summary counts
+  isolation failures separately from authority denials.
+- **Durable environment & approval audit (ADR-0042 / P2)**:
+  - Protocol: `run.environment.disclosed` (permission mode + sandbox backend/strength/wraps) and
+    `authority.approval.decided` (Once/Session/Project, memory, no-gate, policy-deny).
+  - Kernel projects Run `environment` and Action `approval` (audit-only; no authority on replay).
+  - TurnLoop emits environment when the host supplies disclosure; Registry records approval decisions
+    via `recordApprovalDecision` (CLI Runtime always discloses permission + sandbox).
+  - qi:web shows Run environment cards, interactive approval cards, process sandbox tags from
+    Run disclosure, and Audit details for the new event types.
 - **Permission mode (ADR-0040)**: user-facing `manual | yolo | auto` orthogonal to Session
   `ask|plan|agent`. CLI `--permission`, project `[permission].mode`, user
   `[permission].default`. YOLO/auto expand the coding lease pack and auto-accept in-lease

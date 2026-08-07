@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { QiWebServer, projectWebSession } from "@civaapple/qi-web";
+import {
+  QiWebServer,
+  classifyDenial,
+  classifyFailure,
+  guardLayersForTool,
+  projectWebSession,
+} from "@civaapple/qi-web";
 import { InMemoryEventStore } from "@civaapple/qi-agent/kernel";
 import { EventWriter, HumanControlService } from "@civaapple/qi-agent/loop";
 import { SessionEventHub } from "@civaapple/qi-node/stream";
@@ -37,6 +43,19 @@ test("Web workbench serves real Session projections, history and committed live 
     assert.match(application, /function skillLabel/);
     assert.match(application, /artifact-store write/);
     assert.match(application, /Todo status is navigation only/);
+    assert.match(application, /function renderAuthority/);
+    assert.match(application, /function renderSessionAuthority/);
+    assert.match(application, /function renderFailureBanner/);
+    assert.match(application, /function renderGuardLayers/);
+    assert.match(application, /function renderApprovalCard/);
+    assert.match(application, /function renderRunEnvironment/);
+    assert.match(application, /SESSION AUTHORITY/);
+    assert.match(application, /Policy trace/);
+    assert.match(application, /Process isolation/);
+    assert.match(application, /authority\.approval\.decided/);
+    assert.match(application, /run\.environment\.disclosed/);
+    assert.match(application, /workspace\.mount\.added/);
+    assert.match(application, /session\.mode\.changed/);
     assert.doesNotMatch(application, /narrative\.runs\.slice\(\)\.reverse\(\)/);
 
     const meta = await fetch(`${address.url}/api/meta`).then((response) => response.json());
@@ -185,10 +204,323 @@ test("Web narrative joins Run, Step and Action events without synthesizing evide
   assert.equal(action.resultSummary, "1 replacement(s)");
   assert.match(action.diff, /\+return total/);
   assert.equal(action.gitWorkspaceChange, false);
+  assert.equal(action.leaseId, "lea_web_narrative");
+  assert.equal(action.denialCategory, undefined);
   assert.ok(action.milestones.proposed < action.milestones.started);
   assert.ok(action.milestones.started < action.milestones.terminal);
+  assert.equal(narrative.mode, "agent");
+  assert.deepEqual(narrative.mounts, []);
+  assert.deepEqual(narrative.sensitivePathGrants, []);
   assert.deepEqual(view.evidence, {});
   assert.deepEqual(view.memories, {});
+});
+
+test("Web projects Session authority facts and authority denials without inventing approval UI", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = "ses_web_authority";
+  const runId = "run_web_authority";
+  const stepId = "stp_web_authority";
+  const grantedId = "act_web_auth_ok";
+  const deniedId = "act_web_auth_deny";
+  const actor = { kind: "runtime", id: "test" };
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { title: "Authority audit", mode: "agent" }, actor);
+  writer.append(
+    "workspace.mount.added",
+    {
+      mountId: "docs",
+      path: "D:/share/docs",
+      mode: "read",
+      source: "grant",
+    },
+    actor,
+  );
+  writer.append(
+    "workspace.sensitive_path.granted",
+    { path: "secrets/local.env", source: "grant" },
+    actor,
+  );
+  writer.append("run.triggered", { runId, trigger: "user", input: "touch secrets" }, actor);
+  writer.append("run.started", { runId }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: grantedId,
+    toolName: "read",
+    input: { path: "README.md" },
+    resources: ["workspace:README.md"],
+    effect: "read",
+  }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId: deniedId,
+    toolName: "write",
+    input: { path: "out.txt", content: "x" },
+    resources: ["workspace:out.txt"],
+    effect: "write",
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+  writer.append("authority.requested", { runId, stepId, actionId: grantedId }, actor);
+  writer.append("authority.granted", {
+    runId,
+    stepId,
+    actionId: grantedId,
+    leaseId: "lea_read_workspace",
+    policyTrace: [
+      { leaseId: "lea_read_workspace", matched: true, reason: "workspace read lease" },
+    ],
+  }, actor);
+  writer.append("action.started", { runId, stepId, actionId: grantedId }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId: grantedId,
+    modelOutput: [{ type: "text", text: JSON.stringify({ path: "README.md", content: "# ok" }) }],
+  }, actor);
+  writer.append("authority.requested", { runId, stepId, actionId: deniedId }, actor);
+  writer.append("authority.denied", {
+    runId,
+    stepId,
+    actionId: deniedId,
+    reason: "Manual approval required for write (write); no interactive gate available",
+    policyTrace: [
+      {
+        leaseId: "lea_approval_policy",
+        matched: false,
+        reason: "manual-ask: Manual approval required",
+      },
+    ],
+  }, actor);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, actor);
+
+  const view = store.load(sessionId);
+  assert.ok(view);
+  assert.equal(view.mode, "agent");
+  assert.equal(view.mounts.docs?.path, "D:/share/docs");
+  assert.ok(view.sensitivePathGrants["secrets/local.env"]);
+
+  const narrative = projectWebSession(view, store.read(sessionId).events);
+  assert.equal(narrative.mode, "agent");
+  assert.equal(narrative.mounts.length, 1);
+  assert.equal(narrative.mounts[0].mountId, "docs");
+  assert.equal(narrative.mounts[0].source, "grant");
+  assert.equal(narrative.sensitivePathGrants.length, 1);
+  assert.equal(narrative.sensitivePathGrants[0].path, "secrets/local.env");
+
+  const run = narrative.runs[0];
+  assert.equal(run.summary.deniedActions, 1);
+  assert.equal(run.summary.completedActions, 1);
+  const actions = run.steps[0].actions;
+  const granted = actions.find((action) => action.actionId === grantedId);
+  const denied = actions.find((action) => action.actionId === deniedId);
+  assert.ok(granted);
+  assert.ok(denied);
+  assert.equal(granted.leaseId, "lea_read_workspace");
+  assert.equal(granted.policyTrace?.[0]?.matched, true);
+  assert.equal(denied.status, "denied");
+  assert.match(denied.terminalDetail ?? "", /Manual approval required/);
+  assert.equal(denied.denialCategory, "approval");
+  assert.equal(denied.policyTrace?.[0]?.leaseId, "lea_approval_policy");
+  assert.equal(denied.milestones.authorityGranted, undefined);
+  assert.ok(denied.milestones.terminal);
+  assert.deepEqual(granted.guardLayers, ["capability", "path-guard"]);
+  assert.deepEqual(denied.guardLayers, ["capability", "path-guard"]);
+  assert.equal(run.summary.isolationFailures, 0);
+});
+
+test("Web classifies process isolation failures and dual-layer guard models", () => {
+  assert.deepEqual(guardLayersForTool("shell"), ["capability", "path-guard", "process-sandbox"]);
+  assert.deepEqual(guardLayersForTool("edit"), ["capability", "path-guard"]);
+  assert.equal(
+    classifyDenial("User denied write (write)", [{ leaseId: "lea_approval_policy", matched: false, reason: "user_deny" }]),
+    "user_deny",
+  );
+  assert.equal(
+    classifyDenial("Path is outside the Workspace and mounts", undefined, "PATH_GRANT_REQUIRED"),
+    "path",
+  );
+  assert.equal(
+    classifyFailure({
+      toolName: "script",
+      errorCode: "SHELL_PROFILE_START_FAILED",
+      resultSummary: "Could not start shell profile bash: spawn EINVAL (check sandbox/srt wrap)",
+    }),
+    "isolation",
+  );
+  assert.equal(
+    classifyFailure({
+      toolName: "shell",
+      errorCode: "SHELL_PROFILE_EXIT_NONZERO",
+      process: {
+        command: "cat /etc/shadow",
+        exitCode: 1,
+        timedOut: false,
+        stdout: undefined,
+        stderr: "Operation not permitted",
+        workspaceChanged: false,
+      },
+    }),
+    "isolation",
+  );
+  assert.equal(
+    classifyFailure({
+      toolName: "write",
+      errorCode: "SENSITIVE_PATH_GRANT_REQUIRED",
+      result: { message: "Sensitive path requires an explicit human grant" },
+    }),
+    "sensitive_path",
+  );
+  assert.equal(
+    classifyFailure({
+      toolName: "script",
+      errorCode: "SHELL_PROFILE_TIMEOUT",
+      process: { command: "sleep", exitCode: undefined, timedOut: true, stdout: undefined, stderr: undefined, workspaceChanged: false },
+    }),
+    "timeout",
+  );
+
+  const store = new InMemoryEventStore();
+  const sessionId = "ses_web_isolation";
+  const runId = "run_web_isolation";
+  const stepId = "stp_web_isolation";
+  const actionId = "act_web_isolation";
+  const actor = { kind: "runtime", id: "test" };
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { title: "Isolation failure" }, actor);
+  writer.append("run.triggered", { runId, trigger: "user", input: "run blocked cmd" }, actor);
+  writer.append("run.started", { runId }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId,
+    toolName: "shell",
+    input: { command: "npm", args: ["test"] },
+    resources: ["host-process:npm"],
+    effect: "execute",
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+  writer.append("authority.requested", { runId, stepId, actionId }, actor);
+  writer.append("authority.granted", {
+    runId,
+    stepId,
+    actionId,
+    leaseId: "lea_shell",
+    policyTrace: [{ leaseId: "lea_shell", matched: true, reason: "execute lease" }],
+  }, actor);
+  writer.append("action.started", { runId, stepId, actionId }, actor);
+  writer.append("action.failed", {
+    runId,
+    stepId,
+    actionId,
+    errorCode: "SHELL_PROFILE_START_FAILED",
+    modelOutput: [{
+      type: "text",
+      text: JSON.stringify({
+        code: "SHELL_PROFILE_START_FAILED",
+        message: "Could not start shell profile direct: spawn EPERM under srt-sandbox",
+        profile: "direct",
+      }),
+    }],
+  }, actor);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, actor);
+
+  const view = store.load(sessionId);
+  assert.ok(view);
+  const narrative = projectWebSession(view, store.read(sessionId).events);
+  const action = narrative.runs[0].steps[0].actions[0];
+  assert.equal(action.status, "failed");
+  assert.equal(action.failureCategory, "isolation");
+  assert.deepEqual(action.guardLayers, ["capability", "path-guard", "process-sandbox"]);
+  assert.equal(narrative.runs[0].summary.isolationFailures, 1);
+  assert.equal(action.leaseId, "lea_shell");
+});
+
+test("Web projects run.environment.disclosed and authority.approval.decided (ADR-0042)", () => {
+  const store = new InMemoryEventStore();
+  const sessionId = "ses_web_env_approval";
+  const runId = "run_web_env_approval";
+  const stepId = "stp_web_env_approval";
+  const actionId = "act_web_env_approval";
+  const actor = { kind: "runtime", id: "test" };
+  const writer = new EventWriter(store, sessionId);
+  writer.append("session.created", { title: "Env disclosure" }, actor);
+  writer.append("run.triggered", { runId, trigger: "user", input: "write under manual" }, actor);
+  writer.append("run.started", { runId }, actor);
+  writer.append("run.environment.disclosed", {
+    runId,
+    permissionMode: "manual",
+    sessionMode: "agent",
+    sandbox: {
+      backend: "srt-windows",
+      strength: "full",
+      status: "active",
+      wraps: ["shell", "script", "verify"],
+      reason: "srt-win smoke ok",
+    },
+  }, actor);
+  writer.append("step.started", { runId, stepId }, actor);
+  writer.append("action.proposed", {
+    runId,
+    stepId,
+    actionId,
+    toolName: "write",
+    input: { path: "out.txt", content: "x" },
+    resources: ["workspace:out.txt"],
+    effect: "write",
+  }, actor);
+  writer.append("step.completed", { runId, stepId, finishReason: "action-requested" }, actor);
+  writer.append("authority.requested", { runId, stepId, actionId }, actor);
+  writer.append("authority.approval.decided", {
+    runId,
+    stepId,
+    actionId,
+    decision: "allow",
+    scope: "session",
+    source: "interactive",
+    pattern: {
+      tool: "write",
+      effect: "write",
+      resourceClass: "workspace:file:out.txt",
+    },
+    reason: "Manual permission mode requires approval",
+  }, actor);
+  writer.append("authority.granted", {
+    runId,
+    stepId,
+    actionId,
+    leaseId: "lea_write",
+    policyTrace: [{ leaseId: "lea_write", matched: true, reason: "write lease" }],
+  }, actor);
+  writer.append("action.started", { runId, stepId, actionId }, actor);
+  writer.append("action.completed", {
+    runId,
+    stepId,
+    actionId,
+    modelOutput: [{ type: "text", text: JSON.stringify({ path: "out.txt" }) }],
+  }, actor);
+  writer.append("run.completed", { runId, completionKind: "response", evaluationIds: [] }, actor);
+
+  const view = store.load(sessionId);
+  assert.ok(view);
+  assert.equal(view.runs[runId]?.environment?.permissionMode, "manual");
+  assert.equal(view.runs[runId]?.environment?.sandbox?.backend, "srt-windows");
+  assert.equal(view.runs[runId]?.actions[actionId]?.approval?.scope, "session");
+  assert.equal(view.runs[runId]?.actions[actionId]?.approval?.source, "interactive");
+
+  const narrative = projectWebSession(view, store.read(sessionId).events);
+  const run = narrative.runs[0];
+  assert.equal(run.environment?.permissionMode, "manual");
+  assert.equal(run.environment?.sandbox?.backend, "srt-windows");
+  assert.equal(run.environment?.sandbox?.strength, "full");
+  assert.equal(run.summary.approvalDecisions, 1);
+  const action = run.steps[0].actions[0];
+  assert.equal(action.approval?.decision, "allow");
+  assert.equal(action.approval?.scope, "session");
+  assert.equal(action.approval?.source, "interactive");
+  assert.equal(action.approval?.pattern.tool, "write");
 });
 
 test("Web narrative shows full git request on INVALID_GIT_ARGUMENT failures", () => {

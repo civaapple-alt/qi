@@ -55,6 +55,10 @@ for untrusted serialized input.
   this additive value keep their prior history behavior.
 - `action.freshness.rebased` records the original and effective whole-file digests when the Loop safely chains a
   same-Step `edit` after a completed edit; it must precede authority and executor entry.
+- `run.environment.disclosed` audits effective `permissionMode` and optional process sandbox selection for a Run
+  (ADR-0042). It does not grant authority on replay.
+- `authority.approval.decided` audits Manual Once/Session/Project choices and approval-memory / no-gate outcomes
+  while an Action is awaiting authority (ADR-0042). It is not a lease grant.
 - New Memory facts use the structured `MemoryScope` union. `memory.user.asserted` records an explicit human
   source and `memory.activation.changed` records `relevant` versus user-only `always`; legacy string scopes
   remain replayable but isolated.

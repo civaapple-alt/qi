@@ -42,6 +42,46 @@ export interface WebProcessOutput {
   workspaceChanged: boolean;
 }
 
+export interface WebPolicyTraceEntry {
+  leaseId: string;
+  matched: boolean;
+  reason: string;
+}
+
+/**
+ * Heuristic label for authority denials (read-only UX). Not a protocol outcome —
+ * Once/Session/Project choices are not durable Session facts.
+ */
+export type WebDenialCategory =
+  | "approval"
+  | "user_deny"
+  | "mode"
+  | "path"
+  | "lease"
+  | "other";
+
+/**
+ * Heuristic label for settled tool failures (not authority.denied).
+ * Isolation means OS sandbox / process-start policy signals in codes or streams —
+ * not proof of which backend ran.
+ */
+export type WebFailureCategory =
+  | "isolation"
+  | "spawn"
+  | "timeout"
+  | "exit_nonzero"
+  | "path_guard"
+  | "sensitive_path"
+  | "validation"
+  | "other";
+
+/**
+ * Expected enforcement layers for a tool class (dual-path model).
+ * `process-sandbox` means the class is eligible for ADR-0041 wrapping when available;
+ * it does not claim a specific backend for this Action.
+ */
+export type WebGuardLayer = "capability" | "path-guard" | "process-sandbox" | "session-mode";
+
 export interface WebActionProjection {
   actionId: string;
   stepId: string;
@@ -53,6 +93,18 @@ export interface WebActionProjection {
   status: ActionStatus;
   errorCode: string | undefined;
   terminalDetail: string | undefined;
+  /** Lease that authorized this Action when granted. */
+  leaseId: string | undefined;
+  /** Capability / approval policy trace from authority.granted or authority.denied. */
+  policyTrace: WebPolicyTraceEntry[] | undefined;
+  /** Present when status is denied (or terminalDetail looks like a denial). */
+  denialCategory: WebDenialCategory | undefined;
+  /** Present when status is failed (tool/settlement failure, not authority deny). */
+  failureCategory: WebFailureCategory | undefined;
+  /** Expected guard layers for this tool class (static product model). */
+  guardLayers: WebGuardLayer[];
+  /** ADR-0042 durable approval decision when present. */
+  approval: WebApprovalDecision | undefined;
   result: unknown;
   resultSummary: string | undefined;
   /** File-mutation unified diff (edit/write/…) or Git workspaceChange.diff for process tools. */
@@ -122,6 +174,32 @@ export interface WebWorkPlanSnapshot {
   explanation: string | undefined;
 }
 
+export interface WebRunEnvironment {
+  permissionMode: "manual" | "yolo" | "auto";
+  sessionMode: string | undefined;
+  sandbox:
+    | {
+        backend: string;
+        strength: "full" | "reduced" | "none";
+        status: string;
+        wraps: string[];
+        reason: string | undefined;
+      }
+    | undefined;
+}
+
+export interface WebApprovalDecision {
+  decision: "allow" | "deny";
+  scope: "once" | "session" | "project";
+  source: string;
+  pattern: {
+    tool: string;
+    effect: string;
+    resourceClass: string;
+  };
+  reason: string;
+}
+
 export interface WebRunProjection {
   runId: string;
   trigger: "user" | "goal" | "timer" | "event" | "resume";
@@ -135,6 +213,8 @@ export interface WebRunProjection {
   status: RunStatus;
   displayStatus: string;
   terminalReason: string | undefined;
+  /** ADR-0042 durable environment disclosure when present. */
+  environment: WebRunEnvironment | undefined;
   formalPlan: WebFormalPlanProjection | undefined;
   workPlan: WebWorkPlanSnapshot | undefined;
   steps: WebStepProjection[];
@@ -151,6 +231,10 @@ export interface WebRunProjection {
     failedActions: number;
     recoveredFailures: number;
     deniedActions: number;
+    /** Failed Actions whose failureCategory is isolation (sandbox / OS policy signals). */
+    isolationFailures: number;
+    /** Actions with durable authority.approval.decided. */
+    approvalDecisions: number;
     effects: string[];
     tools: string[];
     skillStatus: "none" | "active" | "running" | "succeeded" | "failed" | "fallback";
@@ -168,10 +252,28 @@ export interface WebImageAttachment {
   originalArtifactRef: string;
 }
 
+export interface WebMountProjection {
+  mountId: string;
+  path: string;
+  mode: "read";
+  source: string;
+  addedAt: string;
+}
+
+export interface WebSensitivePathGrantProjection {
+  path: string;
+  source: string;
+  grantedAt: string;
+}
+
 export interface WebSessionProjection {
   sessionId: string;
   title: string | undefined;
+  /** Session mode ask|plan|agent (orthogonal to permission mode, which is not a Session fact). */
+  mode: SessionView["mode"];
   presence: SessionView["presence"];
+  mounts: WebMountProjection[];
+  sensitivePathGrants: WebSensitivePathGrantProjection[];
   runs: WebRunProjection[];
   currentRunId: string | undefined;
 }
@@ -216,6 +318,24 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
           status: action.status,
           errorCode: undefined,
           terminalDetail: action.terminalDetail,
+          leaseId: action.leaseId,
+          policyTrace: action.policyTrace
+            ? action.policyTrace.map((entry) => ({ ...entry }))
+            : undefined,
+          denialCategory: action.status === "denied"
+            ? classifyDenial(action.terminalDetail, action.policyTrace)
+            : undefined,
+          failureCategory: undefined,
+          guardLayers: guardLayersForTool(action.toolName),
+          approval: action.approval
+            ? {
+                decision: action.approval.decision,
+                scope: action.approval.scope,
+                source: action.approval.source,
+                pattern: { ...action.approval.pattern },
+                reason: action.approval.reason,
+              }
+            : undefined,
           result: undefined,
           resultSummary: undefined,
           diff: undefined,
@@ -283,6 +403,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
       terminalReason: run.terminal?.reason,
       formalPlan,
       workPlan,
+      environment: projectRunEnvironment(run),
       steps,
       startSequence: undefined,
       endSequence: undefined,
@@ -296,6 +417,8 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
         failedActions: 0,
         recoveredFailures: 0,
         deniedActions: 0,
+        isolationFailures: 0,
+        approvalDecisions: 0,
         effects: [],
         tools: [],
         skillStatus: skills.length > 0 ? "active" : "none",
@@ -362,14 +485,72 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
       }
       case "authority.granted": {
         const action = actionById.get(event.data.actionId);
-        if (action) action.milestones.authorityGranted = event.sequence;
+        if (action) {
+          action.milestones.authorityGranted = event.sequence;
+          action.leaseId = event.data.leaseId;
+          if (event.data.policyTrace) {
+            action.policyTrace = event.data.policyTrace.map((entry) => ({ ...entry }));
+          }
+        }
         break;
       }
       case "authority.denied": {
         const action = actionById.get(event.data.actionId);
         if (action) {
           action.terminalDetail = event.data.reason;
+          if (event.data.policyTrace) {
+            action.policyTrace = event.data.policyTrace.map((entry) => ({ ...entry }));
+          }
+          action.denialCategory = classifyDenial(event.data.reason, action.policyTrace);
+          action.failureCategory = undefined;
           settleAction(action, event.sequence, event.occurredAt, actionTiming, stepById);
+        }
+        break;
+      }
+      case "authority.approval.decided": {
+        const action = actionById.get(event.data.actionId);
+        if (action) {
+          action.approval = {
+            decision: event.data.decision,
+            scope: event.data.scope,
+            source: event.data.source,
+            pattern: {
+              tool: event.data.pattern.tool,
+              effect: event.data.pattern.effect,
+              resourceClass: event.data.pattern.resourceClass,
+            },
+            reason: event.data.reason,
+          };
+          if (event.data.decision === "deny") {
+            action.denialCategory =
+              event.data.source === "interactive"
+                ? "user_deny"
+                : event.data.source === "no-gate"
+                  || event.data.source === "memory-session"
+                  || event.data.source === "memory-project"
+                  || event.data.source === "policy-deny"
+                  ? "approval"
+                  : classifyDenial(event.data.reason, action.policyTrace);
+          }
+        }
+        break;
+      }
+      case "run.environment.disclosed": {
+        const run = runById.get(event.data.runId);
+        if (run) {
+          run.environment = {
+            permissionMode: event.data.permissionMode,
+            sessionMode: event.data.sessionMode,
+            sandbox: event.data.sandbox
+              ? {
+                  backend: event.data.sandbox.backend,
+                  strength: event.data.sandbox.strength,
+                  status: event.data.sandbox.status,
+                  wraps: [...event.data.sandbox.wraps],
+                  reason: event.data.sandbox.reason,
+                }
+              : undefined,
+          };
         }
         break;
       }
@@ -401,6 +582,7 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
           }
           applyDiffFields(action);
           enrichStructuredAction(action);
+          action.failureCategory = undefined;
           settleAction(action, event.sequence, event.occurredAt, actionTiming, stepById);
         }
         break;
@@ -424,6 +606,14 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
           }
           applyDiffFields(action);
           enrichStructuredAction(action);
+          action.failureCategory = classifyFailure({
+            toolName: action.toolName,
+            errorCode: action.errorCode,
+            resultSummary: action.resultSummary,
+            result: action.result,
+            process: action.process,
+            message: typeof event.data.modelOutput === "string" ? event.data.modelOutput : undefined,
+          });
           settleAction(action, event.sequence, event.occurredAt, actionTiming, stepById);
         }
         break;
@@ -469,6 +659,8 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
       failedActions: actions.filter((action) => action.status === "failed").length,
       recoveredFailures: actions.filter((action) => action.recovered).length,
       deniedActions: actions.filter((action) => action.status === "denied").length,
+      isolationFailures: actions.filter((action) => action.failureCategory === "isolation").length,
+      approvalDecisions: actions.filter((action) => action.approval !== undefined).length,
       effects: [...new Set(actions.map((action) => action.effect))],
       tools: [...new Set(actions.map((action) => action.toolName))],
       skillStatus,
@@ -482,10 +674,233 @@ export function projectWebSession(view: SessionView, events: readonly SessionEve
   return {
     sessionId: view.sessionId,
     title: view.title,
+    mode: view.mode,
     presence: view.presence,
+    mounts: projectMounts(view),
+    sensitivePathGrants: projectSensitivePathGrants(view),
     runs,
     currentRunId: view.currentRunId,
   };
+}
+
+function projectRunEnvironment(run: SessionView["runs"][string]): WebRunEnvironment | undefined {
+  const environment = run.environment;
+  if (!environment) return undefined;
+  return {
+    permissionMode: environment.permissionMode,
+    sessionMode: environment.sessionMode,
+    sandbox: environment.sandbox
+      ? {
+          backend: environment.sandbox.backend,
+          strength: environment.sandbox.strength,
+          status: environment.sandbox.status,
+          wraps: [...environment.sandbox.wraps],
+          reason: environment.sandbox.reason,
+        }
+      : undefined,
+  };
+}
+
+function projectMounts(view: SessionView): WebMountProjection[] {
+  return view.mountOrder
+    .map((mountId) => view.mounts[mountId])
+    .filter((mount): mount is NonNullable<typeof mount> => mount !== undefined)
+    .map((mount) => ({
+      mountId: mount.mountId,
+      path: mount.path,
+      mode: mount.mode,
+      source: mount.source,
+      addedAt: mount.addedAt,
+    }));
+}
+
+function projectSensitivePathGrants(view: SessionView): WebSensitivePathGrantProjection[] {
+  return view.sensitivePathGrantOrder
+    .map((path) => view.sensitivePathGrants[path])
+    .filter((grant): grant is NonNullable<typeof grant> => grant !== undefined)
+    .map((grant) => ({
+      path: grant.path,
+      source: grant.source,
+      grantedAt: grant.grantedAt,
+    }));
+}
+
+/** Classify a denial reason for read-only Narrative labels. */
+export function classifyDenial(
+  reason: string | undefined,
+  policyTrace: readonly WebPolicyTraceEntry[] | undefined,
+  errorCode?: string | undefined,
+): WebDenialCategory {
+  const codes = `${errorCode ?? ""} ${(policyTrace ?? []).map((entry) => entry.leaseId).join(" ")}`.toUpperCase();
+  const text = `${reason ?? ""} ${(policyTrace ?? []).map((entry) => `${entry.leaseId} ${entry.reason}`).join(" ")}`
+    .toLowerCase();
+  if (text.includes("user_deny") || text.includes("user denied")) return "user_deny";
+  if (
+    codes.includes("LEA_APPROVAL_POLICY")
+    || text.includes("lea_approval_policy")
+    || text.includes("manual approval")
+    || text.includes("approval required")
+    || text.includes("approval-memory")
+    || text.includes("no interactive gate")
+    || text.includes("approval policy")
+  ) {
+    return "approval";
+  }
+  if (
+    text.includes("session mode")
+    || text.includes("mode_den")
+    || text.includes("not allowed in")
+    || /\bask\b.*\bmode\b/.test(text)
+    || text.includes("mode forbids")
+    || text.includes("plan mode")
+    || text.includes("ask mode")
+  ) {
+    return "mode";
+  }
+  if (
+    codes.includes("PATH_")
+    || codes.includes("MOUNT_")
+    || codes.includes("SENSITIVE_")
+    || codes.includes("PROTECTED_")
+    || codes.includes("SYMLINK_")
+    || text.includes("sensitive")
+    || text.includes("outside workspace")
+    || text.includes("outside the workspace")
+    || text.includes("path grant")
+    || text.includes("path guard")
+    || text.includes(".ssh")
+    || text.includes("protected path")
+    || text.includes("mount not")
+    || text.includes("unmounted")
+    || text.includes("read-only mount")
+    || text.includes("authorize with /add-dir")
+  ) {
+    return "path";
+  }
+  if (
+    text.includes("lease")
+    || text.includes("capability")
+    || text.includes("not authorized")
+    || text.includes("authority denied")
+    || text.includes("no matching lease")
+    || text.includes("default deny")
+  ) {
+    return "lease";
+  }
+  return "other";
+}
+
+/** Expected dual-layer guards for a tool (static product model). */
+export function guardLayersForTool(toolName: string): WebGuardLayer[] {
+  if (["shell", "script", "verify", "task"].includes(toolName)) {
+    return ["capability", "path-guard", "process-sandbox"];
+  }
+  if (toolName === "skill") {
+    return ["capability", "path-guard", "process-sandbox"];
+  }
+  if (["ask_question", "update_plan", "plan_document", "delegate"].includes(toolName)) {
+    return ["session-mode", "capability"];
+  }
+  if (
+    ["read", "edit", "write", "move", "remove", "find", "search", "git", "read_image", "artifact", "network"].includes(
+      toolName,
+    )
+  ) {
+    return ["capability", "path-guard"];
+  }
+  return ["capability"];
+}
+
+export function classifyFailure(input: {
+  toolName: string;
+  errorCode?: string | undefined;
+  resultSummary?: string | undefined;
+  result?: unknown;
+  process?: WebProcessOutput | undefined;
+  message?: string | undefined;
+}): WebFailureCategory {
+  const code = (input.errorCode ?? "").toUpperCase();
+  const payload = record(input.result);
+  const messageFromResult = string(payload?.message) ?? string(payload?.error) ?? "";
+  const stream = [input.process?.stderr, input.process?.stdout, input.resultSummary, input.message, messageFromResult]
+    .filter(Boolean)
+    .join("\n");
+  const text = `${code}\n${stream}`.toLowerCase();
+
+  if (code.includes("TIMEOUT") || input.process?.timedOut === true) return "timeout";
+
+  if (
+    code === "PATH_OUTSIDE_WORKSPACE"
+    || code === "PATH_GRANT_REQUIRED"
+    || code === "PROTECTED_WORKSPACE_PATH"
+    || code === "MOUNT_NOT_FOUND"
+    || code === "MOUNT_READ_ONLY"
+    || code === "SYMLINK_NOT_ALLOWED"
+    || code === "PATH_NOT_FOUND"
+    || code === "NOT_A_DIRECTORY"
+  ) {
+    return "path_guard";
+  }
+  if (code === "SENSITIVE_PATH_GRANT_REQUIRED" || text.includes("sensitive path requires")) {
+    return "sensitive_path";
+  }
+
+  if (
+    code.includes("START_FAILED")
+    || code.includes("SPAWN")
+    || text.includes("could not start")
+    || text.includes("spawn ")
+    || text.includes("einval")
+  ) {
+    if (looksLikeIsolation(text)) return "isolation";
+    return "spawn";
+  }
+
+  if (looksLikeIsolation(text) || looksLikeIsolation(code.toLowerCase())) {
+    return "isolation";
+  }
+
+  if (
+    code.includes("EXIT_NONZERO")
+    || code.includes("NONZERO")
+    || (typeof input.process?.exitCode === "number" && input.process.exitCode !== 0)
+  ) {
+    return "exit_nonzero";
+  }
+
+  if (
+    code.startsWith("INVALID_")
+    || code.includes("VALIDATION")
+    || code.includes("TOO_LARGE")
+    || code.includes("UNSUPPORTED")
+  ) {
+    return "validation";
+  }
+
+  return "other";
+}
+
+function looksLikeIsolation(text: string): boolean {
+  return (
+    text.includes("sandbox")
+    || text.includes("srt")
+    || text.includes("seatbelt")
+    || text.includes("bubblewrap")
+    || text.includes("bwrap")
+    || text.includes("low integrity")
+    || text.includes("low-il")
+    || text.includes("win-low-il")
+    || text.includes("eperm")
+    || text.includes("operation not permitted")
+    || text.includes("permission denied")
+    || text.includes("access_denied")
+    || text.includes("access is denied")
+    || text.includes("0x80070005")
+    || text.includes("wfp")
+    || text.includes("network is unreachable") && text.includes("sandbox")
+    || text.includes("blocked by")
+    || text.includes("os isolation")
+  );
 }
 
 const activeSkillBlockPattern = /^skill:active:(workspace|user):([a-z0-9]+(?:-[a-z0-9]+)*):[a-f0-9]{16}$/;

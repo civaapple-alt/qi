@@ -2400,6 +2400,20 @@ export class TuiRuntime {
         getProjectApprovals: this.getProjectApprovals,
         ...(this.#requestApproval === undefined ? {} : { requestApproval: this.#requestApproval }),
         rememberApproval: (entry) => this.rememberApproval(entry),
+        environmentDisclosure: {
+          permissionMode: this.#permissionMode,
+          ...(this.#processSandbox === undefined
+            ? {}
+            : {
+                sandbox: {
+                  backend: this.#processSandbox.info.backend,
+                  strength: this.#processSandbox.info.strength,
+                  status: this.#processSandbox.info.status,
+                  wraps: [...this.#processSandbox.info.wraps],
+                  reason: this.#processSandbox.info.reason.slice(0, 500),
+                },
+              }),
+        },
         runProcess: this.runProcess,
       }));
       if (result.view.runs[result.runId]?.goalBinding) {

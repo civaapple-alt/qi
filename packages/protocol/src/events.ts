@@ -1181,6 +1181,83 @@ export const SessionEventSchema = Type.Union([
       { additionalProperties: false },
     ),
   ),
+  /**
+   * ADR-0042: audit-only snapshot of effective permission mode and process sandbox for this Run.
+   * Does not grant authority on replay.
+   */
+  event(
+    "run.environment.disclosed",
+    Type.Object(
+      {
+        runId: RunIdSchema,
+        permissionMode: Type.Union([
+          Type.Literal("manual"),
+          Type.Literal("yolo"),
+          Type.Literal("auto"),
+        ]),
+        sessionMode: Type.Optional(SessionModeSchema),
+        sandbox: Type.Optional(Type.Object(
+          {
+            backend: Type.String({ minLength: 1, maxLength: 64 }),
+            strength: Type.Union([
+              Type.Literal("full"),
+              Type.Literal("reduced"),
+              Type.Literal("none"),
+            ]),
+            status: Type.String({ minLength: 1, maxLength: 32 }),
+            wraps: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 16 }),
+            reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+          },
+          { additionalProperties: false },
+        )),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  /**
+   * ADR-0042: approval-policy decision while Action is awaiting-authority.
+   * Records Once/Session/Project interactive choices and memory/policy outcomes; not a lease grant.
+   */
+  event(
+    "authority.approval.decided",
+    Type.Object(
+      {
+        runId: RunIdSchema,
+        stepId: StepIdSchema,
+        actionId: ActionIdSchema,
+        decision: Type.Union([Type.Literal("allow"), Type.Literal("deny")]),
+        scope: Type.Union([
+          Type.Literal("once"),
+          Type.Literal("session"),
+          Type.Literal("project"),
+        ]),
+        source: Type.Union([
+          Type.Literal("interactive"),
+          Type.Literal("memory-session"),
+          Type.Literal("memory-project"),
+          Type.Literal("auto"),
+          Type.Literal("policy-deny"),
+          Type.Literal("no-gate"),
+        ]),
+        pattern: Type.Object(
+          {
+            tool: Type.String({ minLength: 1, maxLength: 128 }),
+            effect: Type.Union([
+              Type.Literal("read"),
+              Type.Literal("write"),
+              Type.Literal("execute"),
+              Type.Literal("publish"),
+              Type.Literal("spend"),
+            ]),
+            resourceClass: Type.String({ minLength: 1, maxLength: 1_000 }),
+          },
+          { additionalProperties: false },
+        ),
+        reason: Type.String({ minLength: 1, maxLength: 500 }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
   event("action.started", ActionRef),
   event(
     "task.started",

@@ -45,9 +45,11 @@ the six coordinated public packages.
 2. [decisions: precise mutation](decisions.md#adr-0003-use-freshness-checked-precise-file-mutation)
 3. [ADR-0040: permission mode](decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode) (manual/yolo/auto)
 4. [ADR-0041: graded process sandbox](decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host) (srt → low-il → host)
-5. `packages/agent/docs/capability/README.md`
-6. `packages/agent/docs/tools/execution-contract.md`
-7. `packages/node/README.md` (`./sandbox`) and `packages/node/docs/workspace/effect-journal.md`
+5. [ADR-0042: durable environment & approval audit](decisions.md#adr-0042-durable-environment-and-approval-audit-facts-read-only-surfaces)
+6. `packages/agent/docs/capability/README.md`
+7. `packages/agent/docs/tools/execution-contract.md`
+8. `packages/node/README.md` (`./sandbox`) and `packages/node/docs/workspace/effect-journal.md`
+9. `apps/web/README.md` (read-only projection of environment + approval facts)
 
 ### Models, context, or memory
 
@@ -75,11 +77,13 @@ then `packages/node/README.md` (`./media`) and the provider adapter tests.
 3. [decisions: human control](decisions.md#adr-0011-make-human-control-and-askplanagent-modes-durable)
 4. [ADR-0040: permission mode manual/yolo/auto](decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode)
 5. [ADR-0041: graded process sandbox](decisions.md#adr-0041-graded-process-sandbox-srt--windows-low-il--host)
-6. [decisions: bounded interaction timeline](decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention)
-7. [ADR-0031: drafts, `@` mentions, model reconfigure, permission display](decisions.md#adr-0031-preserve-composer-drafts-across-local-slash-controls)
-8. [ADR-0032: consecutive Session Run disclosure](decisions.md#adr-0032-bound-automatic-disclosure-for-consecutive-session-runs)
-9. `packages/tui/README.md`
-10. `apps/cli/README.md`
+6. [ADR-0042: durable environment & approval audit](decisions.md#adr-0042-durable-environment-and-approval-audit-facts-read-only-surfaces)
+7. [decisions: bounded interaction timeline](decisions.md#adr-0027-project-one-bounded-interaction-timeline-with-protected-human-attention)
+8. [ADR-0031: drafts, `@` mentions, model reconfigure, permission display](decisions.md#adr-0031-preserve-composer-drafts-across-local-slash-controls)
+9. [ADR-0032: consecutive Session Run disclosure](decisions.md#adr-0032-bound-automatic-disclosure-for-consecutive-session-runs)
+10. `packages/tui/README.md`
+11. `apps/cli/README.md`
+12. `apps/web/README.md` (read-only Session workbench; no interactive approval)
 
 ### Extensions
 

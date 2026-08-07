@@ -91,6 +91,24 @@ export interface StepView {
   }>;
 }
 
+export interface ActionApprovalView {
+  decision: "allow" | "deny";
+  scope: "once" | "session" | "project";
+  source:
+    | "interactive"
+    | "memory-session"
+    | "memory-project"
+    | "auto"
+    | "policy-deny"
+    | "no-gate";
+  pattern: {
+    tool: string;
+    effect: "read" | "write" | "execute" | "publish" | "spend";
+    resourceClass: string;
+  };
+  reason: string;
+}
+
 export interface ActionView {
   actionId: ActionId;
   stepId: StepId;
@@ -101,11 +119,25 @@ export interface ActionView {
   terminalDetail?: string;
   resources: string[];
   policyTrace?: Array<{ leaseId: string; matched: boolean; reason: string }>;
+  /** ADR-0042 approval-policy audit; optional on older Sessions. */
+  approval?: ActionApprovalView;
   freshnessRebase?: {
     priorActionId: ActionId;
     resource: string;
     originalExpectedSha256: string;
     effectiveExpectedSha256: string;
+  };
+}
+
+export interface RunEnvironmentView {
+  permissionMode: "manual" | "yolo" | "auto";
+  sessionMode?: SessionMode;
+  sandbox?: {
+    backend: string;
+    strength: "full" | "reduced" | "none";
+    status: string;
+    wraps: string[];
+    reason?: string;
   };
 }
 
@@ -318,6 +350,8 @@ export interface RunView {
   input?: string;
   content?: RunInputPart[];
   mode: SessionMode;
+  /** ADR-0042 audit-only environment disclosure for this Run. */
+  environment?: RunEnvironmentView;
   planBinding?: RunPlanBinding;
   goalBinding?: RunGoalBinding;
   status: RunStatus;
@@ -1525,6 +1559,31 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       run.status = "active";
       break;
     }
+    case "run.environment.disclosed": {
+      const run = getRun(view, event.data.runId);
+      if (run.status !== "active" && run.status !== "triggered") {
+        fail("RUN_ENVIRONMENT_INACTIVE", `Run ${run.runId} is ${run.status}`);
+      }
+      if (run.environment) {
+        fail("RUN_ENVIRONMENT_ALREADY_DISCLOSED", `Run ${run.runId} already has environment disclosure`);
+      }
+      run.environment = {
+        permissionMode: event.data.permissionMode,
+        ...(event.data.sessionMode === undefined ? {} : { sessionMode: event.data.sessionMode }),
+        ...(event.data.sandbox === undefined
+          ? {}
+          : {
+              sandbox: {
+                backend: event.data.sandbox.backend,
+                strength: event.data.sandbox.strength,
+                status: event.data.sandbox.status,
+                wraps: [...event.data.sandbox.wraps],
+                ...(event.data.sandbox.reason === undefined ? {} : { reason: event.data.sandbox.reason }),
+              },
+            }),
+      };
+      break;
+    }
     case "steering.received": {
       const run = getRun(view, event.data.runId);
       requireActive(run);
@@ -1796,6 +1855,27 @@ export function applySessionEvent(current: SessionView | undefined, rawEvent: un
       action.status = "denied";
       action.terminalDetail = event.data.reason;
       if (event.data.policyTrace) action.policyTrace = event.data.policyTrace.map((entry) => ({ ...entry }));
+      break;
+    }
+    case "authority.approval.decided": {
+      const run = getRun(view, event.data.runId);
+      requireActive(run);
+      const action = getAction(run, event.data.actionId, event.data.stepId);
+      requireActionStatus(action, "awaiting-authority", "AUTHORITY_NOT_REQUESTED");
+      if (action.approval) {
+        fail("APPROVAL_ALREADY_DECIDED", `Action ${action.actionId} already has an approval decision`);
+      }
+      action.approval = {
+        decision: event.data.decision,
+        scope: event.data.scope,
+        source: event.data.source,
+        pattern: {
+          tool: event.data.pattern.tool,
+          effect: event.data.pattern.effect,
+          resourceClass: event.data.pattern.resourceClass,
+        },
+        reason: event.data.reason,
+      };
       break;
     }
     case "action.started": {

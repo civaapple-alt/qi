@@ -23,6 +23,12 @@ When the host sets `permissionMode` on the execution context ([ADR-0040](../../.
 authorization also runs `evaluateApprovalPolicy` after the lease check: **manual** may ask
 Once/Session/Project; **yolo/auto** auto-accept in-lease tools. Mount grants and MCP bind remain authority
 expansion. Hard path denials stay fail-closed without an “approve danger” prompt.
+Interactive, approval-memory, no-gate, and policy-deny outcomes may call optional
+`recordApprovalDecision` so the host can append `authority.approval.decided`
+([ADR-0042](../../../design/decisions.md#adr-0042-durable-environment-and-approval-audit-facts-read-only-surfaces));
+that event is audit-only and never grants a lease. Default-read and yolo/auto in-lease auto-accept may omit
+it; Run-level `run.environment.disclosed` still records permission mode and sandbox selection when the host
+supplies disclosure.
 
 Built-ins provide bounded directory listing and tree rendering, fd-accelerated file discovery, rg-accelerated
 content search, whole-file or bounded line-range reads, file write/edit, fixed read-only Git inspection

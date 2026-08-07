@@ -118,7 +118,7 @@ describe("approval policy chain", () => {
       sessionMemory: memory,
     });
     assert.equal(result.kind, "approve");
-    assert.equal(result.policy, "approval-memory-hit");
+    assert.equal(result.policy, "approval-memory-session");
   });
 
   it("project memory matches directory tree patterns", () => {
@@ -140,7 +140,7 @@ describe("approval policy chain", () => {
       projectMemory: memory,
     });
     assert.equal(result.kind, "approve");
-    assert.equal(result.policy, "approval-memory-hit");
+    assert.equal(result.policy, "approval-memory-project");
   });
 
   it("serializes and parses approval patterns", () => {

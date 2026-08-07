@@ -101,6 +101,10 @@ parent lease. Session mode and product policy may narrow authority further but n
 whether in-lease non-read Actions auto-accept or require human Once/Session/Project approval; it does not invent
 authority. Goal-based 追寻 is a third axis (activation/continuation), not a Session mode. See
 [ADR-0040](decisions.md#adr-0040-permission-mode-manual--yolo--auto-orthogonal-to-session-mode).
+Effective permission mode and process sandbox selection may be audited per Run as `run.environment.disclosed`;
+Manual Once/Session/Project and approval-memory outcomes may be audited as `authority.approval.decided`
+([ADR-0042](decisions.md#adr-0042-durable-environment-and-approval-audit-facts-read-only-surfaces)). Read-only
+surfaces (Web) project those facts; they do not grant authority on replay and do not host interactive gates.
 
 Effective authority is always:
 

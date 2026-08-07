@@ -59,6 +59,23 @@ export interface ToolExecutionContext {
   }) => Promise<{ readonly decision: "allow" | "deny"; readonly scope: ApprovalScope }>;
   /** Persist Session/Project memories after human choice. */
   rememberApproval?: (entry: StoredApproval) => void | Promise<void>;
+  /**
+   * ADR-0042: optional durable audit of approval-policy decisions (interactive, memory, no-gate, policy-deny).
+   * Hosts typically append `authority.approval.decided` while the Action is awaiting-authority.
+   */
+  recordApprovalDecision?: (decision: {
+    readonly decision: "allow" | "deny";
+    readonly scope: ApprovalScope;
+    readonly source:
+      | "interactive"
+      | "memory-session"
+      | "memory-project"
+      | "auto"
+      | "policy-deny"
+      | "no-gate";
+    readonly pattern: ApprovalPattern;
+    readonly reason: string;
+  }) => void | Promise<void>;
   /** Read-only mounts available to discovery tools; prefer getMounts for mid-Run grants. */
   mounts?: readonly WorkspaceMount[];
   /** Live mount snapshot so a mid-Run human grant applies to the next Action. */
@@ -323,13 +340,46 @@ export class ToolRegistry {
       });
       // Synthetic lea_* id so authority.* Session events satisfy LeaseIdSchema.
       const approvalLeaseId = "lea_approval_policy";
+      const record = context.recordApprovalDecision;
       if (approval.kind === "deny") {
+        const source =
+          approval.policy === "approval-memory-session"
+            ? "memory-session"
+            : approval.policy === "approval-memory-project"
+              ? "memory-project"
+              : "policy-deny";
+        await record?.({
+          decision: "deny",
+          scope: "once",
+          source,
+          pattern: approval.pattern,
+          reason: approval.reason.slice(0, 500),
+        });
         throw new AuthorityDeniedError(approval.reason, [
           { leaseId: approvalLeaseId, matched: false, reason: `${approval.policy}: ${approval.reason}` },
         ]);
       }
+      if (approval.kind === "approve") {
+        if (approval.policy === "approval-memory-session" || approval.policy === "approval-memory-project") {
+          await record?.({
+            decision: "allow",
+            scope: approval.policy === "approval-memory-session" ? "session" : "project",
+            source: approval.policy === "approval-memory-session" ? "memory-session" : "memory-project",
+            pattern: approval.pattern,
+            reason: approval.reason.slice(0, 500),
+          });
+        }
+        // default-read and yolo/auto in-lease accepts omit durable approval events (Run environment covers mode).
+      }
       if (approval.kind === "ask") {
         if (!context.requestApproval) {
+          await record?.({
+            decision: "deny",
+            scope: "once",
+            source: "no-gate",
+            pattern: approval.pattern,
+            reason: `Manual approval required for ${name} (${effect}); no interactive gate available`.slice(0, 500),
+          });
           throw new AuthorityDeniedError(
             `Manual approval required for ${name} (${effect}); no interactive gate available`,
             [{ leaseId: approvalLeaseId, matched: false, reason: approval.policy }],
@@ -344,11 +394,25 @@ export class ToolRegistry {
           reason: approval.reason,
         });
         if (response.decision === "deny") {
+          await record?.({
+            decision: "deny",
+            scope: "once",
+            source: "interactive",
+            pattern: approval.pattern,
+            reason: `User denied ${name} (${effect})`.slice(0, 500),
+          });
           throw new AuthorityDeniedError(
             `User denied ${name} (${effect})`,
             [{ leaseId: approvalLeaseId, matched: false, reason: "user_deny" }],
           );
         }
+        await record?.({
+          decision: "allow",
+          scope: response.scope,
+          source: "interactive",
+          pattern: approval.pattern,
+          reason: approval.reason.slice(0, 500),
+        });
         if (response.scope !== "once") {
           const entry = rememberApproval({
             pattern: approval.pattern,

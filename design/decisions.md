@@ -979,6 +979,33 @@ Qi Node process in srt (tools and provider IO must remain on the host Runtime).
 Required evidence: backend resolution tests; mock wrap for shell and MCP stdio; Windows low-il path without
 admin; disclosure fields; fail-closed path for `sandbox.policy = srt` when srt is missing (optional strict mode).
 
+## ADR-0042: Durable environment and approval audit facts (read-only surfaces)
+
+Pressure: permission mode, graded process sandbox, and Manual Once/Session/Project decisions are product
+safety controls (ADR-0040 / ADR-0041) but lived only in Runtime memory, `host:environment` prompts, or
+project `policy.toml`. Read-only surfaces (`qi:web`, Audit) could not reconstruct them without inventing
+state, which violates ADR-0016.
+
+- **`run.environment.disclosed`** is an additive Session audit fact emitted after `run.started` when the host
+  Runtime knows effective permission mode and/or process sandbox selection for that Run. It records
+  `permissionMode`, optional `sessionMode`, and optional sandbox `{ backend, strength, status, wraps, reason }`.
+  Disclosure **does not grant authority** on replay (same spirit as ADR-0015 mounts vs project policy).
+- **`authority.approval.decided`** records an approval-policy outcome for an Action while it is
+  `awaiting-authority`: interactive Once/Session/Project allow or deny, session/project approval memory hits,
+  policy denials, and no-gate fail-closed denials. Default-read auto-approve and pure yolo/auto in-lease
+  auto-accept may omit this event to avoid noise; Run-level `permissionMode` still explains the rhythm.
+- Approval memory written to project `[[approvals]]` remains **policy** (ADR-0015); the Session event is only
+  the audit of a decision that affected this Action.
+- Web and other read-only projectors may surface these facts. They must not offer interactive approval or
+  change sandbox/permission from Web.
+- Older Sessions without these events remain valid; projectors treat missing disclosure as “not recorded”.
+
+Rejected: folding permission mode into Session mode; making yolo/auto Session event ids; synthesizing approval
+UI choices without `authority.approval.decided`; treating environment disclosure as a capability grant.
+
+Required evidence: protocol parse/replay; Kernel projects Run environment and Action approval; TurnLoop emits
+disclosure when host supplies it; Registry records approval decisions; Web narrative cards; focused tests.
+
 ## Changing a decision
 
 Update this document before implementing a cross-package behavioral change. State the pressure, the new boundary,

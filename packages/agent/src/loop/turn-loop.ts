@@ -125,6 +125,20 @@ export interface TurnRequest {
   getProjectApprovals?: () => readonly import("@civaapple/qi-agent/capability").StoredApproval[];
   requestApproval?: import("@civaapple/qi-agent/tools").ToolExecutionContext["requestApproval"];
   rememberApproval?: import("@civaapple/qi-agent/tools").ToolExecutionContext["rememberApproval"];
+  /**
+   * ADR-0042: host supplies effective permission/sandbox for durable `run.environment.disclosed`.
+   * Omitted when the host does not know (unit tests / embedding without sandbox).
+   */
+  environmentDisclosure?: {
+    readonly permissionMode: import("@civaapple/qi-agent/capability").PermissionMode;
+    readonly sandbox?: {
+      readonly backend: string;
+      readonly strength: "full" | "reduced" | "none";
+      readonly status: string;
+      readonly wraps: readonly string[];
+      readonly reason?: string;
+    };
+  };
   /** ADR-0041 sandboxed child process runner for shell/script/verify. */
   runProcess?: import("@civaapple/qi-agent/tools").ToolExecutionContext["runProcess"];
 }
@@ -304,6 +318,29 @@ export class TurnLoop {
       );
     }
     writer.append("run.started", { runId }, { kind: "runtime", id: "qi" });
+    if (request.environmentDisclosure) {
+      const sandbox = request.environmentDisclosure.sandbox;
+      writer.append(
+        "run.environment.disclosed",
+        {
+          runId,
+          permissionMode: request.environmentDisclosure.permissionMode,
+          sessionMode: request.mode ?? writer.view?.runs[runId]?.mode ?? runMode,
+          ...(sandbox === undefined
+            ? {}
+            : {
+                sandbox: {
+                  backend: sandbox.backend,
+                  strength: sandbox.strength,
+                  status: sandbox.status,
+                  wraps: [...sandbox.wraps],
+                  ...(sandbox.reason === undefined ? {} : { reason: sandbox.reason.slice(0, 500) }),
+                },
+              }),
+        },
+        { kind: "runtime", id: "qi" },
+      );
+    }
     const frozenMode = writer.view?.runs[runId]?.mode ?? runMode;
     const frozenGoalBinding = writer.view?.runs[runId]?.goalBinding;
     const goalEngine = frozenGoalBinding
@@ -857,6 +894,26 @@ export class TurnLoop {
               : { getProjectApprovals: request.getProjectApprovals }),
             ...(request.requestApproval === undefined ? {} : { requestApproval: request.requestApproval }),
             ...(request.rememberApproval === undefined ? {} : { rememberApproval: request.rememberApproval }),
+            recordApprovalDecision: async (decision) => {
+              writer.append(
+                "authority.approval.decided",
+                {
+                  runId,
+                  stepId,
+                  actionId,
+                  decision: decision.decision,
+                  scope: decision.scope,
+                  source: decision.source,
+                  pattern: {
+                    tool: decision.pattern.tool,
+                    effect: decision.pattern.effect,
+                    resourceClass: decision.pattern.resourceClass.slice(0, 1_000),
+                  },
+                  reason: decision.reason.slice(0, 500),
+                },
+                { kind: "runtime", id: "approval_gate" },
+              );
+            },
             ...(request.runProcess === undefined ? {} : { runProcess: request.runProcess }),
             mounts: request.getMounts?.() ?? [],
             ...(request.getMounts === undefined ? {} : { getMounts: request.getMounts }),

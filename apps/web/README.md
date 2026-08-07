@@ -46,7 +46,24 @@ npm run qi:web -- --db "%USERPROFILE%\.qi\projects\D-ai-project-qi\qi.sqlite"
   raw `run.input` remains available and is not used as the sidebar or narrative title when a Formal Plan binding exists.
 - A Step whose model requested Actions is not presented as fully complete until those Actions settle.
 - Action lifecycle labels are derived by joining events on `actionId`; later events never invent missing authority
-  or tool identity.
+  or tool identity. Granted Actions surface `leaseId` and optional `policyTrace`; denied Actions surface the durable
+  denial reason, a heuristic `denialCategory` (approval / user_deny / mode / path / lease / other), and policy
+  trace when present. Web never invents Once/Session/Project approval choices — those are not Session facts.
+- Failed Actions get a heuristic `failureCategory` (isolation / spawn / timeout / exit_nonzero / path_guard /
+  sensitive_path / validation / other) from error codes and process streams. Process isolation signals (sandbox,
+  EPERM, srt wrap failures) highlight as deterministic tool failures, not approval prompts. Each Action lists
+  expected **guard layers** for its tool class (capability + path-guard; host children also show process-sandbox
+  eligibility). That layer list is the dual-path product model, not a claim about the concrete sandbox backend.
+- Session Continuity and Contract project durable **Session authority** from the Kernel view: `mode`
+  (`ask|plan|agent`), read-only mounts (`workspace.mount.*`), and sensitive-path grants
+  (`workspace.sensitive_path.*`).
+- When present, **`run.environment.disclosed`** (ADR-0042) surfaces permission mode and process sandbox
+  backend/strength/wraps on Run narrative headers and the Contract pane. Older Sessions without disclosure show
+  an explicit empty state rather than inventing values.
+- When present, **`authority.approval.decided`** renders a read-only approval card (Once / Session / Project,
+  source interactive|memory|no-gate|policy-deny). Web never answers approvals.
+- Audit mode enriches `authority.*` (including approval decisions), `run.environment.disclosed`,
+  `session.mode.changed`, `workspace.mount.*`, and `workspace.sensitive_path.*`. Live SSE reloads on those types.
 - Committed `step.model.reasoning` projects as a collapsible Thinking block (default ~3 lines). It is narrative-only
   and is not Evidence.
 - Context omissions are labeled by projected category (for example an omitted history Run) instead of showing

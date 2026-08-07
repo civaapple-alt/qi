@@ -34,6 +34,11 @@ Never add current time, random selection, network lookup, or provider cache acce
 Bootstrap Session titles such as `Qi TUI` are replaced by a truncated first-line form of the first user
 `run.triggered` input (72 characters max). Explicit non-bootstrap titles from `session.created` are kept.
 
+`run.environment.disclosed` folds onto `RunView.environment` (permission mode and optional process sandbox
+snapshot). `authority.approval.decided` folds onto `ActionView.approval` while the Action is
+`awaiting-authority`. Both are optional on older Sessions and never invent authority
+([ADR-0042](../../../design/decisions.md#adr-0042-durable-environment-and-approval-audit-facts-read-only-surfaces)).
+
 ## Evidence
 
 `tests/slice0.test.mjs` provides the transition matrix in executable form. `tests/sqlite-store.test.mjs` proves

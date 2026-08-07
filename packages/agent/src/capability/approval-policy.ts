@@ -197,13 +197,13 @@ export function evaluateApprovalPolicy(input: ApprovalEvaluationInput): Approval
       ? {
           kind: "approve",
           reason: "Matched session approval memory",
-          policy: "approval-memory-hit",
+          policy: "approval-memory-session",
           pattern,
         }
       : {
           kind: "deny",
           reason: "Matched session denial memory",
-          policy: "approval-memory-hit",
+          policy: "approval-memory-session",
           pattern,
         };
   }
@@ -214,13 +214,13 @@ export function evaluateApprovalPolicy(input: ApprovalEvaluationInput): Approval
       ? {
           kind: "approve",
           reason: "Matched project approval memory",
-          policy: "approval-memory-hit",
+          policy: "approval-memory-project",
           pattern,
         }
       : {
           kind: "deny",
           reason: "Matched project denial memory",
-          policy: "approval-memory-hit",
+          policy: "approval-memory-project",
           pattern,
         };
   }
